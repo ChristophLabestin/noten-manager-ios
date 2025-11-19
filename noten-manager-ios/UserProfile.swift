@@ -1,0 +1,9 @@
+// UserProfile.swift
+import Foundation
+
+struct UserProfile: Codable {
+    let id: String
+    let name: String
+    let email: String
+    let encryptionSalt: String
+}
