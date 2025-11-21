@@ -15,6 +15,7 @@ struct AddExamView: View {
     @State private var isSaving: Bool = false
     @State private var error: String?
     @State private var shareWithGroup: Bool = false
+    @State private var requiresGrade: Bool = true
 
     private var subjects: [Subject] {
         store.subjects.filter { $0.name != "Fachreferat" }
@@ -78,9 +79,12 @@ struct AddExamView: View {
                         )
                     }
 
-                    if store.examGroupId != nil {
-                        Toggle("Mit Klausurgruppe teilen", isOn: $shareWithGroup)
+                    if !store.groupIds.isEmpty {
+                        Toggle("Mit Gruppen teilen", isOn: $shareWithGroup)
                     }
+
+                    Toggle("Note verknüpfen erforderlich", isOn: $requiresGrade)
+
                 }
                 if let error {
                     Text(error)
@@ -110,7 +114,7 @@ struct AddExamView: View {
                         subjectName = subjects.first?.name ?? ""
                     }
                 }
-                shareWithGroup = (store.examGroupId != nil)
+                shareWithGroup = !store.groupIds.isEmpty
             }
         }
     }
@@ -127,16 +131,28 @@ struct AddExamView: View {
         }
         do {
             let reminder: Date? = hasReminder ? reminderDate : nil
-            if shareWithGroup, store.examGroupId != nil {
-                let sharedId = try await store.addExamToSharedGroup(
+            if shareWithGroup {
+                let sharedIds = try await store.addExamToGroups(
                     subjectName: subjectName,
                     title: trimmedTitle,
                     date: date,
                     weight: examWeight,
-                    reminderAt: reminder
+                    reminderAt: reminder,
+                    requiresGrade: requiresGrade
                 )
-                if let reminder {
-                    try await store.setUserReminderForSharedExam(examId: sharedId, reminderAt: reminder)
+                if sharedIds.isEmpty {
+                    try await store.addExamToFirestore(
+                        subjectName: subjectName,
+                        title: trimmedTitle,
+                        date: date,
+                        weight: examWeight,
+                        reminderAt: reminder,
+                        requiresGrade: requiresGrade
+                    )
+                } else if let reminder {
+                    for item in sharedIds {
+                        try await store.setUserReminderForSharedExam(examId: item.docId, reminderAt: reminder, groupId: item.groupId)
+                    }
                 }
             } else {
                 try await store.addExamToFirestore(
@@ -144,7 +160,8 @@ struct AddExamView: View {
                     title: trimmedTitle,
                     date: date,
                     weight: examWeight,
-                    reminderAt: reminder
+                    reminderAt: reminder,
+                    requiresGrade: requiresGrade
                 )
             }
             dismiss()

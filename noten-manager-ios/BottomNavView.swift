@@ -242,8 +242,8 @@ struct BottomNavView: View {
                     .frame(width: 56, height: 56)
                     .shadow(color: fabShadowColor, radius: fabPressed ? 12 : 24, x: 0, y: fabPressed ? 6 : 10)
                     .overlay(
-                        Text("+")
-                            .font(.system(size: 30, weight: .bold))
+                        Image(systemName: isOpen ? "xmark" : "plus")
+                            .font(.system(size: 26, weight: .bold))
                             .foregroundStyle(colorTextDarkDark) // $color-text-dark-dark
                     )
             }
@@ -310,18 +310,6 @@ struct BottomNavView: View {
                         }
 
                         VStack(spacing: 8) {
-                            // Klausur
-                            ActionButton(
-                                iconContent: AnyView(Image(systemName: "calendar.badge.clock").font(.system(size: 18, weight: .semibold))),
-                                label: "Klausur",
-                                description: "Klausurtermin eintragen",
-                                disabled: store.subjects.isEmpty,
-                                title: store.subjects.isEmpty ? "Lege zuerst ein Fach an" : ""
-                            ) {
-                                isOpen = false
-                                showAddExam = true
-                            }
-
                             // Hausaufgabe
                             ActionButton(
                                 iconContent: AnyView(Image(systemName: "checklist").font(.system(size: 18, weight: .semibold))),
@@ -336,7 +324,7 @@ struct BottomNavView: View {
 
                             // Note
                             ActionButton(
-                                iconContent: AnyView(Text("+").font(.system(size: 20, weight: .semibold))),
+                                iconContent: AnyView(Image(systemName: "list.bullet.rectangle.portrait.fill").font(.system(size: 18, weight: .semibold))),
                                 label: "Note",
                                 description: "Einzelne Leistung eintragen",
                                 disabled: disableAddGrade,
@@ -346,9 +334,21 @@ struct BottomNavView: View {
                                 showAddGrade = true
                             }
 
+                            // Klausurtermin
+                            ActionButton(
+                                iconContent: AnyView(Image(systemName: "calendar.badge.clock").font(.system(size: 18, weight: .semibold))),
+                                label: "Klausurtermin",
+                                description: "Klausurtermin eintragen",
+                                disabled: store.subjects.isEmpty,
+                                title: store.subjects.isEmpty ? "Lege zuerst ein Fach an" : ""
+                            ) {
+                                isOpen = false
+                                showAddExam = true
+                            }
+
                             // Fach
                             ActionButton(
-                                iconContent: AnyView(Text("+").font(.system(size: 20, weight: .semibold))),
+                                iconContent: AnyView(Image(systemName: "folder.badge.plus").font(.system(size: 18, weight: .semibold))),
                                 label: "Fach",
                                 description: "Neues Fach anlegen",
                                 disabled: false,
@@ -366,7 +366,8 @@ struct BottomNavView: View {
                                             Image(systemName: "square.and.pencil")
                                                 .font(.system(size: 18, weight: .semibold))
                                         } else {
-                                            Text("+").font(.system(size: 20, weight: .semibold))
+                                            Image(systemName: "doc.text.fill")
+                                                .font(.system(size: 18, weight: .semibold))
                                         }
                                     }
                                 ),

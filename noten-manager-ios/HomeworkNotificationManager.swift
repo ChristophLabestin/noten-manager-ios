@@ -5,6 +5,7 @@ import FirebaseFirestore
 
 enum HomeworkNotificationManager {
     static let categoryIdentifier = "HOMEWORK_CATEGORY"
+    static let sharedCategoryIdentifier = "HOMEWORK_SHARED_CATEGORY"
     static let actionMarkDoneIdentifier = "HOMEWORK_MARK_DONE"
     static let actionSnoozeIdentifier = "HOMEWORK_SNOOZE_1H"
 
@@ -25,10 +26,17 @@ enum HomeworkNotificationManager {
             intentIdentifiers: [],
             options: []
         )
+        let sharedCategory = UNNotificationCategory(
+            identifier: sharedCategoryIdentifier,
+            actions: [snooze],
+            intentIdentifiers: [],
+            options: []
+        )
         let center = UNUserNotificationCenter.current()
         center.getNotificationCategories { existing in
             var all = existing
             all.insert(category)
+            all.insert(sharedCategory)
             center.setNotificationCategories(all)
         }
     }
@@ -59,51 +67,79 @@ enum HomeworkNotificationManager {
             let now = Date()
 
             for hw in homeworks where hw.isActive {
-                if let dueDate = hw.dueDate,
-                   let reminder = reminderDate(before: dueDate),
-                   reminder > now {
-                    let content = UNMutableNotificationContent()
-                    content.title = "Hausaufgabe morgen fällig"
-                    if hw.subjectName.isEmpty {
-                        content.body = hw.title
-                    } else {
-                        content.body = "\(hw.title) in \(hw.subjectName) ist morgen fällig."
+                if hw.isShared {
+                    // Only schedule user-specific reminderAt with shared category
+                    if let reminderAt = hw.reminderAt,
+                       reminderAt > now {
+                        let content = UNMutableNotificationContent()
+                        content.title = "Erinnerung an Hausaufgabe"
+                        if hw.subjectName.isEmpty {
+                            content.body = hw.title
+                        } else {
+                            content.body = "\(hw.title) in \(hw.subjectName)"
+                        }
+                        content.sound = .default
+                        content.categoryIdentifier = sharedCategoryIdentifier
+                        content.userInfo = ["homeworkId": hw.id]
+
+                        let comps = Calendar.current.dateComponents(
+                            [.year, .month, .day, .hour, .minute],
+                            from: reminderAt
+                        )
+                        let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+                        let identifier = "homework_custom_\(hw.id)"
+                        let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
+                        center.add(request, withCompletionHandler: nil)
                     }
-                    content.sound = .default
-                     content.categoryIdentifier = categoryIdentifier
-                     content.userInfo = ["homeworkId": hw.id]
+                } else {
+                    // Original logic for non-shared homeworks
 
-                    let comps = Calendar.current.dateComponents(
-                        [.year, .month, .day, .hour, .minute],
-                        from: reminder
-                    )
-                    let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
-                    let identifier = "homework_due_\(hw.id)"
-                    let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
-                    center.add(request, withCompletionHandler: nil)
-                }
+                    if let dueDate = hw.dueDate,
+                       let reminder = reminderDate(before: dueDate),
+                       reminder > now {
+                        let content = UNMutableNotificationContent()
+                        content.title = "Hausaufgabe morgen fällig"
+                        if hw.subjectName.isEmpty {
+                            content.body = hw.title
+                        } else {
+                            content.body = "\(hw.title) in \(hw.subjectName) ist morgen fällig."
+                        }
+                        content.sound = .default
+                        content.categoryIdentifier = categoryIdentifier
+                        content.userInfo = ["homeworkId": hw.id]
 
-                if let reminderAt = hw.reminderAt,
-                   reminderAt > now {
-                    let content = UNMutableNotificationContent()
-                    content.title = "Erinnerung an Hausaufgabe"
-                    if hw.subjectName.isEmpty {
-                        content.body = hw.title
-                    } else {
-                        content.body = "\(hw.title) in \(hw.subjectName)"
+                        let comps = Calendar.current.dateComponents(
+                            [.year, .month, .day, .hour, .minute],
+                            from: reminder
+                        )
+                        let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+                        let identifier = "homework_due_\(hw.id)"
+                        let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
+                        center.add(request, withCompletionHandler: nil)
                     }
-                    content.sound = .default
-                    content.categoryIdentifier = categoryIdentifier
-                    content.userInfo = ["homeworkId": hw.id]
 
-                    let comps = Calendar.current.dateComponents(
-                        [.year, .month, .day, .hour, .minute],
-                        from: reminderAt
-                    )
-                    let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
-                    let identifier = "homework_custom_\(hw.id)"
-                    let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
-                    center.add(request, withCompletionHandler: nil)
+                    if let reminderAt = hw.reminderAt,
+                       reminderAt > now {
+                        let content = UNMutableNotificationContent()
+                        content.title = "Erinnerung an Hausaufgabe"
+                        if hw.subjectName.isEmpty {
+                            content.body = hw.title
+                        } else {
+                            content.body = "\(hw.title) in \(hw.subjectName)"
+                        }
+                        content.sound = .default
+                        content.categoryIdentifier = categoryIdentifier
+                        content.userInfo = ["homeworkId": hw.id]
+
+                        let comps = Calendar.current.dateComponents(
+                            [.year, .month, .day, .hour, .minute],
+                            from: reminderAt
+                        )
+                        let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+                        let identifier = "homework_custom_\(hw.id)"
+                        let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
+                        center.add(request, withCompletionHandler: nil)
+                    }
                 }
             }
         }

@@ -14,6 +14,7 @@ struct AddHomeworkView: View {
     @State private var reminderDate: Date = Date().addingTimeInterval(60 * 60)
     @State private var isSaving: Bool = false
     @State private var error: String?
+    @State private var shareWithGroup: Bool = false
 
     private var subjects: [Subject] {
         store.subjects.filter { $0.name != "Fachreferat" }
@@ -72,6 +73,10 @@ struct AddHomeworkView: View {
                             displayedComponents: [.date, .hourAndMinute]
                         )
                     }
+
+                    if !store.groupIds.isEmpty {
+                        Toggle("Mit Gruppen teilen", isOn: $shareWithGroup)
+                    }
                 }
                 if let error {
                     Text(error)
@@ -101,6 +106,7 @@ struct AddHomeworkView: View {
                         subjectName = subjects.first?.name ?? ""
                     }
                 }
+                shareWithGroup = !store.groupIds.isEmpty
             }
         }
     }
@@ -117,12 +123,20 @@ struct AddHomeworkView: View {
         }
         do {
             let due: Date? = hasDueDate ? dueDate : nil
-            try await store.addHomeworkToFirestore(
-                subjectName: subjectName,
-                title: trimmedTitle,
-                dueDate: due,
-                reminderAt: hasReminder ? reminderDate : nil
-            )
+            let reminder: Date? = hasReminder ? reminderDate : nil
+            if shareWithGroup {
+                let sharedIds = try await store.addHomeworkToGroups(subjectName: subjectName, title: trimmedTitle, dueDate: due, reminderAt: reminder)
+                if sharedIds.isEmpty {
+                    try await store.addHomeworkToFirestore(subjectName: subjectName, title: trimmedTitle, dueDate: due, reminderAt: reminder)
+                } else if let reminder {
+                    // Reminder nur für die angelegten geteilten Einträge setzen
+                    for item in sharedIds {
+                        try await store.setUserReminderForSharedHomework(homeworkId: item.docId, reminderAt: reminder, groupId: item.groupId)
+                    }
+                }
+            } else {
+                try await store.addHomeworkToFirestore(subjectName: subjectName, title: trimmedTitle, dueDate: due, reminderAt: reminder)
+            }
             dismiss()
         } catch {
             self.error = error.localizedDescription

@@ -214,33 +214,31 @@ struct HomeView: View {
 
     // MARK: - Small subviews for body
 
+    @ViewBuilder
     private func subjectRowAny(subject: Subject,
                                subjectGrades: [String: [Grade]],
-                               fachreferatSubjectName: String?) -> AnyView {
+                               fachreferatSubjectName: String?) -> some View {
         let grades = subjectGrades[subject.name] ?? []
         if subject.name == "Fachreferat" {
-            return AnyView(
+            SubjectRowView(
+                subject: subject,
+                grades: grades,
+                fachreferatSubjectName: fachreferatSubjectName
+            )
+            .contentShape(Rectangle())
+        } else {
+            NavigationLink {
+                SubjectDetailView(subject: subject)
+                    .environmentObject(store)
+            } label: {
                 SubjectRowView(
                     subject: subject,
                     grades: grades,
                     fachreferatSubjectName: fachreferatSubjectName
                 )
                 .contentShape(Rectangle())
-            )
-        } else {
-            return AnyView(
-                NavigationLink {
-                    SubjectDetailView(subject: subject)
-                        .environmentObject(store)
-                } label: {
-                    SubjectRowView(
-                        subject: subject,
-                        grades: grades,
-                        fachreferatSubjectName: fachreferatSubjectName
-                    )
-                    .contentShape(Rectangle())
-                }
-            )
+            }
+            .buttonStyle(.plain)
         }
     }
 

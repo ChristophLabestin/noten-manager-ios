@@ -14,9 +14,37 @@ struct AppSettingsView: View {
     @State private var showHomeworkSheet: Bool = false
     @State private var showExamSheet: Bool = false
 
+    // Gemeinsame Gruppe (Klausuren + Hausaufgaben)
+    @State private var groupJoinCode: String = ""
+    @State private var groupNameInput: String = ""
+    @State private var isCreatingGroup: Bool = false
+    @State private var isJoiningGroup: Bool = false
+    @State private var groupInfoMessage: String?
+    @State private var groupErrorMessage: String?
+    @State private var showMappingGroupId: String? = nil
+    @State private var selectedSubjectsForNewGroup: Set<String> = []
+    @State private var groupPendingLeave: String? = nil
+
     private var maxExamSubjects: Int { 4 }
     private var currentExamSubjectsCount: Int {
         store.subjects.filter { ($0.examSubject ?? false) }.count
+    }
+    
+    private var hasOverdueHomeworks: Bool {
+        let now = Date()
+        return store.homeworks.contains { hw in
+            guard !hw.isCompleted else { return false }
+            if let due = hw.dueDate { return due < now }
+            if let reminder = hw.reminderAt { return reminder < now }
+            return false
+        }
+    }
+
+    private var hasOverdueExams: Bool {
+        let now = Date()
+        return store.allExams.contains { exam in
+            !exam.isCompleted && exam.date < now
+        }
     }
 
     var body: some View {
@@ -77,14 +105,18 @@ struct AppSettingsView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Dark Mode")
                                     .font(.subheadline)
-                                Toggle(
-                                    isOn: Binding(
-                                        get: { store.darkMode },
-                                        set: { val in Task { await store.updatePreferences(darkMode: val) } }
-                                    )
-                                ) {
-                                    Text(store.darkMode ? "Dark Mode aktiviert" : "Dark Mode deaktiviert")
+                                Picker("", selection: Binding(
+                                    get: { store.darkModeMode },
+                                    set: { val in Task { await store.updatePreferences(darkModeMode: val) } }
+                                )) {
+                                    Text("Geräteeinstellung").tag("system")
+                                    Text("Light Mode").tag("light")
+                                    Text("Dark Mode").tag("dark")
                                 }
+                                .pickerStyle(.segmented)
+                                Text("Geräteeinstellung folgt dem iOS-Modus, Light/Dark sind fest gewählt.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
 
                             // Weitere Einstellungen
@@ -117,6 +149,146 @@ struct AppSettingsView: View {
                                         : "Animationen deaktiviert"
                                     )
                                 }
+                            }
+                        }
+                    }
+
+                    // Karte: Gruppen (gemeinsame Gruppe-Logik, kein aktiver State)
+                    SettingsCard(
+                        title: "Gruppen",
+                        subtitle: "Gemeinsame Gruppen für Klausuren und Hausaufgaben"
+                    ) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            if store.groupIds.isEmpty {
+                                Text("Lege eine Gruppe an oder tritt mit einem Code bei. Fächer werden gruppenbezogen geteilt.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                ForEach(store.groupIds, id: \.self) { gid in
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        HStack {
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(store.groupNames[gid] ?? "Ohne Namen")
+                                                    .font(.headline)
+                                            Text(gid)
+                                                .font(.system(.caption, design: .monospaced))
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                        Button(role: .destructive) {
+                                            groupPendingLeave = gid
+                                        } label: {
+                                            Image(systemName: "rectangle.portrait.and.arrow.right")
+                                                .foregroundStyle(.red)
+                                        }
+                                        .buttonStyle(.plain)
+                                            .accessibilityLabel("Gruppe verlassen")
+                                        }
+                                        Button("Fächer abgleichen") {
+                                            showMappingGroupId = gid
+                                        }
+                                    }
+                                    .padding(12)
+                                    .background(.thinMaterial)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                                }
+                            }
+
+                            Divider().padding(.vertical, 4)
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Neue Gruppe erstellen")
+                                    .font(.subheadline)
+                                TextField("Gruppenname (Pflichtfeld)", text: $groupNameInput)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Fächer einbringen")
+                                        .font(.footnote)
+                                    if store.availableSubjectsForNewGroup().isEmpty {
+                                        Text("Alle Fächer sind bereits einer Gruppe zugeordnet.")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    } else {
+                                        ForEach(store.availableSubjectsForNewGroup(), id: \.name) { subj in
+                                            Toggle(subj.name, isOn: Binding(
+                                                get: { selectedSubjectsForNewGroup.contains(subj.name) },
+                                                set: { val in
+                                                    if val { selectedSubjectsForNewGroup.insert(subj.name) }
+                                                    else { selectedSubjectsForNewGroup.remove(subj.name) }
+                                                }
+                                            ))
+                                        }
+                                    }
+                                }
+                            }
+                            Button {
+                                Task {
+                                    guard !isCreatingGroup else { return }
+                                    let trimmedName = groupNameInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    guard !trimmedName.isEmpty else {
+                                        groupErrorMessage = "Bitte einen Gruppennamen eingeben."
+                                        return
+                                    }
+                                    let subjects = selectedSubjectsForNewGroup.isEmpty ? store.availableSubjectsForNewGroup().map { $0.name } : Array(selectedSubjectsForNewGroup)
+                                    guard !subjects.isEmpty else {
+                                        groupErrorMessage = "Keine verfügbaren Fächer für diese Gruppe."
+                                        return
+                                    }
+                                    isCreatingGroup = true
+                                    groupErrorMessage = nil
+                                    groupInfoMessage = nil
+                                    defer { isCreatingGroup = false }
+                                    do {
+                                        let code = try await store.createSharedGroup(name: trimmedName, subjects: subjects)
+                                        groupJoinCode = code
+                                        groupInfoMessage = "Neue Gruppe erstellt. Teile den Code mit deinen Mitschülern."
+                                        groupNameInput = ""
+                                        selectedSubjectsForNewGroup = []
+                                    } catch {
+                                        groupErrorMessage = error.localizedDescription
+                                    }
+                                }
+                            } label: {
+                                if isCreatingGroup { ProgressView() } else { Text("Gruppe erstellen") }
+                            }
+                            .disabled(groupNameInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                            Divider().padding(.vertical, 4)
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Einer Gruppe beitreten")
+                                    .font(.subheadline)
+                                TextField("Gruppencode", text: $groupJoinCode)
+                                    .textInputAutocapitalization(.characters)
+                                    .autocorrectionDisabled(true)
+                            }
+                            Button {
+                                Task {
+                                    guard !isJoiningGroup else { return }
+                                    isJoiningGroup = true
+                                    groupErrorMessage = nil
+                                    groupInfoMessage = nil
+                                    defer { isJoiningGroup = false }
+                                    do {
+                                        try await store.joinSharedGroup(with: groupJoinCode)
+                                        groupInfoMessage = "Erfolgreich der Gruppe beigetreten."
+                                    } catch {
+                                        groupErrorMessage = error.localizedDescription
+                                    }
+                                }
+                            } label: {
+                                if isJoiningGroup { ProgressView() } else { Text("Mit Code beitreten") }
+                            }
+                            .disabled(groupJoinCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                            if let msg = groupInfoMessage {
+                                Text(msg)
+                                    .font(.footnote)
+                                    .foregroundStyle(.green)
+                            }
+                            if let err = groupErrorMessage {
+                                Text(err)
+                                    .font(.footnote)
+                                    .foregroundStyle(.red)
                             }
                         }
                     }
@@ -227,13 +399,14 @@ struct AppSettingsView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
             }
+            .navigationTitle("Einstellungen")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     VStack(spacing: 2) {
                         Text("Einstellungen")
                             .font(.headline)
-                        Text("Name und App-Design anpassen")
+                        Text("Profil & App verwalten")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -243,16 +416,32 @@ struct AppSettingsView: View {
                         Button {
                             showExamSheet = true
                         } label: {
-                            Image(systemName: "calendar.badge.clock")
-                                .imageScale(.large)
+                            ZStack(alignment: .topTrailing) {
+                                Image(systemName: "calendar.badge.clock")
+                                    .imageScale(.large)
+                                if hasOverdueExams {
+                                    Circle()
+                                        .fill(Color.red)
+                                        .frame(width: 8, height: 8)
+                                        .offset(x: 4, y: -4)
+                                }
+                            }
                         }
                         .accessibilityLabel("Klausurtermine anzeigen")
 
                         Button {
                             showHomeworkSheet = true
                         } label: {
-                            Image(systemName: "checklist")
-                                .imageScale(.large)
+                            ZStack(alignment: .topTrailing) {
+                                Image(systemName: "checklist")
+                                    .imageScale(.large)
+                                if hasOverdueHomeworks {
+                                    Circle()
+                                        .fill(Color.red)
+                                        .frame(width: 8, height: 8)
+                                        .offset(x: 4, y: -4)
+                                }
+                            }
                         }
                         .accessibilityLabel("Aktive Hausaufgaben anzeigen")
                     }
@@ -261,6 +450,7 @@ struct AppSettingsView: View {
             .onAppear {
                 newName = ""
                 nameSavedSuccess = false
+                selectedSubjectsForNewGroup = []
             }
             .background(
                 Group {
@@ -277,6 +467,33 @@ struct AppSettingsView: View {
             .sheet(isPresented: $showExamSheet) {
                 ExamListView()
                     .environmentObject(store)
+            }
+            .sheet(
+                isPresented: Binding(
+                    get: { showMappingGroupId != nil },
+                    set: { if !$0 { showMappingGroupId = nil } }
+                )
+            ) {
+                if let gid = showMappingGroupId {
+                    UnifiedMappingView(groupId: gid)
+                        .environmentObject(store)
+                }
+            }
+            .alert("Gruppe verlassen?", isPresented: Binding(
+                get: { groupPendingLeave != nil },
+                set: { if !$0 { groupPendingLeave = nil } }
+            )) {
+                Button("Abbrechen", role: .cancel) {
+                    groupPendingLeave = nil
+                }
+                Button("Verlassen", role: .destructive) {
+                    if let gid = groupPendingLeave {
+                        Task { await store.leaveSharedGroup(code: gid) }
+                    }
+                    groupPendingLeave = nil
+                }
+            } message: {
+                Text("Möchtest du diese Gruppe wirklich verlassen?")
             }
         }
     }

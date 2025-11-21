@@ -57,6 +57,23 @@ struct FinalGradeView: View {
         return Color.blue.opacity(0.1)
     }
 
+    private var hasOverdueHomeworks: Bool {
+        let now = Date()
+        return store.homeworks.contains { hw in
+            guard !hw.isCompleted else { return false }
+            if let due = hw.dueDate { return due < now }
+            if let reminder = hw.reminderAt { return reminder < now }
+            return false
+        }
+    }
+
+    private var hasOverdueExams: Bool {
+        let now = Date()
+        return store.allExams.contains { exam in
+            !exam.isCompleted && exam.date < now
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
@@ -331,16 +348,32 @@ struct FinalGradeView: View {
                     Button {
                         showExamSheet = true
                     } label: {
-                        Image(systemName: "calendar.badge.clock")
-                            .imageScale(.large)
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: "calendar.badge.clock")
+                                .imageScale(.large)
+                            if hasOverdueExams {
+                                Circle()
+                                    .fill(Color.red)
+                                    .frame(width: 8, height: 8)
+                                    .offset(x: 4, y: -4)
+                            }
+                        }
                     }
                     .accessibilityLabel("Klausurtermine anzeigen")
 
                     Button {
                         showHomeworkSheet = true
                     } label: {
-                        Image(systemName: "checklist")
-                            .imageScale(.large)
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: "checklist")
+                                .imageScale(.large)
+                            if hasOverdueHomeworks {
+                                Circle()
+                                    .fill(Color.red)
+                                    .frame(width: 8, height: 8)
+                                    .offset(x: 4, y: -4)
+                            }
+                        }
                     }
                     .accessibilityLabel("Aktive Hausaufgaben anzeigen")
                 }
@@ -377,6 +410,18 @@ struct FinalGradeView: View {
         }
         .onChange(of: store.gradeYear) { _ in
             recomputeMaxDroppedHalfYears()
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 2) {
+                    Text("Abschlussnote")
+                        .font(.headline)
+                    Text("Übersicht & Status")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
     }
 

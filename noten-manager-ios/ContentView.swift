@@ -29,6 +29,7 @@ struct ContentView: View {
         .onAppear {
             authManager.startListeningAuthState()
         }
+        .hideKeyboardOnTap()
     }
 
     private var backgroundGradient: some View {

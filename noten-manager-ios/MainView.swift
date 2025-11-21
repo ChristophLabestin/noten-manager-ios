@@ -76,7 +76,7 @@ struct MainView: View {
         }
         // Dark-Mode-Verhalten wie im React-Client:
         // nutze die gespeicherte darkMode-Präferenz des Nutzers
-        .preferredColorScheme(gradesStore.darkMode ? .dark : .light)
+        .preferredColorScheme(gradesStore.preferredColorScheme)
         .task {
             // Live-Updates starten
             await gradesStore.startListening()

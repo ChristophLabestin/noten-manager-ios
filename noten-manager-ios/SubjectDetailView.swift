@@ -47,6 +47,7 @@ struct SubjectDetailView: View {
     @State private var editEmail: String = ""
     @State private var editAlias: String = ""
     @State private var isSavingSubject: Bool = false
+    @State private var showDeleteSubjectAlert: Bool = false
 
     // BottomNav Navigation
     @State private var navigateToSettings: Bool = false
@@ -285,6 +286,17 @@ struct SubjectDetailView: View {
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled(true)
                     }
+                    Section {
+                        Button(role: .destructive) {
+                            showDeleteSubjectAlert = true
+                        } label: {
+                            HStack {
+                                Spacer()
+                                Text("Fach löschen")
+                                Spacer()
+                            }
+                        }
+                    }
                 }
                 .navigationTitle("Fach bearbeiten")
                 .toolbar {
@@ -322,15 +334,38 @@ struct SubjectDetailView: View {
                 }
             }
         }
-        .confirmationDialog("Note löschen?", isPresented: .constant(deleteConfirmGradeId != nil), presenting: deleteConfirmGradeId) { gid in
+        .alert(
+            "Note löschen?",
+            isPresented: Binding(
+                get: { deleteConfirmGradeId != nil },
+                set: { newValue in
+                    if !newValue {
+                        deleteConfirmGradeId = nil
+                    }
+                }
+            )
+        ) {
             Button("Löschen", role: .destructive) {
-                Task { await deleteGrade(gradeId: gid) }
+                if let gid = deleteConfirmGradeId {
+                    Task { await deleteGrade(gradeId: gid) }
+                }
             }
             Button("Abbrechen", role: .cancel) {
                 deleteConfirmGradeId = nil
             }
-        } message: { _ in
-            Text("Möchtest du diese Note wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.")
+        } message: {
+            Text("Diese Note wird dauerhaft gelöscht.")
+        }
+        .alert(
+            "Fach löschen?",
+            isPresented: $showDeleteSubjectAlert
+        ) {
+            Button("Löschen", role: .destructive) {
+                Task { await deleteSubjectCompletely() }
+            }
+            Button("Abbrechen", role: .cancel) { }
+        } message: {
+            Text("Dieses Fach und alle zugehörigen Noten werden dauerhaft gelöscht.")
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -726,4 +761,10 @@ struct SubjectDetailView: View {
             // optional: Fehlerbehandlung
         }
     }
+
+    private func deleteSubjectCompletely() async {
+        await store.deleteSubjectFromFirestore(subjectName: currentSubjectName)
+        await MainActor.run { dismiss() }
+    }
 }
+

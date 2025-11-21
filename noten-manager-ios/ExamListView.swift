@@ -7,12 +7,7 @@ struct ExamListView: View {
 
     @State private var visibleInactiveCount: Int = 5
     @State private var editingExam: Exam? = nil
-    @State private var examToDelete: Exam? = nil
     @State private var examForNewGrade: Exam? = nil
-    @State private var joinCode: String = ""
-    @State private var isCreatingGroup: Bool = false
-    @State private var groupInfoMessage: String?
-    @State private var groupErrorMessage: String?
     @State private var reminderExam: Exam? = nil
 
     private var activeExams: [Exam] {
@@ -61,91 +56,6 @@ struct ExamListView: View {
                     }
                 }
 
-                Section("Klausurtermine teilen") {
-                    if let code = store.examGroupId, !code.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Du bist mit einer Klausurgruppe verbunden. Termine aus dieser Gruppe erscheinen automatisch in deiner Liste.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                            HStack {
-                                Text("Gruppencode:")
-                                Text(code)
-                                    .font(.system(.body, design: .monospaced))
-                            }
-                        }
-
-                        Button("Gruppe verlassen") {
-                            Task {
-                                await store.leaveExamGroup()
-                                joinCode = ""
-                                groupInfoMessage = nil
-                                groupErrorMessage = nil
-                            }
-                        }
-                        .foregroundColor(.red)
-                    } else {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Lege eine Klausurgruppe an oder tritt mit einem Code einer bestehenden Gruppe bei. So muss nur eine Person die Termine eintragen.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        Button {
-                            Task {
-                                guard !isCreatingGroup else { return }
-                                isCreatingGroup = true
-                                groupErrorMessage = nil
-                                defer { isCreatingGroup = false }
-                                do {
-                                    let code = try await store.createExamGroupIfNeeded()
-                                    joinCode = code
-                                    groupInfoMessage = "Neue Gruppe erstellt. Teile den Code mit deinen Mitschülern."
-                                } catch {
-                                    groupErrorMessage = error.localizedDescription
-                                }
-                            }
-                        } label: {
-                            if isCreatingGroup {
-                                ProgressView()
-                            } else {
-                                Text("Neue Klausurgruppe erstellen")
-                            }
-                        }
-
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Einer bestehenden Gruppe beitreten")
-                                .font(.subheadline)
-                            TextField("Gruppencode", text: $joinCode)
-                                .textInputAutocapitalization(.characters)
-                                .autocorrectionDisabled(true)
-                        }
-
-                        Button("Mit Code beitreten") {
-                            Task {
-                                groupErrorMessage = nil
-                                groupInfoMessage = nil
-                                do {
-                                    try await store.joinExamGroup(with: joinCode)
-                                    groupInfoMessage = "Erfolgreich der Klausurgruppe beigetreten."
-                                } catch {
-                                    groupErrorMessage = error.localizedDescription
-                                }
-                            }
-                        }
-                        .disabled(joinCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                        if let msg = groupInfoMessage {
-                            Text(msg)
-                                .font(.footnote)
-                                .foregroundStyle(.green)
-                        }
-                        if let err = groupErrorMessage {
-                            Text(err)
-                                .font(.footnote)
-                                .foregroundStyle(.red)
-                        }
-                    }
-                }
             }
             .navigationTitle("Klausurtermine")
             .toolbar {
@@ -160,34 +70,14 @@ struct ExamListView: View {
                 EditExamView(exam: exam)
                     .environmentObject(store)
             }
-            .alert(
-                "Klausur löschen?",
-                isPresented: Binding(
-                    get: { examToDelete != nil },
-                    set: { newValue in
-                        if !newValue {
-                            examToDelete = nil
-                        }
-                    }
-                )
-            ) {
-                Button("Löschen", role: .destructive) {
-                    if let exam = examToDelete {
-                        Task { await deleteExam(exam) }
-                    }
-                }
-                Button("Abbrechen", role: .cancel) {
-                    examToDelete = nil
-                }
-            } message: {
-                Text("Dieser Klausurtermin wird dauerhaft gelöscht.")
-            }
             .sheet(item: $examForNewGrade) { exam in
                 let note = noteForExam(exam)
                 AddGradeView(
                     preselectedSubjectName: exam.subjectName,
                     preselectedWeight: exam.weight,
-                    prefilledNote: note
+                    prefilledNote: note,
+                    linkedExamId: exam.id,
+                    markLinkedExamCompletedByDefault: true
                 )
                 .environmentObject(store)
             }
@@ -212,76 +102,67 @@ struct ExamListView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                if exam.isShared {
+                    let name = exam.groupId.flatMap { store.groupNames[$0] } ?? exam.groupId ?? ""
+                    if !name.isEmpty {
+                        Text("Gruppe: \(name)")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
+                }
 
                 Text(formattedDateTime(exam.date))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
-                if exam.reminderAt != nil {
-                    HStack(spacing: 4) {
-                        Image(systemName: "bell.fill")
-                            .font(.caption2)
-                        Text("Erinnerung aktiv")
-                            .font(.caption2)
-                    }
-                    .foregroundStyle(.orange)
+                if !exam.isShared && Date() >= exam.date && !exam.isCompleted {
+                    Text("noch keine Note verknüpft")
+                        .font(.caption2)
+                        .foregroundStyle(.red)
                 }
 
+                // Erinnerung-Hinweis nur per Icon in der Aktion, kein Text/zusätzliches Icon hier
+
                 if exam.isShared {
-                    Text("Geteilter Termin")
-                        .font(.caption2)
-                        .foregroundStyle(.blue)
+                    HStack(spacing: 4) {
+                        Image(systemName: "person.2.fill")
+                            .foregroundStyle(.blue)
+                            .imageScale(.small)
+                        Text("Geteilter Termin")
+                            .font(.caption2)
+                            .foregroundStyle(.blue)
+                    }
                 }
             }
             Spacer()
             HStack(spacing: 12) {
-                if exam.isShared && !isSharedOwner {
-                    Button {
-                        reminderExam = exam
-                    } label: {
-                        Image(systemName: "bell")
-                            .font(.system(size: 16, weight: .regular))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Erinnerung für diese Klausur festlegen")
-                } else {
-                    if !exam.isShared {
-                        if !isInactiveSection && !exam.isCompleted {
-                            Button {
-                                Task { await markCompleted(exam) }
-                            } label: {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundStyle(.green)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Als erledigt markieren")
-                        } else {
-                            Image(systemName: "checkmark.circle")
-                                .font(.system(size: 16))
-                                .foregroundStyle(.secondary)
+                // Glocke: zeigt Status (grau = aus, grün = an) und öffnet Reminder-Editor
+                Button {
+                    reminderExam = exam
+                } label: {
+                    Image(systemName: reminderIconName(exam))
+                        .font(.system(size: 16, weight: .regular))
+                        .foregroundStyle(reminderIconColor(exam))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Erinnerung bearbeiten")
+                .contextMenu {
+                    Button("Erinnerung bearbeiten…") { reminderExam = exam }
+                    if exam.reminderAt != nil {
+                        Button("Erinnerung entfernen", role: .destructive) {
+                            Task { await toggleReminder(exam) }
                         }
                     }
-
-                    Button {
-                        editingExam = exam
-                    } label: {
-                        Image(systemName: "pencil")
-                            .font(.system(size: 16, weight: .regular))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Klausur bearbeiten")
-
-                    Button {
-                        examToDelete = exam
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 16, weight: .regular))
-                            .foregroundStyle(.red)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Klausur löschen")
                 }
+
+                Button {
+                    editingExam = exam
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 16, weight: .regular))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Klausur bearbeiten")
             }
         }
         .contentShape(Rectangle())
@@ -309,12 +190,36 @@ struct ExamListView: View {
         await store.setExamCompleted(id: exam.id, completed: true)
     }
 
-    private func deleteExam(_ exam: Exam) async {
-        if exam.isShared {
-            await store.deleteSharedExamFromGroup(id: exam.id)
-        } else {
-            await store.deleteExamFromFirestore(id: exam.id)
+    private func toggleReminder(_ exam: Exam) async {
+        let newValue: Date? = (exam.reminderAt == nil) ? Date().addingTimeInterval(3600) : nil
+        do {
+            if exam.isShared {
+                try await store.setUserReminderForSharedExam(examId: exam.id, reminderAt: newValue, groupId: exam.groupId)
+            } else {
+                try await store.updateExamInFirestore(
+                    id: exam.id,
+                    subjectName: exam.subjectName,
+                    title: exam.title,
+                    date: exam.date,
+                    weight: exam.weight,
+                    reminderAt: newValue,
+                    isCompleted: exam.isCompleted
+                )
+            }
+        } catch {
+            // Optional: Fehlerbehandlung oder Logging
         }
-        examToDelete = nil
+    }
+
+    private func reminderIconName(_ exam: Exam) -> String {
+        return exam.reminderAt == nil ? "bell" : "bell.fill"
+    }
+
+    private func reminderIconColor(_ exam: Exam) -> Color {
+        return exam.reminderAt == nil ? .secondary : .green
+    }
+
+    private func reminderAccessibilityLabel(_ exam: Exam) -> String {
+        return "Erinnerung bearbeiten"
     }
 }

@@ -14,7 +14,12 @@ struct EditHomeworkView: View {
     @State private var reminderDate: Date
     @State private var isCompleted: Bool
     @State private var isSaving: Bool = false
+    @State private var isDeleting: Bool = false
+    @State private var showDeleteConfirm: Bool = false
     @State private var error: String?
+
+    @State private var isShared: Bool = false
+    @State private var sharedId: String? = nil
 
     init(homework: Homework) {
         self.homework = homework
@@ -27,6 +32,7 @@ struct EditHomeworkView: View {
         _hasReminder = State(initialValue: homework.reminderAt != nil)
         _reminderDate = State(initialValue: initialReminder)
         _isCompleted = State(initialValue: homework.isCompleted)
+        // isShared stays false by default, no model field to set from
     }
 
     private var subjects: [Subject] {
@@ -79,8 +85,14 @@ struct EditHomeworkView: View {
                         )
                     }
 
-                    Toggle("Als erledigt markieren", isOn: $isCompleted)
-                        .tint(.green)
+                    if store.homeworkGroupId != nil {
+                        Text("Wenn diese Aufgabe aus der Gruppe stammt, wird nur deine persönliche Erinnerung gespeichert.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Toggle("Als erledigt markieren", isOn: $isCompleted)
+                            .tint(.green)
+                    }
                 }
                 if let error {
                     Text(error)
@@ -102,6 +114,25 @@ struct EditHomeworkView: View {
                     }
                     .disabled(!canSave || isSaving || subjects.isEmpty)
                 }
+                ToolbarItem(placement: .destructiveAction) {
+                    Button {
+                        showDeleteConfirm = true
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .disabled(isDeleting)
+                }
+            }
+            .alert(
+                "Hausaufgabe löschen?",
+                isPresented: $showDeleteConfirm
+            ) {
+                Button("Abbrechen", role: .cancel) { showDeleteConfirm = false }
+                Button("Löschen", role: .destructive) {
+                    Task { await deleteHomework() }
+                }
+            } message: {
+                Text("Diese Hausaufgabe wird dauerhaft gelöscht.")
             }
         }
     }
@@ -119,18 +150,48 @@ struct EditHomeworkView: View {
         do {
             let due: Date? = hasDueDate ? dueDate : nil
             let reminder: Date? = hasReminder ? reminderDate : nil
-            try await store.updateHomeworkInFirestore(
-                id: homework.id,
-                subjectName: subjectName,
-                title: trimmedTitle,
-                dueDate: due,
-                reminderAt: reminder,
-                isCompleted: isCompleted
-            )
+            if homework.isShared, let gid = homework.groupId {
+                try await store.updateSharedHomeworkInGroup(
+                    groupId: gid,
+                    id: homework.id,
+                    subjectName: subjectName,
+                    title: trimmedTitle,
+                    dueDate: due
+                )
+                if hasReminder {
+                    try await store.setUserReminderForSharedHomework(homeworkId: homework.id, reminderAt: reminder, groupId: gid)
+                }
+            } else {
+                try await store.updateHomeworkInFirestore(
+                    id: homework.id,
+                    subjectName: subjectName,
+                    title: trimmedTitle,
+                    dueDate: due,
+                    reminderAt: reminder,
+                    isCompleted: isCompleted
+                )
+            }
             dismiss()
         } catch {
             self.error = error.localizedDescription
         }
         isSaving = false
+    }
+
+    private func deleteHomework() async {
+        guard !isDeleting else { return }
+        isDeleting = true
+        do {
+            if homework.isShared, let gid = homework.groupId {
+                await store.deleteSharedHomeworkFromGroup(groupId: gid, id: homework.id)
+            } else {
+                await store.deleteHomeworkFromFirestore(id: homework.id)
+            }
+            await MainActor.run {
+                showDeleteConfirm = false
+                dismiss()
+            }
+        }
+        isDeleting = false
     }
 }

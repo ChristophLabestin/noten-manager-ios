@@ -16,6 +16,9 @@ struct EditExamView: View {
     @State private var isCompleted: Bool
     @State private var isSaving: Bool = false
     @State private var error: String?
+    @State private var requiresGrade: Bool
+    @State private var isDeleting: Bool = false
+    @State private var showDeleteConfirm: Bool = false
 
     init(exam: Exam) {
         self.exam = exam
@@ -27,6 +30,7 @@ struct EditExamView: View {
         _hasReminder = State(initialValue: exam.reminderAt != nil)
         _reminderDate = State(initialValue: initialReminder)
         _isCompleted = State(initialValue: exam.isCompleted)
+        _requiresGrade = State(initialValue: exam.requiresGrade ?? true)
     }
 
     private var subjects: [Subject] {
@@ -95,6 +99,8 @@ struct EditExamView: View {
                         )
                     }
 
+                    Toggle("Note verknüpfen erforderlich", isOn: $requiresGrade)
+
                     if !exam.isShared {
                         Toggle("Als erledigt markieren", isOn: $isCompleted)
                             .tint(.green)
@@ -120,6 +126,25 @@ struct EditExamView: View {
                     }
                     .disabled(!canSave || isSaving || subjects.isEmpty)
                 }
+                ToolbarItem(placement: .destructiveAction) {
+                    Button {
+                        showDeleteConfirm = true
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .disabled(isDeleting)
+                }
+            }
+            .alert(
+                "Klausur löschen?",
+                isPresented: $showDeleteConfirm
+            ) {
+                Button("Abbrechen", role: .cancel) { showDeleteConfirm = false }
+                Button("Löschen", role: .destructive) {
+                    Task { await deleteExam() }
+                }
+            } message: {
+                Text("Dieser Klausurtermin wird dauerhaft gelöscht.")
             }
         }
     }
@@ -137,7 +162,13 @@ struct EditExamView: View {
         do {
             let reminder: Date? = hasReminder ? reminderDate : nil
             if exam.isShared {
+                guard let gid = exam.groupId else {
+                    error = "Keine Gruppe für diese Klausur gefunden."
+                    isSaving = false
+                    return
+                }
                 try await store.updateSharedExamInGroup(
+                    groupId: gid,
                     id: exam.id,
                     subjectName: subjectName,
                     title: trimmedTitle,
@@ -145,7 +176,7 @@ struct EditExamView: View {
                     weight: examWeight,
                     reminderAt: reminder
                 )
-                try await store.setUserReminderForSharedExam(examId: exam.id, reminderAt: reminder)
+                try await store.setUserReminderForSharedExam(examId: exam.id, reminderAt: reminder, groupId: gid)
             } else {
                 try await store.updateExamInFirestore(
                     id: exam.id,
@@ -162,5 +193,20 @@ struct EditExamView: View {
             self.error = error.localizedDescription
         }
         isSaving = false
+    }
+
+    private func deleteExam() async {
+        guard !isDeleting else { return }
+        isDeleting = true
+        if exam.isShared, let gid = exam.groupId {
+            await store.deleteSharedExamFromGroup(groupId: gid, id: exam.id)
+        } else {
+            await store.deleteExamFromFirestore(id: exam.id)
+        }
+        await MainActor.run {
+            showDeleteConfirm = false
+            dismiss()
+        }
+        isDeleting = false
     }
 }
