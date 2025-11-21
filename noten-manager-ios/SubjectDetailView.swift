@@ -1,12 +1,21 @@
 import SwiftUI
 import CryptoKit
 import FirebaseAuth
+import FirebaseFirestore
 
 struct SubjectDetailView: View {
     @EnvironmentObject var store: GradesStore
+    @Environment(\.dismiss) private var dismiss
     let subject: Subject
 
     enum HalfYearFilter: Hashable { case all, one, two }
+
+    // Aktueller Fachzustand (lokal, damit Umbenennen direkt sichtbar ist)
+    @State private var currentSubjectName: String
+    @State private var currentTeacher: String?
+    @State private var currentRoom: String?
+    @State private var currentEmail: String?
+    @State private var currentAlias: String?
 
     @State private var halfYear: HalfYearFilter = .all
 
@@ -30,13 +39,31 @@ struct SubjectDetailView: View {
     // Toolbar State
     @State private var isSigningOut: Bool = false
 
+    // Fach bearbeiten
+    @State private var showEditSubjectSheet: Bool = false
+    @State private var editName: String = ""
+    @State private var editTeacher: String = ""
+    @State private var editRoom: String = ""
+    @State private var editEmail: String = ""
+    @State private var editAlias: String = ""
+    @State private var isSavingSubject: Bool = false
+
     // BottomNav Navigation
     @State private var navigateToSettings: Bool = false
     @State private var navigateToFinal: Bool = false
-    @State private var navigateToSubjects: Bool = false
+    @State private var showAddGradeSheet: Bool = false
+
+    init(subject: Subject) {
+        self.subject = subject
+        _currentSubjectName = State(initialValue: subject.name)
+        _currentTeacher = State(initialValue: subject.teacher)
+        _currentRoom = State(initialValue: subject.room)
+        _currentEmail = State(initialValue: subject.email)
+        _currentAlias = State(initialValue: subject.alias)
+    }
 
     private var allGrades: [GradeWithId] {
-        store.gradesBySubject[subject.name] ?? []
+        store.gradesBySubject[currentSubjectName] ?? []
     }
 
     private var filteredGrades: [GradeWithId] {
@@ -92,125 +119,187 @@ struct SubjectDetailView: View {
         return gradeColor(v)
     }
 
+    private var isFeminine: Bool { store.theme == "feminine" }
+    private var isDark: Bool { store.darkMode }
+
+    private var chipForegroundColor: Color {
+        if isFeminine {
+            return Color(hex: isDark ? "#f472b6" : "#ec4899")
+        }
+        return .blue
+    }
+
+    private var chipBackgroundColor: Color {
+        if isFeminine {
+            return chipForegroundColor.opacity(isDark ? 0.30 : 0.15)
+        }
+        return Color.blue.opacity(0.1)
+    }
+
+    private var themedBackground: some View {
+        Group {
+            if store.darkMode {
+                RadialGradient(
+                    gradient: Gradient(colors: [
+                        Color(hex: "#1f2937"),
+                        Color(red: 2 / 255, green: 6 / 255, blue: 23 / 255)
+                    ]),
+                    center: .top,
+                    startRadius: 0,
+                    endRadius: 800
+                )
+            } else if store.theme == "feminine" {
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color(hex: "#fdf2ff"),
+                        Color(hex: "#fdf2f8"),
+                        Color(hex: "#fef2f2")
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            } else {
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color(red: 238 / 255, green: 242 / 255, blue: 255 / 255),
+                        Color(red: 249 / 255, green: 250 / 255, blue: 251 / 255),
+                        Color(red: 247 / 255, green: 247 / 255, blue: 247 / 255)
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+        }
+        .ignoresSafeArea()
+    }
+
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                // Halbjahresfilter im pill-förmigen Container (wie Home-Layout)
-                HStack {
-                    HStack(spacing: 4) {
-                        SegmentButton(title: "Alle", active: halfYear == .all) { halfYear = .all }
-                        SegmentButton(title: "1. Hj", active: halfYear == .one) { halfYear = .one }
-                        SegmentButton(title: "2. Hj", active: halfYear == .two) { halfYear = .two }
-                    }
-                    .padding(4)
-                    .background(toggleBackground)
-                    .clipShape(Capsule())
-                    .shadow(color: toggleShadow, radius: 8, x: 0, y: 4)
+        ZStack {
+            themedBackground
 
-                    Spacer()
-                }
-                .padding(.horizontal)
+            ScrollView {
+                VStack(spacing: 16) {
+                    // Halbjahresfilter im pill-förmigen Container (wie Home-Layout)
+                    HStack {
+                        HStack(spacing: 4) {
+                            SegmentButton(title: "Alle", active: halfYear == .all) { halfYear = .all }
+                            SegmentButton(title: "1. Hj", active: halfYear == .one) { halfYear = .one }
+                            SegmentButton(title: "2. Hj", active: halfYear == .two) { halfYear = .two }
+                        }
+                        .padding(4)
+                        .background(toggleBackground)
+                        .clipShape(Capsule())
+                        .shadow(color: toggleShadow, radius: 8, x: 0, y: 4)
 
-                // Summary
-                HStack(spacing: 12) {
-                    SummaryCard(title: "Durchschnitt") {
-                        let avg = averageForSubject()
-                        Text(formatAverage(avg))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(avgColor(avg).opacity(0.15))
-                            .foregroundStyle(avgColor(avg))
-                            .clipShape(Capsule())
+                        Spacer()
                     }
-                    SummaryCard(title: "Noten") {
-                        Text("\(allGrades.count)")
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Color.blue.opacity(0.1))
-                            .foregroundStyle(.blue)
-                            .clipShape(Capsule())
-                    }
-                }
-                .padding(.horizontal)
+                    .padding(.horizontal)
 
-                // Details
-                if subject.teacher != nil || subject.alias != nil || subject.email != nil || subject.room != nil {
+                    // Summary
+                    HStack(spacing: 12) {
+                        SummaryCard(title: "Durchschnitt") {
+                            let avg = averageForSubject()
+                            Text(formatAverage(avg))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(avgColor(avg).opacity(0.15))
+                                .foregroundStyle(avgColor(avg))
+                                .clipShape(Capsule())
+                        }
+                        SummaryCard(title: "Noten") {
+                            Text("\(allGrades.count)")
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(chipBackgroundColor)
+                                .foregroundStyle(chipForegroundColor)
+                                .clipShape(Capsule())
+                        }
+                    }
+                    .padding(.horizontal)
+
+                    // Details
+                    if (currentTeacher?.isEmpty == false) ||
+                       (currentAlias?.isEmpty == false) ||
+                       (currentEmail?.isEmpty == false) ||
+                       (currentRoom?.isEmpty == false) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Details").font(.title3).bold()
+                            VStack(spacing: 8) {
+                                if let t = currentTeacher, !t.isEmpty {
+                                    detailRow(label: "Lehrkraft", value: t)
+                                }
+                                if let a = currentAlias, !a.isEmpty {
+                                    detailRow(label: "Kürzel", value: a)
+                                }
+                                if let e = currentEmail, !e.isEmpty {
+                                    detailRow(label: "E-Mail", value: e, isEmail: true)
+                                }
+                                if let r = currentRoom, !r.isEmpty {
+                                    detailRow(label: "Raum", value: r)
+                                }
+                            }
+                            .padding()
+                            .background(.thinMaterial)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                        .padding(.horizontal)
+                    }
+
+                    // Notenliste
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Details").font(.title3).bold()
-                        VStack(spacing: 8) {
-                            if let t = subject.teacher, !t.isEmpty {
-                                detailRow(label: "Lehrkraft", value: t)
-                            }
-                            if let a = subject.alias, !a.isEmpty {
-                                detailRow(label: "Kürzel", value: a)
-                            }
-                            if let e = subject.email, !e.isEmpty {
-                                detailRow(label: "E-Mail", value: e, isEmail: true)
-                            }
-                            if let r = subject.room, !r.isEmpty {
-                                detailRow(label: "Raum", value: r)
+                        Text("Noten").font(.title3).bold()
+                        Text("Tippe auf eine Note, um diese zu bearbeiten")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        if sortedGrades.isEmpty {
+                            Text("Keine Noten vorhanden").foregroundStyle(.secondary).padding(.top, 8)
+                        } else {
+                            VStack(spacing: 12) {
+                                ForEach(sortedGrades, id: \.id) { g in
+                                    gradeCard(g)
+                                }
                             }
                         }
-                        .padding()
-                        .background(.thinMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
                     }
                     .padding(.horizontal)
                 }
-
-                // Notenliste
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Noten").font(.title3).bold()
-                    Text("Tippe auf eine Note, um diese zu bearbeiten")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    if sortedGrades.isEmpty {
-                        Text("Keine Noten vorhanden").foregroundStyle(.secondary).padding(.top, 8)
-                    } else {
-                        VStack(spacing: 12) {
-                            ForEach(sortedGrades, id: \.id) { g in
-                                gradeCard(g)
-                            }
+                .padding(.vertical, 8)
+            }
+        }
+        .sheet(isPresented: $showEditSubjectSheet) {
+            NavigationStack {
+                Form {
+                    Section("Allgemein") {
+                        TextField("Fachname", text: $editName)
+                            .textInputAutocapitalization(.words)
+                    }
+                    Section("Details") {
+                        TextField("Lehrkraft", text: $editTeacher)
+                        TextField("Raum", text: $editRoom)
+                        TextField("Kürzel", text: $editAlias)
+                        TextField("E-Mail", text: $editEmail)
+                            .keyboardType(.emailAddress)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled(true)
+                    }
+                }
+                .navigationTitle("Fach bearbeiten")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Abbrechen") {
+                            cancelEditSubject()
                         }
                     }
-                }
-                .padding(.horizontal)
-            }
-            .padding(.vertical, 8)
-        }
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                VStack(spacing: 6) {
-                    Text(subject.name)
-                        .font(.headline)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Text(subject.type == 1 ? "Hauptfach" : "Nebenfach")
-                        .font(.caption2)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(subject.type == 1 ? Color.blue.opacity(0.15) : Color.gray.opacity(0.15))
-                        .foregroundStyle(subject.type == 1 ? .blue : .gray)
-                        .clipShape(Capsule())
-                }
-            }
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    Task { await signOut() }
-                } label: {
-                    if isSigningOut {
-                        ProgressView().scaleEffect(0.8)
-                    } else {
-                        Image(systemName: "rectangle.portrait.and.arrow.right")
-                            .font(.title3)
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(isSavingSubject ? "Speichern…" : "Speichern") {
+                            Task { await handleSaveSubject() }
+                        }
+                        .disabled(isSavingSubject)
                     }
                 }
-                .accessibilityLabel("Abmelden")
-                .disabled(isSigningOut)
             }
         }
         .sheet(isPresented: $showNoteSheet) {
@@ -243,6 +332,46 @@ struct SubjectDetailView: View {
         } message: { _ in
             Text("Möchtest du diese Note wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.")
         }
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 2) {
+                    Text(currentSubjectName)
+                        .font(.headline)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    if subject.type == 0 || subject.type == 1 {
+                        Tag(
+                            text: subject.type == 1 ? "Hauptfach" : "Nebenfach",
+                            style: subject.type == 1 ? .main : .minor
+                        )
+                    }
+                }
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                HStack(spacing: 10) {
+                    Button {
+                        startEditSubject()
+                    } label: {
+                        Image(systemName: "pencil")
+                            .font(.title3)
+                    }
+
+                    Button {
+                        showAddGradeSheet = true
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.title3)
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showAddGradeSheet) {
+            NavigationStack {
+                AddGradeView(preselectedSubjectName: currentSubjectName)
+                    .environmentObject(store)
+            }
+        }
         .background(
             Group {
                 NavigationLink(
@@ -253,12 +382,10 @@ struct SubjectDetailView: View {
                     destination: AbiturExamView().environmentObject(store),
                     isActive: $navigateToFinal
                 ) { EmptyView() }
-                NavigationLink(
-                    destination: SubjectsManageView().environmentObject(store),
-                    isActive: $navigateToSubjects
-                ) { EmptyView() }
             }
         )
+        // Nur den aktuellen Fachnamen an den Container melden
+        .preference(key: QuickAddSubjectPreferenceKey.self, value: currentSubjectName)
     }
 
     // MARK: - Helpers (Optik)
@@ -368,13 +495,13 @@ struct SubjectDetailView: View {
                     Button("Notiz anzeigen") {
                         openNoteEditor(for: grade.id, current: note)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderedProminent)
                     .font(.footnote)
                 } else {
                     Button("Notiz hinzufügen") {
                         openNoteEditor(for: grade.id, current: "")
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderedProminent)
                     .font(.footnote)
                 }
 
@@ -389,7 +516,7 @@ struct SubjectDetailView: View {
                     Button {
                         Task { await saveInlineEdit(gradeId: grade.id) }
                     } label: {
-                        Label("Speichern", systemImage: "checkmark.circle.fill")
+                        Image(systemName: "checkmark.circle.fill")
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(isSaving)
@@ -397,21 +524,21 @@ struct SubjectDetailView: View {
                     Button {
                         cancelInlineEdit()
                     } label: {
-                        Label("Abbrechen", systemImage: "xmark.circle")
+                        Image(systemName: "xmark.circle")
                     }
                     .buttonStyle(.bordered)
                 } else {
                     Button {
                         startInlineEdit(grade)
                     } label: {
-                        Label("Bearbeiten", systemImage: "pencil")
+                        Image(systemName: "pencil")
                     }
                     .buttonStyle(.bordered)
 
                     Button(role: .destructive) {
                         deleteConfirmGradeId = grade.id
                     } label: {
-                        Label("Löschen", systemImage: "trash")
+                        Image(systemName: "trash")
                     }
                     .buttonStyle(.bordered)
                 }
@@ -449,7 +576,7 @@ struct SubjectDetailView: View {
         let value = Double(editedGradeValue) ?? 0
         do {
             try await store.updateGradeInFirestore(
-                subjectId: subject.name,
+                subjectId: currentSubjectName,
                 gradeId: gradeId,
                 grade: value,
                 weight: editedWeight,
@@ -473,7 +600,7 @@ struct SubjectDetailView: View {
     private func saveNote() async {
         guard let gid = noteEditGradeId else { return }
         do {
-            try await store.updateGradeNoteInFirestore(subjectId: subject.name, gradeId: gid, note: noteEditText.isEmpty ? nil : noteEditText)
+            try await store.updateGradeNoteInFirestore(subjectId: currentSubjectName, gradeId: gid, note: noteEditText.isEmpty ? nil : noteEditText)
             showNoteSheet = false
             noteEditGradeId = nil
             noteEditText = ""
@@ -484,11 +611,108 @@ struct SubjectDetailView: View {
 
     private func deleteGrade(gradeId: String) async {
         do {
-            try await store.deleteGradeFromFirestore(subjectId: subject.name, gradeId: gradeId)
+            try await store.deleteGradeFromFirestore(subjectId: currentSubjectName, gradeId: gradeId)
         } catch {
             // Optional: Fehler anzeigen
         }
         deleteConfirmGradeId = nil
+    }
+
+    // MARK: - Fach bearbeiten
+
+    private func startEditSubject() {
+        editName = currentSubjectName
+        editTeacher = currentTeacher ?? ""
+        editRoom = currentRoom ?? ""
+        editEmail = currentEmail ?? ""
+        editAlias = currentAlias ?? ""
+        showEditSubjectSheet = true
+    }
+
+    private func cancelEditSubject() {
+        showEditSubjectSheet = false
+        editName = ""
+        editTeacher = ""
+        editRoom = ""
+        editEmail = ""
+        editAlias = ""
+    }
+
+    private func handleSaveSubject() async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard !isSavingSubject else { return }
+
+        let originalName = subject.name
+        let newName = editName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !newName.isEmpty else { return }
+
+        if newName.lowercased() != originalName.lowercased(),
+           store.subjects.contains(where: { $0.name.lowercased() == newName.lowercased() }) {
+            return
+        }
+
+        isSavingSubject = true
+        defer { isSavingSubject = false }
+
+        let db = Firestore.firestore()
+        guard let original = store.subjects.first(where: { $0.name == originalName }) else { return }
+
+        do {
+            if newName == originalName {
+                let subjectDocRef = db.collection("users").document(uid).collection("subjects").document(originalName)
+                try await subjectDocRef.updateData([
+                    "teacher": editTeacher.isEmpty ? NSNull() : editTeacher,
+                    "room": editRoom.isEmpty ? NSNull() : editRoom,
+                    "email": editEmail.isEmpty ? NSNull() : editEmail,
+                    "alias": editAlias.isEmpty ? NSNull() : editAlias
+                ])
+            } else {
+                let oldRef = db.collection("users").document(uid).collection("subjects").document(originalName)
+                let newRef = db.collection("users").document(uid).collection("subjects").document(newName)
+
+                var payload: [String: Any] = [
+                    "type": original.type,
+                    "date": original.date,
+                    "order": original.order as Any,
+                    "teacher": editTeacher.isEmpty ? NSNull() : editTeacher,
+                    "room": editRoom.isEmpty ? NSNull() : editRoom,
+                    "email": editEmail.isEmpty ? NSNull() : editEmail,
+                    "alias": editAlias.isEmpty ? NSNull() : editAlias,
+                    "droppedHalfYear": original.droppedHalfYear as Any,
+                    "examSubject": original.examSubject as Any,
+                    "examType": original.examType?.rawValue as Any,
+                    "examPointsEncrypted": original.examPointsEncrypted as Any,
+                    "writtenExamPointsEncrypted": original.writtenExamPointsEncrypted as Any,
+                    "oralExamPointsEncrypted": original.oralExamPointsEncrypted as Any
+                ]
+                payload["type"] = original.type
+                payload["date"] = original.date
+
+                try await newRef.setData(payload, merge: true)
+
+                let oldGradesRef = oldRef.collection("grades")
+                let newGradesRef = newRef.collection("grades")
+                let oldGradesSnap = try await oldGradesRef.getDocuments()
+
+                for gdoc in oldGradesSnap.documents {
+                    try await newGradesRef.document(gdoc.documentID).setData(gdoc.data())
+                }
+                for gdoc in oldGradesSnap.documents {
+                    try await gdoc.reference.delete()
+                }
+                try await oldRef.delete()
+            }
+
+            currentSubjectName = newName
+            currentTeacher = editTeacher.isEmpty ? nil : editTeacher
+            currentRoom = editRoom.isEmpty ? nil : editRoom
+            currentEmail = editEmail.isEmpty ? nil : editEmail
+            currentAlias = editAlias.isEmpty ? nil : editAlias
+
+            cancelEditSubject()
+        } catch {
+            // Optional: Fehler anzeigen
+        }
     }
 
     private func signOut() async {

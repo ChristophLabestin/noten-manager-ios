@@ -29,6 +29,8 @@ struct FinalGradeView: View {
     @State private var maxDroppedHalfYears: Int = 3
     @State private var examPointsBySubject: [String: Double?] = [:]
     @State private var finalGradeToFixed: Int = 1
+    @State private var showHomeworkSheet: Bool = false
+    @State private var showExamSheet: Bool = false
 
     private var subjectsWithoutFachreferat: [Subject] {
         store.subjects.filter { $0.name != "Fachreferat" }
@@ -38,18 +40,26 @@ struct FinalGradeView: View {
         store.fachreferat != nil
     }
 
+    private var isFeminine: Bool { store.theme == "feminine" }
+    private var isDark: Bool { store.darkMode }
+
+    private var chipForegroundColor: Color {
+        if isFeminine {
+            return Color(hex: isDark ? "#f472b6" : "#ec4899")
+        }
+        return .blue
+    }
+
+    private var chipBackgroundColor: Color {
+        if isFeminine {
+            return chipForegroundColor.opacity(isDark ? 0.30 : 0.15)
+        }
+        return Color.blue.opacity(0.1)
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
-                // BurgerMenu Header
-                BurgerMenuView(
-                    isSmall: true,
-                    title: "Abschlussnote",
-                    subjectType: nil,
-                    subtitle: "Halbjahre streichen und Abschlussnote berechnen"
-                )
-                    .environmentObject(store)
-
                 if store.isLoading {
                     VStack(spacing: 8) {
                         ProgressView(value: store.progress, total: 100)
@@ -194,8 +204,8 @@ struct FinalGradeView: View {
                         Text("\(subjectsWithoutFachreferat.count)")
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
-                            .background(Color.blue.opacity(0.1))
-                            .foregroundStyle(.blue)
+                            .background(chipBackgroundColor)
+                            .foregroundStyle(chipForegroundColor)
                             .clipShape(Capsule())
                     }
                     SummaryCard(title: "Halbjahre") {
@@ -203,15 +213,15 @@ struct FinalGradeView: View {
                             Text("\(selectedDropCount) / \(maxDroppedHalfYears)")
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 6)
-                                .background(Color.blue.opacity(0.1))
-                                .foregroundStyle(.blue)
+                                .background(chipBackgroundColor)
+                                .foregroundStyle(chipForegroundColor)
                                 .clipShape(Capsule())
                         } else {
                             Text("\(selectedDropCount)")
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 6)
-                                .background(Color.blue.opacity(0.1))
-                                .foregroundStyle(.blue)
+                                .background(chipBackgroundColor)
+                                .foregroundStyle(chipForegroundColor)
                                 .clipShape(Capsule())
                         }
                     }
@@ -304,7 +314,46 @@ struct FinalGradeView: View {
             .padding(.vertical, 8)
         }
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar { }
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 2) {
+                    Text("Abschlussnote")
+                        .font(.headline)
+                    Text("Halbjahre streichen & berechnen")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(1)
+                }
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                HStack {
+                    Button {
+                        showExamSheet = true
+                    } label: {
+                        Image(systemName: "calendar.badge.clock")
+                            .imageScale(.large)
+                    }
+                    .accessibilityLabel("Klausurtermine anzeigen")
+
+                    Button {
+                        showHomeworkSheet = true
+                    } label: {
+                        Image(systemName: "checklist")
+                            .imageScale(.large)
+                    }
+                    .accessibilityLabel("Aktive Hausaufgaben anzeigen")
+                }
+            }
+        }
+        .sheet(isPresented: $showHomeworkSheet) {
+            HomeworkListView()
+                .environmentObject(store)
+        }
+        .sheet(isPresented: $showExamSheet) {
+            ExamListView()
+                .environmentObject(store)
+        }
         .onAppear {
             // Initiale Drop-Selections aus persisted droppedHalfYear
             var next: [String: HalfYearDropOption] = [:]
@@ -350,9 +399,10 @@ struct FinalGradeView: View {
             HStack {
                 Text(subject.name).font(.headline)
                 Spacer()
-                Text(subject.type == 1 ? "Hauptfach" : "Nebenfach")
-                    .font(.caption)
-                    .foregroundStyle(subject.type == 1 ? .blue : .secondary)
+                Tag(
+                    text: subject.type == 1 ? "Hauptfach" : "Nebenfach",
+                    style: subject.type == 1 ? .main : .minor
+                )
             }
 
             HStack {

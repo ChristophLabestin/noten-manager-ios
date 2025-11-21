@@ -1,4 +1,5 @@
 import SwiftUI
+import FirebaseAuth
 
 struct AppSettingsView: View {
     @Environment(\.dismiss) private var dismiss
@@ -10,7 +11,8 @@ struct AppSettingsView: View {
 
     // BottomNav Navigation
     @State private var navigateToFinal: Bool = false
-    @State private var navigateToSubjects: Bool = false
+    @State private var showHomeworkSheet: Bool = false
+    @State private var showExamSheet: Bool = false
 
     private var maxExamSubjects: Int { 4 }
     private var currentExamSubjectsCount: Int {
@@ -21,15 +23,6 @@ struct AppSettingsView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    // BurgerMenu Header – analog zur Web-Settings-Seite
-                    BurgerMenuView(
-                        isSmall: true,
-                        title: "Einstellungen",
-                        subjectType: nil,
-                        subtitle: "Name und App-Design anpassen"
-                    )
-                    .environmentObject(store)
-
                     // Karte: Allgemein + App-Design
                     SettingsCard(
                         title: "Allgemein",
@@ -210,12 +203,61 @@ struct AppSettingsView: View {
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
+
+                    // Account
+                    SettingsCard(
+                        title: "Account",
+                        subtitle: nil
+                    ) {
+                        Button(role: .destructive) {
+                            Task {
+                                store.stopListening()
+                                try? Auth.auth().signOut()
+                            }
+                        } label: {
+                            HStack {
+                                Spacer()
+                                Text("Abmelden")
+                                    .font(.body)
+                                Spacer()
+                            }
+                        }
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
             }
-            // Native Toolbar ausblenden, da BurgerMenuView den Header übernimmt
-            .toolbar(.hidden, for: .navigationBar)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    VStack(spacing: 2) {
+                        Text("Einstellungen")
+                            .font(.headline)
+                        Text("Name und App-Design anpassen")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    HStack {
+                        Button {
+                            showExamSheet = true
+                        } label: {
+                            Image(systemName: "calendar.badge.clock")
+                                .imageScale(.large)
+                        }
+                        .accessibilityLabel("Klausurtermine anzeigen")
+
+                        Button {
+                            showHomeworkSheet = true
+                        } label: {
+                            Image(systemName: "checklist")
+                                .imageScale(.large)
+                        }
+                        .accessibilityLabel("Aktive Hausaufgaben anzeigen")
+                    }
+                }
+            }
             .onAppear {
                 newName = ""
                 nameSavedSuccess = false
@@ -226,12 +268,16 @@ struct AppSettingsView: View {
                         destination: AbiturExamView().environmentObject(store),
                         isActive: $navigateToFinal
                     ) { EmptyView() }
-                    NavigationLink(
-                        destination: SubjectsManageView().environmentObject(store),
-                        isActive: $navigateToSubjects
-                    ) { EmptyView() }
                 }
             )
+            .sheet(isPresented: $showHomeworkSheet) {
+                HomeworkListView()
+                    .environmentObject(store)
+            }
+            .sheet(isPresented: $showExamSheet) {
+                ExamListView()
+                    .environmentObject(store)
+            }
         }
     }
 
@@ -284,9 +330,10 @@ private struct ExamSubjectRow: View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
                 Text(subject.name).font(.body)
-                Text(subject.type == 1 ? "Hauptfach" : "Nebenfach")
-                    .font(.caption)
-                    .foregroundStyle(subject.type == 1 ? .blue : .secondary)
+                Tag(
+                    text: subject.type == 1 ? "Hauptfach" : "Nebenfach",
+                    style: subject.type == 1 ? .main : .minor
+                )
             }
             Spacer()
             Toggle("", isOn: Binding(

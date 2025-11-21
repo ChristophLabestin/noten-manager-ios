@@ -9,6 +9,10 @@ final class GradesStore: ObservableObject {
     @Published var subjects: [Subject] = []
     @Published var gradesBySubject: [String: [GradeWithId]] = [:] // Key = subjectId (name)
     @Published var fachreferat: Fachreferat?
+    @Published var homeworks: [Homework] = []
+    @Published var exams: [Exam] = []            // Eigene Prüfungen
+    @Published var sharedExams: [Exam] = []      // Prüfungen aus gemeinsamer Gruppe
+    @Published var examGroupId: String? = nil    // Aktuelle Prüfungsgruppe
     @Published var encryptionKey: SymmetricKey?
     @Published var isLoading: Bool = false
     @Published var loadingLabel: String = ""
@@ -29,6 +33,10 @@ final class GradesStore: ObservableObject {
     private var userDocListener: ListenerRegistration?
     private var subjectsListener: ListenerRegistration?
     private var fachreferatListener: ListenerRegistration?
+    private var homeworksListener: ListenerRegistration?
+    private var examsListener: ListenerRegistration?
+    private var sharedExamsListener: ListenerRegistration?
+    private var sharedExamUserSettingsListener: ListenerRegistration?
     private var gradesListeners: [String: ListenerRegistration] = [:] // subjectId -> listener
 
     // Cache verschlüsselter Noten, damit wir bei Key-Verfügbarkeit sofort entschlüsseln können
@@ -36,6 +44,12 @@ final class GradesStore: ObservableObject {
 
     private var isListening: Bool = false
     private var isSettingUp: Bool = false
+    private var sharedExamsGroupId: String?
+    private var sharedExamUserReminders: [String: Date] = [:] // examId -> user-spezifische Erinnerung
+
+    init() {
+        loadLocalPreferences()
+    }
 
     // MARK: - Live Updates
 
@@ -75,6 +89,16 @@ final class GradesStore: ObservableObject {
         subjectsListener = nil
         fachreferatListener?.remove()
         fachreferatListener = nil
+        homeworksListener?.remove()
+        homeworksListener = nil
+        examsListener?.remove()
+        examsListener = nil
+        sharedExamsListener?.remove()
+        sharedExamsListener = nil
+        sharedExamsGroupId = nil
+        sharedExamUserSettingsListener?.remove()
+        sharedExamUserSettingsListener = nil
+        sharedExamUserReminders = [:]
         for (_, l) in gradesListeners {
             l.remove()
         }
@@ -90,12 +114,13 @@ final class GradesStore: ObservableObject {
         gradesBySubject = [:]
         fachreferat = nil
         encryptionKey = nil
-        compactView = false
-        animationsEnabled = true
+        homeworks = []
+        exams = []
+        sharedExams = []
+        examGroupId = nil
+        sharedExamUserReminders = [:]
         subjectSortMode = .name
         subjectSortOrder = []
-        theme = "default"
-        darkMode = false
         gradeYear = nil
         isLoading = false
         loadingLabel = ""
@@ -211,6 +236,111 @@ final class GradesStore: ObservableObject {
                     }
                 }
         }
+
+        // Hausaufgaben-Listener
+        if homeworksListener == nil {
+            homeworksListener = db.collection("users")
+                .document(uid)
+                .collection("homeworks")
+                .order(by: "createdAt", descending: false)
+                .addSnapshotListener { [weak self] snapshot, error in
+                    Task { @MainActor in
+                        guard let self else { return }
+                        let docs = snapshot?.documents ?? []
+                        let list: [Homework] = docs.compactMap { doc in
+                            let data = doc.data()
+                            let subjectName = data["subjectName"] as? String ?? ""
+                            let title = data["title"] as? String ?? ""
+                            let isCompleted = data["isCompleted"] as? Bool ?? false
+                            let createdTs = data["createdAt"] as? Timestamp
+                            let createdAt = createdTs?.dateValue() ?? Date()
+                            let dueTs = data["dueDate"] as? Timestamp
+                            let dueDate = dueTs?.dateValue()
+                            let reminderTs = data["reminderAt"] as? Timestamp
+                            let reminderAt = reminderTs?.dateValue()
+                            return Homework(
+                                id: doc.documentID,
+                                subjectName: subjectName,
+                                title: title,
+                                dueDate: dueDate,
+                                reminderAt: reminderAt,
+                                isCompleted: isCompleted,
+                                createdAt: createdAt
+                            )
+                        }
+                        self.homeworks = list
+                        HomeworkNotificationManager.syncNotifications(for: list)
+                    }
+                }
+        }
+
+        // Prüfungs-Listener
+        if examsListener == nil {
+            examsListener = db.collection("users")
+                .document(uid)
+                .collection("exams")
+                .order(by: "createdAt", descending: false)
+                .addSnapshotListener { [weak self] snapshot, error in
+                    Task { @MainActor in
+                        guard let self else { return }
+                        let docs = snapshot?.documents ?? []
+                        let list: [Exam] = docs.compactMap { doc in
+                            let data = doc.data()
+                            let subjectName = data["subjectName"] as? String ?? ""
+                            let title = data["title"] as? String ?? ""
+                            let isCompleted = data["isCompleted"] as? Bool ?? false
+                            let createdTs = data["createdAt"] as? Timestamp
+                            let createdAt = createdTs?.dateValue() ?? Date()
+                            guard let dateTs = data["date"] as? Timestamp else { return nil }
+                            let date = dateTs.dateValue()
+                            let weight = data["weight"] as? Int
+                            let reminderTs = data["reminderAt"] as? Timestamp
+                            let reminderAt = reminderTs?.dateValue()
+                            let creatorId = data["creatorId"] as? String ?? uid
+                            return Exam(
+                                id: doc.documentID,
+                                subjectName: subjectName,
+                                title: title,
+                                date: date,
+                                weight: weight,
+                                reminderAt: reminderAt,
+                                isCompleted: isCompleted,
+                                createdAt: createdAt,
+                                isShared: false,
+                                creatorId: creatorId
+                            )
+                        }
+                        self.exams = list
+                        ExamNotificationManager.syncNotifications(for: self.allExams)
+                    }
+                }
+        }
+
+        // Gemeinsame Prüfungs-Listener (Group)
+        updateSharedExamsListenerIfNeeded()
+
+        // User-spezifische Einstellungen für geteilte Prüfungen
+        if sharedExamUserSettingsListener == nil {
+            sharedExamUserSettingsListener = db.collection("users")
+                .document(uid)
+                .collection("examGroupReminders")
+                .addSnapshotListener { [weak self] snapshot, error in
+                    Task { @MainActor in
+                        guard let self else { return }
+                        let docs = snapshot?.documents ?? []
+                        var map: [String: Date] = [:]
+                        for doc in docs {
+                            let data = doc.data()
+                            if let ts = data["reminderAt"] as? Timestamp {
+                                map[doc.documentID] = ts.dateValue()
+                            }
+                        }
+                        self.sharedExamUserReminders = map
+                        self.applySharedExamUserReminders()
+                        ExamNotificationManager.syncNotifications(for: self.allExams)
+                    }
+                }
+        }
     }
 
     private func setupGradesListenersIfNeeded(uid: String, subjects: [Subject]) {
@@ -278,18 +408,56 @@ final class GradesStore: ObservableObject {
         }
     }
 
+    // Alle Prüfungen (eigene + geteilte)
+    var allExams: [Exam] {
+        exams + sharedExams
+    }
+
+    private func applySharedExamUserReminders() {
+        guard !sharedExams.isEmpty else { return }
+        sharedExams = sharedExams.map { exam in
+            if let date = sharedExamUserReminders[exam.id] {
+                return Exam(
+                    id: exam.id,
+                    subjectName: exam.subjectName,
+                    title: exam.title,
+                    date: exam.date,
+                    weight: exam.weight,
+                    reminderAt: date,
+                    isCompleted: exam.isCompleted,
+                    createdAt: exam.createdAt,
+                    isShared: exam.isShared,
+                    creatorId: exam.creatorId
+                )
+            } else {
+                return Exam(
+                    id: exam.id,
+                    subjectName: exam.subjectName,
+                    title: exam.title,
+                    date: exam.date,
+                    weight: exam.weight,
+                    reminderAt: nil,
+                    isCompleted: exam.isCompleted,
+                    createdAt: exam.createdAt,
+                    isShared: exam.isShared,
+                    creatorId: exam.creatorId
+                )
+            }
+        }
+    }
+
     // MARK: - User-Settings + Key
 
     private func applyUserSettings(from data: [String: Any]) {
-        compactView = (data["compactView"] as? Bool) ?? false
-        animationsEnabled = (data["animationsEnabled"] as? Bool) ?? true
+        compactView = (data["compactView"] as? Bool) ?? compactView
+        animationsEnabled = (data["animationsEnabled"] as? Bool) ?? animationsEnabled
 
         if let themeVal = data["theme"] as? String, ["default","feminine"].contains(themeVal) {
             theme = themeVal
-        } else {
-            theme = "default"
         }
-        darkMode = (data["darkMode"] as? Bool) ?? false
+        if let dm = data["darkMode"] as? Bool {
+            darkMode = dm
+        }
         if let gy = data["gradeYear"] as? Int, (gy == 12 || gy == 13) {
             gradeYear = gy
         } else {
@@ -306,6 +474,12 @@ final class GradesStore: ObservableObject {
             subjectSortOrder = order
         } else {
             subjectSortOrder = []
+        }
+
+        if let gid = data["examGroupId"] as? String, !gid.isEmpty {
+            examGroupId = gid
+        } else {
+            examGroupId = nil
         }
     }
 
@@ -332,6 +506,174 @@ final class GradesStore: ObservableObject {
         }
     }
 
+    private func loadLocalPreferences() {
+        let defaults = UserDefaults.standard
+
+        if let storedTheme = defaults.string(forKey: "grades_theme"),
+           ["default", "feminine"].contains(storedTheme) {
+            theme = storedTheme
+        }
+        if defaults.object(forKey: "grades_darkMode") != nil {
+            darkMode = defaults.bool(forKey: "grades_darkMode")
+        }
+        if defaults.object(forKey: "grades_compactView") != nil {
+            compactView = defaults.bool(forKey: "grades_compactView")
+        }
+        if defaults.object(forKey: "grades_animationsEnabled") != nil {
+            animationsEnabled = defaults.bool(forKey: "grades_animationsEnabled")
+        }
+    }
+
+    // MARK: - Gemeinsame Klausurtermine (Gruppen)
+
+    private func normalizedExamGroupCode(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    }
+
+    private func generateExamGroupCode(length: Int = 6) -> String {
+        let chars = Array("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
+        var result = ""
+        for _ in 0..<length {
+            if let c = chars.randomElement() {
+                result.append(c)
+            }
+        }
+        return result
+    }
+
+    private func updateSharedExamsListenerIfNeeded() {
+        // Falls keine Gruppe mehr vorhanden ist, Listener entfernen
+        if examGroupId == nil {
+            sharedExamsListener?.remove()
+            sharedExamsListener = nil
+            sharedExamsGroupId = nil
+            sharedExams = []
+            return
+        }
+
+        guard let gid = examGroupId else { return }
+
+        // Wenn bereits für dieselbe Gruppe aktiv, nichts tun
+        if sharedExamsGroupId == gid, sharedExamsListener != nil {
+            return
+        }
+
+        // Falls Gruppe gewechselt wurde, alten Listener entfernen
+        sharedExamsListener?.remove()
+        sharedExamsListener = nil
+        sharedExamsGroupId = nil
+        sharedExams = []
+
+        sharedExamsGroupId = gid
+        sharedExamsListener = db.collection("examGroups")
+            .document(gid)
+            .collection("exams")
+            .order(by: "createdAt", descending: false)
+            .addSnapshotListener { [weak self] snapshot, error in
+                Task { @MainActor in
+                    guard let self else { return }
+                    let docs = snapshot?.documents ?? []
+                    let list: [Exam] = docs.compactMap { doc in
+                        let data = doc.data()
+                        let subjectName = data["subjectName"] as? String ?? ""
+                        let title = data["title"] as? String ?? ""
+                        let createdTs = data["createdAt"] as? Timestamp
+                        let createdAt = createdTs?.dateValue() ?? Date()
+                        guard let dateTs = data["date"] as? Timestamp else { return nil }
+                        let date = dateTs.dateValue()
+                        let weight = data["weight"] as? Int
+                        let creatorId = data["creatorId"] as? String
+                        return Exam(
+                            id: doc.documentID,
+                            subjectName: subjectName,
+                            title: title,
+                            date: date,
+                            weight: weight,
+                            reminderAt: nil,
+                            isCompleted: false,
+                            createdAt: createdAt,
+                            isShared: true,
+                            creatorId: creatorId
+                        )
+                    }
+                    self.sharedExams = list
+                    self.applySharedExamUserReminders()
+                    ExamNotificationManager.syncNotifications(for: self.allExams)
+                }
+            }
+    }
+
+    func createExamGroupIfNeeded() async throws -> String {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
+        }
+
+        if let existing = examGroupId, !existing.isEmpty {
+            return existing
+        }
+
+        let code = generateExamGroupCode()
+        let groupRef = db.collection("examGroups").document(code)
+        try await groupRef.setData([
+            "ownerId": uid,
+            "createdAt": Date()
+        ], merge: true)
+
+        try await db.collection("users").document(uid).updateData([
+            "examGroupId": code
+        ])
+
+        examGroupId = code
+        updateSharedExamsListenerIfNeeded()
+        return code
+    }
+
+    func joinExamGroup(with rawCode: String) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
+        }
+
+        let code = normalizedExamGroupCode(rawCode)
+        guard !code.isEmpty else {
+            throw NSError(domain: "GradesStore", code: -2, userInfo: [NSLocalizedDescriptionKey: "Ungültiger Gruppencode"])
+        }
+
+        let groupRef = db.collection("examGroups").document(code)
+        let snap = try await groupRef.getDocument()
+        if !snap.exists {
+            try await groupRef.setData([
+                "ownerId": uid,
+                "createdAt": Date()
+            ])
+        }
+
+        try await db.collection("users").document(uid).updateData([
+            "examGroupId": code
+        ])
+
+        examGroupId = code
+        updateSharedExamsListenerIfNeeded()
+    }
+
+    func leaveExamGroup() async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        do {
+            try await db.collection("users").document(uid).updateData([
+                "examGroupId": FieldValue.delete()
+            ])
+        } catch {
+            // optional loggen
+        }
+
+        examGroupId = nil
+        sharedExamsListener?.remove()
+        sharedExamsListener = nil
+        sharedExamsGroupId = nil
+        sharedExams = []
+        sharedExamUserReminders = [:]
+        ExamNotificationManager.syncNotifications(for: allExams)
+    }
+
     // MARK: - Write
 
     func addSubjectToFirestore(name: String, type: Int, date: Date) async throws {
@@ -349,6 +691,89 @@ final class GradesStore: ObservableObject {
         } else {
             subjects = subjects.map { $0.name == name ? s : $0 }
         }
+    }
+
+    func addExamToFirestore(subjectName: String, title: String, date: Date, weight: Int?, reminderAt: Date?) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
+        }
+        let now = Date()
+        let ref = db.collection("users")
+            .document(uid)
+            .collection("exams")
+            .document()
+
+        var payload: [String: Any] = [
+            "subjectName": subjectName,
+            "title": title,
+            "date": date,
+            "isCompleted": false,
+            "createdAt": now,
+            "creatorId": uid
+        ]
+        if let weight {
+            payload["weight"] = weight
+        }
+        if let reminderAt {
+            payload["reminderAt"] = reminderAt
+        }
+
+        try await ref.setData(payload)
+    }
+
+    func addExamToSharedGroup(subjectName: String, title: String, date: Date, weight: Int?, reminderAt: Date?) async throws -> String {
+        guard let gid = examGroupId, !gid.isEmpty else {
+            throw NSError(domain: "GradesStore", code: -2, userInfo: [NSLocalizedDescriptionKey: "Keine Klausurgruppe ausgewählt"])
+        }
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
+        }
+        let now = Date()
+        let ref = db.collection("examGroups")
+            .document(gid)
+            .collection("exams")
+            .document()
+
+        var payload: [String: Any] = [
+            "subjectName": subjectName,
+            "title": title,
+            "date": date,
+            "createdAt": now,
+            "creatorId": uid
+        ]
+        if let weight {
+            payload["weight"] = weight
+        }
+        // reminderAt wird pro Benutzer separat gespeichert
+
+        try await ref.setData(payload)
+        return ref.documentID
+    }
+
+    func addHomeworkToFirestore(subjectName: String, title: String, dueDate: Date?, reminderAt: Date?) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
+        }
+        let now = Date()
+        let ref = db.collection("users")
+            .document(uid)
+            .collection("homeworks")
+            .document()
+
+        var payload: [String: Any] = [
+            "subjectName": subjectName,
+            "title": title,
+            "isCompleted": false,
+            "createdAt": now
+        ]
+        if let dueDate {
+            payload["dueDate"] = dueDate
+        }
+        if let reminderAt {
+            payload["reminderAt"] = reminderAt
+        }
+
+        try await ref.setData(payload)
     }
 
     func addGradeToFirestore(subjectId: String, grade: Double, weight: Double, date: Date, note: String?, halfYear: Int?, using key: SymmetricKey) async throws -> String {
@@ -371,6 +796,133 @@ final class GradesStore: ObservableObject {
         gradesBySubject[subjectId] = list
 
         return newRef.documentID
+    }
+
+    func updateHomeworkInFirestore(id: String, subjectName: String, title: String, dueDate: Date?, reminderAt: Date?, isCompleted: Bool) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
+        }
+        let ref = db.collection("users")
+            .document(uid)
+            .collection("homeworks")
+            .document(id)
+
+        var payload: [String: Any] = [
+            "subjectName": subjectName,
+            "title": title,
+            "isCompleted": isCompleted
+        ]
+        if let dueDate {
+            payload["dueDate"] = dueDate
+        } else {
+            payload["dueDate"] = NSNull()
+        }
+        if let reminderAt {
+            payload["reminderAt"] = reminderAt
+        } else {
+            payload["reminderAt"] = NSNull()
+        }
+
+        try await ref.updateData(payload)
+    }
+
+    func updateExamInFirestore(id: String, subjectName: String, title: String, date: Date, weight: Int?, reminderAt: Date?, isCompleted: Bool) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
+        }
+        let ref = db.collection("users")
+            .document(uid)
+            .collection("exams")
+            .document(id)
+
+        var payload: [String: Any] = [
+            "subjectName": subjectName,
+            "title": title,
+            "date": date,
+            "isCompleted": isCompleted
+        ]
+        if let weight {
+            payload["weight"] = weight
+        } else {
+            payload["weight"] = NSNull()
+        }
+        if let reminderAt {
+            payload["reminderAt"] = reminderAt
+        } else {
+            payload["reminderAt"] = NSNull()
+        }
+
+        try await ref.updateData(payload)
+    }
+
+    func updateSharedExamInGroup(id: String, subjectName: String, title: String, date: Date, weight: Int?, reminderAt: Date?) async throws {
+        guard let gid = examGroupId, !gid.isEmpty else {
+            throw NSError(domain: "GradesStore", code: -2, userInfo: [NSLocalizedDescriptionKey: "Keine Klausurgruppe ausgewählt"])
+        }
+        let ref = db.collection("examGroups")
+            .document(gid)
+            .collection("exams")
+            .document(id)
+
+        var payload: [String: Any] = [
+            "subjectName": subjectName,
+            "title": title,
+            "date": date
+        ]
+        if let weight {
+            payload["weight"] = weight
+        } else {
+            payload["weight"] = NSNull()
+        }
+        try await ref.updateData(payload)
+    }
+
+    func setUserReminderForSharedExam(examId: String, reminderAt: Date?) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
+        }
+        let ref = db.collection("users")
+            .document(uid)
+            .collection("examGroupReminders")
+            .document(examId)
+
+        if let reminderAt {
+            try await ref.setData([
+                "reminderAt": reminderAt
+            ])
+        } else {
+            try await ref.delete()
+        }
+    }
+
+    func setHomeworkCompleted(id: String, completed: Bool) async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        let docRef = db.collection("users")
+            .document(uid)
+            .collection("homeworks")
+            .document(id)
+        do {
+            try await docRef.updateData([
+                "isCompleted": completed
+            ])
+        } catch {
+            // optional loggen
+        }
+    }
+
+    func setExamCompleted(id: String, completed: Bool) async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        let docRef = db.collection("users")
+            .document(uid)
+            .collection("exams")
+            .document(id)
+        do {
+            try await docRef.updateData([
+                "isCompleted": completed
+            ])
+        } catch {
+            // optional loggen
+        }
     }
 
     func setFachreferatToFirestore(subjectName: String, grade: Double, date: Date, note: String?, using key: SymmetricKey) async throws {
@@ -489,6 +1041,13 @@ final class GradesStore: ObservableObject {
         if let compactView { self.compactView = compactView }
         if let animationsEnabled { self.animationsEnabled = animationsEnabled }
 
+        // lokal speichern, damit Einstellungen direkt beim App-Start verfügbar sind
+        let defaults = UserDefaults.standard
+        if let theme { defaults.set(theme, forKey: "grades_theme") }
+        if let darkMode { defaults.set(darkMode, forKey: "grades_darkMode") }
+        if let compactView { defaults.set(compactView, forKey: "grades_compactView") }
+        if let animationsEnabled { defaults.set(animationsEnabled, forKey: "grades_animationsEnabled") }
+
         var payload: [String: Any] = [:]
         if let theme { payload["theme"] = theme }
         if let darkMode { payload["darkMode"] = darkMode }
@@ -581,6 +1140,45 @@ final class GradesStore: ObservableObject {
                 }
                 return s
             }
+        } catch {
+            // optional loggen
+        }
+    }
+
+    func deleteHomeworkFromFirestore(id: String) async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        let docRef = db.collection("users")
+            .document(uid)
+            .collection("homeworks")
+            .document(id)
+        do {
+            try await docRef.delete()
+        } catch {
+            // optional loggen
+        }
+    }
+
+    func deleteExamFromFirestore(id: String) async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        let docRef = db.collection("users")
+            .document(uid)
+            .collection("exams")
+            .document(id)
+        do {
+            try await docRef.delete()
+        } catch {
+            // optional loggen
+        }
+    }
+
+    func deleteSharedExamFromGroup(id: String) async {
+        guard let gid = examGroupId, !gid.isEmpty else { return }
+        let docRef = db.collection("examGroups")
+            .document(gid)
+            .collection("exams")
+            .document(id)
+        do {
+            try await docRef.delete()
         } catch {
             // optional loggen
         }

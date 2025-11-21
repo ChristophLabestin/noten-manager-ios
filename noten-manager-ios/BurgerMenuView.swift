@@ -45,13 +45,10 @@ struct BurgerMenuView: View {
                         .truncationMode(.tail)
 
                     if let subjectType {
-                        Text(subjectType == 1 ? "Hauptfach" : "Nebenfach")
-                            .font(.caption2)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(subjectType == 1 ? Color.blue.opacity(0.15) : Color.gray.opacity(0.15))
-                            .foregroundStyle(subjectType == 1 ? .blue : .gray)
-                            .clipShape(Capsule())
+                        Tag(
+                            text: subjectType == 1 ? "Hauptfach" : "Nebenfach",
+                            style: subjectType == 1 ? .main : .minor
+                        )
                     } else if let subtitle, !subtitle.isEmpty {
                         Text(subtitle)
                             .font(.caption)
@@ -120,7 +117,7 @@ struct BurgerMenuView: View {
     }
 }
 
-private struct LogoutButtonView: View {
+struct LogoutButtonView: View {
     @EnvironmentObject var store: GradesStore
     @State private var isSigningOut: Bool = false
     var body: some View {

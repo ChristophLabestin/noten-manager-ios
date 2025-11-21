@@ -18,12 +18,11 @@ struct HomeView: View {
     // Navigation-States für echte Seiten (kein Sheet)
     @State private var navigateToSettings: Bool = false
     @State private var navigateToFinalGrade: Bool = false
-    @State private var navigateToSubjectsManage: Bool = false
 
-    // Toolbar-State (ersetzt BurgerMenuView am Home)
     @State private var greeting: String = ""
     @State private var displayName: String = ""
-    @State private var isSigningOut: Bool = false
+    @State private var showHomeworkSheet: Bool = false
+    @State private var showExamSheet: Bool = false
 
     private var subjectsWithoutFachreferat: [Subject] {
         store.subjects.filter { $0.name != "Fachreferat" }
@@ -273,37 +272,64 @@ struct HomeView: View {
         isEditingOrder ? .active : .inactive
     }
 
+    // MARK: - Overdue indicators
+
+    private var hasOverdueHomeworks: Bool {
+        let now = Date()
+        return store.homeworks.contains { hw in
+            guard !hw.isCompleted else { return false }
+            if let due = hw.dueDate {
+                return due < now
+            }
+            if let reminder = hw.reminderAt {
+                return reminder < now
+            }
+            return false
+        }
+    }
+
+    private var hasOverdueExams: Bool {
+        let now = Date()
+        return store.allExams.contains { exam in
+            !exam.isCompleted && exam.date < now
+        }
+    }
+
     // MARK: - Body
 
     var body: some View {
         List {
             // Section 1: Loading, Filter, Summary
             Section {
-                if store.isLoading {
-                    VStack(spacing: 8) {
-                        ProgressView(value: store.progress, total: 100)
-                        Text(store.loadingLabel).font(.footnote)
+                VStack(spacing: 12) {
+                    if store.isLoading {
+                        VStack(spacing: 8) {
+                            ProgressView(value: store.progress, total: 100)
+                            Text(store.loadingLabel).font(.footnote)
+                        }
                     }
+
+                    // Halbjahresfilter + Reorder
+                    FilterAndReorderRow(
+                        halfYear: $halfYear,
+                        enableDrag: enableDrag,
+                        isEditingOrder: $isEditingOrder,
+                        onToggleEdit: {
+                            toggleEditMode(sortedNames: sortedSubjectsComputed.map { $0.name })
+                        }
+                    )
+
+                    // Summary
+                    SummaryRow(
+                        overall: overallComputed,
+                        subjectsCount: subjectsWithoutFachreferat.count,
+                        totalGradesCount: totalGradesCountComputed,
+                        gradeColor: gradeColor
+                    )
                 }
-
-                // Halbjahresfilter + Reorder
-                FilterAndReorderRow(
-                    halfYear: $halfYear,
-                    enableDrag: enableDrag,
-                    isEditingOrder: $isEditingOrder,
-                    onToggleEdit: {
-                        toggleEditMode(sortedNames: sortedSubjectsComputed.map { $0.name })
-                    }
-                )
-
-                // Summary
-                SummaryRow(
-                    overall: overallComputed,
-                    subjectsCount: subjectsWithoutFachreferat.count,
-                    totalGradesCount: totalGradesCountComputed,
-                    gradeColor: gradeColor
-                )
             }
+            .listRowBackground(Color.clear)
+            .listSectionSeparator(.hidden)
 
             // Section 2: Fächerliste (inkl. Reorder)
             Section {
@@ -332,43 +358,69 @@ struct HomeView: View {
                     }
                 }
             }
+            .listRowBackground(Color.clear)
+            .listSectionSeparator(.hidden)
         }
         .environment(\.editMode, .constant(editModeBinding))
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        .listRowSeparator(.hidden)
 
         // Unsichtbare NavigationLinks (NavigationStack-Ziele)
         .background(
             NavigationLinksBackground(
                 navigateToSettings: $navigateToSettings,
-                navigateToFinalGrade: $navigateToFinalGrade,
-                navigateToSubjectsManage: $navigateToSubjectsManage
+                navigateToFinalGrade: $navigateToFinalGrade
             ).environmentObject(store)
         )
-
-        // Toolbar
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
                 ToolbarTitleView(greeting: greeting, displayName: displayName)
             }
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    Task { await signOut() }
-                } label: {
-                    if isSigningOut {
-                        ProgressView().scaleEffect(0.8)
-                    } else {
-                        Image(systemName: "rectangle.portrait.and.arrow.right")
-                            .font(.title3)
+                HStack {
+                    Button {
+                        showExamSheet = true
+                    } label: {
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: "calendar.badge.clock")
+                                .imageScale(.large)
+                            if hasOverdueExams {
+                                Circle()
+                                    .fill(Color.red)
+                                    .frame(width: 8, height: 8)
+                                    .offset(x: 4, y: -4)
+                            }
+                        }
                     }
+                    .accessibilityLabel("Klausurtermine anzeigen")
+
+                    Button {
+                        showHomeworkSheet = true
+                    } label: {
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: "checklist")
+                                .imageScale(.large)
+                            if hasOverdueHomeworks {
+                                Circle()
+                                    .fill(Color.red)
+                                    .frame(width: 8, height: 8)
+                                    .offset(x: 4, y: -4)
+                            }
+                        }
+                    }
+                    .accessibilityLabel("Aktive Hausaufgaben anzeigen")
                 }
-                .accessibilityLabel("Abmelden")
-                .disabled(isSigningOut)
             }
         }
-        .task {
-            await store.startListening()
+        .sheet(isPresented: $showHomeworkSheet) {
+            HomeworkListView()
+                .environmentObject(store)
+        }
+        .sheet(isPresented: $showExamSheet) {
+            ExamListView()
+                .environmentObject(store)
         }
         .onAppear {
             computeGreeting()
@@ -395,8 +447,6 @@ struct HomeView: View {
             isEditingOrder = true
         }
     }
-
-    // MARK: - Toolbar helpers (Greeting/Name/Logout)
 
     private func computeGreeting() {
         let hours = Calendar.current.component(.hour, from: Date())
@@ -433,18 +483,6 @@ struct HomeView: View {
             }
         } catch {
             displayName = ""
-        }
-    }
-
-    private func signOut() async {
-        guard !isSigningOut else { return }
-        isSigningOut = true
-        defer { isSigningOut = false }
-        do {
-            store.stopListening()
-            try Auth.auth().signOut()
-        } catch {
-            // optional: Fehlerbehandlung
         }
     }
 }
@@ -616,16 +654,90 @@ struct SubjectRowView: View {
 }
 
 struct Tag: View {
+    @EnvironmentObject var store: GradesStore
+
     enum Style { case main, minor }
     let text: String
     let style: Style
+
+    private var isFeminine: Bool { store.theme == "feminine" }
+    private var isDark: Bool { store.darkMode }
+
+    private var primaryDefault: Color { Color(hex: "#1e3a8a") }          // $color-primary
+    private var primaryFeminine: Color { Color(hex: "#ec4899") }        // $color-primary-feminine
+    private var textMedium: Color { Color(hex: "#6b7280") }             // $color-text-medium
+    private var textDarkDark: Color { Color(hex: "#f9fafb") }           // $color-text-dark-dark
+
+    private var bgBlueBase: Color { Color(red: 37 / 255, green: 99 / 255, blue: 235 / 255) }
+    private var bgGrayBase: Color { Color(red: 148 / 255, green: 163 / 255, blue: 184 / 255) }
+    private var bgPinkBase: Color { Color(red: 236 / 255, green: 72 / 255, blue: 153 / 255) }
+
+    private var backgroundColor: Color {
+        if isFeminine {
+            switch style {
+            case .main:
+                // body.theme-feminine .subject-tag / .subject-tag--main
+                return bgPinkBase.opacity(isDark ? 0.8 : 0.18)
+            case .minor:
+                // body.theme-feminine .subject-tag--minor
+                return bgPinkBase.opacity(isDark ? 0.55 : 0.08)
+            }
+        }
+
+        if isDark {
+            // body.dark-mode .subject-tag / .subject-tag--minor
+            switch style {
+            case .main:
+                return bgBlueBase.opacity(0.35)
+            case .minor:
+                return bgGrayBase.opacity(0.55)
+            }
+        }
+
+        // Light + default theme
+        switch style {
+        case .main:
+            return bgBlueBase.opacity(0.12)
+        case .minor:
+            return bgGrayBase.opacity(0.18)
+        }
+    }
+
+    private var foregroundColor: Color {
+        if isFeminine {
+            if isDark {
+                // body.theme-feminine.dark-mode -> immer heller Text
+                return textDarkDark
+            }
+            switch style {
+            case .main:
+                return primaryFeminine
+            case .minor:
+                return bgPinkBase.opacity(0.85)
+            }
+        }
+
+        if isDark {
+            // body.dark-mode .subject-tag / .subject-tag--minor
+            return textDarkDark
+        }
+
+        // Light + default theme
+        switch style {
+        case .main:
+            return primaryDefault
+        case .minor:
+            return textMedium
+        }
+    }
+
     var body: some View {
         Text(text)
             .font(.caption2)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(style == .main ? Color.blue.opacity(0.15) : Color.gray.opacity(0.15))
-            .foregroundStyle(style == .main ? .blue : .gray)
+            .background(backgroundColor)
+            .foregroundStyle(foregroundColor)
             .clipShape(Capsule())
     }
 }
@@ -676,6 +788,8 @@ private struct FilterAndReorderRow: View {
 
 
 private struct SummaryRow: View {
+    @EnvironmentObject var store: GradesStore
+
     let overall: Double?
     let subjectsCount: Int
     let totalGradesCount: Int
@@ -696,16 +810,16 @@ private struct SummaryRow: View {
                 Text("\(subjectsCount)")
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(Color.blue.opacity(0.1))
-                    .foregroundStyle(.blue)
+                    .background(chipBackgroundColor)
+                    .foregroundStyle(chipForegroundColor)
                     .clipShape(Capsule())
             }
             SummaryCard(title: "Noten") {
                 Text("\(totalGradesCount)")
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(Color.blue.opacity(0.1))
-                    .foregroundStyle(.blue)
+                    .background(chipBackgroundColor)
+                    .foregroundStyle(chipForegroundColor)
                     .clipShape(Capsule())
             }
         }
@@ -715,6 +829,23 @@ private struct SummaryRow: View {
         guard let v = value else { return "-" }
         return String(format: "%.2f", v)
     }
+
+    private var isFeminine: Bool { store.theme == "feminine" }
+    private var isDark: Bool { store.darkMode }
+
+    private var chipForegroundColor: Color {
+        if isFeminine {
+            return Color(hex: isDark ? "#f472b6" : "#ec4899")
+        }
+        return .blue
+    }
+
+    private var chipBackgroundColor: Color {
+        if isFeminine {
+            return chipForegroundColor.opacity(isDark ? 0.30 : 0.15)
+        }
+        return Color.blue.opacity(0.1)
+    }
 }
 
 private struct ToolbarTitleView: View {
@@ -722,25 +853,22 @@ private struct ToolbarTitleView: View {
     let displayName: String
 
     var body: some View {
-        HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(greeting)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+        VStack(spacing: 2) {
+            Text(greeting)
+                .font(.headline)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            if !displayName.isEmpty {
+                Text("\(displayName)!")
+                    .font(.title3)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
-                if !displayName.isEmpty {
-                    Text("\(displayName)!")
-                        .font(.headline)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                }
             }
-            .allowsHitTesting(false)
-            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
+        .frame(maxWidth: .infinity)
+        .multilineTextAlignment(.center)
+        .allowsHitTesting(false)
     }
 }
 
@@ -748,7 +876,6 @@ private struct NavigationLinksBackground: View {
     @EnvironmentObject var store: GradesStore
     @Binding var navigateToSettings: Bool
     @Binding var navigateToFinalGrade: Bool
-    @Binding var navigateToSubjectsManage: Bool
 
     var body: some View {
         Group {
@@ -759,10 +886,6 @@ private struct NavigationLinksBackground: View {
             NavigationLink(
                 destination: AbiturExamView().environmentObject(store),
                 isActive: $navigateToFinalGrade
-            ) { EmptyView() }
-            NavigationLink(
-                destination: SubjectsManageView().environmentObject(store),
-                isActive: $navigateToSubjectsManage
             ) { EmptyView() }
         }
     }

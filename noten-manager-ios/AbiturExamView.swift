@@ -13,18 +13,10 @@ struct AbiturExamView: View {
         var isSaving: Bool
     }
 
-    // Identifiable Wrapper für .sheet(item:)
-    private struct SheetKey: Identifiable, Equatable {
-        let id: String
-    }
-
     @State private var examState: [String: ExamStateItem] = [:]
-    @State private var showWrittenPickerFor: SheetKey? = nil
-    @State private var showOralPickerFor: SheetKey? = nil
 
     // BottomNav Navigation
     @State private var navigateToSettings: Bool = false
-    @State private var navigateToSubjects: Bool = false
 
     private var hasFachreferat: Bool { store.fachreferat != nil }
 
@@ -66,6 +58,60 @@ struct AbiturExamView: View {
         if v >= 7 { return .green }
         if v >= 4 { return .orange }
         return .red
+    }
+
+    private var isFeminine: Bool { store.theme == "feminine" }
+    private var isDark: Bool { store.darkMode }
+
+    private var chipForegroundColor: Color {
+        if isFeminine {
+            return Color(hex: isDark ? "#f472b6" : "#ec4899")
+        }
+        return .blue
+    }
+
+    private var chipBackgroundColor: Color {
+        if isFeminine {
+            return chipForegroundColor.opacity(isDark ? 0.30 : 0.15)
+        }
+        return Color.blue.opacity(0.1)
+    }
+
+    private var themedBackground: some View {
+        Group {
+            if isDark {
+                RadialGradient(
+                    gradient: Gradient(colors: [
+                        Color(hex: "#1f2937"),
+                        Color(red: 2 / 255, green: 6 / 255, blue: 23 / 255)
+                    ]),
+                    center: .top,
+                    startRadius: 0,
+                    endRadius: 800
+                )
+            } else if isFeminine {
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color(hex: "#fdf2ff"),
+                        Color(hex: "#fdf2f8"),
+                        Color(hex: "#fef2f2")
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            } else {
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color(red: 238 / 255, green: 242 / 255, blue: 255 / 255),
+                        Color(red: 249 / 255, green: 250 / 255, blue: 251 / 255),
+                        Color(red: 247 / 255, green: 247 / 255, blue: 247 / 255)
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+        }
+        .ignoresSafeArea()
     }
 
     private func computeExamPoints(written: Double?, oral: Double?) -> Double? {
@@ -153,9 +199,10 @@ struct AbiturExamView: View {
             HStack {
                 Text(subject.name).font(.headline)
                 Spacer()
-                Text(subject.type == 1 ? "Hauptfach" : "Nebenfach")
-                    .font(.caption)
-                    .foregroundStyle(subject.type == 1 ? .blue : .secondary)
+                Tag(
+                    text: subject.type == 1 ? "Hauptfach" : "Nebenfach",
+                    style: subject.type == 1 ? .main : .minor
+                )
             }
             HStack {
                 Text("Jahresdurchschnitt").font(.subheadline).foregroundStyle(.secondary)
@@ -192,33 +239,56 @@ struct AbiturExamView: View {
                     .clipShape(Capsule())
             }
 
-            HStack {
-                Button {
-                    showWrittenPickerFor = SheetKey(id: subject.name)
-                } label: {
-                    Text(written != nil ? "Schriftliche Note anpassen" : "Schriftliche Note eintragen")
-                        .font(.subheadline)
+            // Schriftliche Note
+            Menu {
+                ForEach(Array(stride(from: 15, through: 0, by: -1)), id: \.self) { value in
+                    Button("\(value) Punkte") {
+                        Task { await handleWrittenPointsChange(subject, points: Double(value)) }
+                    }
                 }
-                Spacer()
-                Text(written != nil ? "\(Int(written!)) Punkte" : "Nicht eingetragen")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if written != nil {
+                    Button(role: .destructive) {
+                        Task { await handleClearWrittenPoints(subject) }
+                    } label: {
+                        Text("Eintrag löschen")
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Schriftliche Note")
+                        .font(.subheadline)
+                    Spacer()
+                    Text(written != nil ? "\(Int(written!)) Punkte" : "Nicht eingetragen")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
-            HStack {
-                Button {
-                    if oral == nil && oralLimitReached { return }
-                    showOralPickerFor = SheetKey(id: subject.name)
-                } label: {
-                    Text(oral != nil ? "Mündliche Note anpassen" : "Mündliche Note eintragen")
-                        .font(.subheadline)
+            // Mündliche Note
+            Menu {
+                ForEach(Array(stride(from: 15, through: 0, by: -1)), id: \.self) { value in
+                    Button("\(value) Punkte") {
+                        Task { await handleOralPointsChange(subject, points: Double(value)) }
+                    }
                 }
-                .disabled(oral == nil && oralLimitReached)
-                Spacer()
-                Text(oral != nil ? "\(Int(oral!)) Punkte" : "Nicht eingetragen")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if oral != nil {
+                    Button(role: .destructive) {
+                        Task { await handleClearOralPoints(subject) }
+                    } label: {
+                        Text("Eintrag löschen")
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Mündliche Note")
+                        .font(.subheadline)
+                    Spacer()
+                    Text(oral != nil ? "\(Int(oral!)) Punkte" : "Nicht eingetragen")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
+            .disabled(oral == nil && oralLimitReached)
 
             if written != nil || oral != nil {
                 Button(role: .destructive) {
@@ -235,139 +305,132 @@ struct AbiturExamView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        ZStack {
+            themedBackground
+
             ScrollView {
                 VStack(spacing: 16) {
-                    // BurgerMenu-Header
-                    BurgerMenuView(
-                        isSmall: true,
-                        title: "Abschlussprüfung",
-                        subjectType: nil,
-                        subtitle: "Abiturnoten verwalten"
-                    )
-                    .environmentObject(store)
-
-                    if store.isLoading {
-                        VStack(spacing: 8) {
-                            ProgressView(value: store.progress, total: 100)
-                            Text(store.loadingLabel).font(.footnote)
-                        }
-                        .padding(.horizontal)
+                if store.isLoading {
+                    VStack(spacing: 8) {
+                        ProgressView(value: store.progress, total: 100)
+                        Text(store.loadingLabel).font(.footnote)
                     }
+                    .padding(.horizontal)
+                }
 
-                    // Gesamtpunkte
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Gesamtpunkte").font(.headline)
-                        let color: Color = getGradeClassColor(overallAverage)
-                        let totalPointsDisplay: String = {
-                            if maxTotalPoints > 0 {
-                                let left = Int(round(totalPoints))
-                                let right = Int(round(Double(maxTotalPoints)))
-                                return "\(left) / \(right)"
+                // Gesamtpunkte
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Gesamtpunkte").font(.headline)
+                    let color: Color = getGradeClassColor(overallAverage)
+                    let totalPointsDisplay: String = {
+                        if maxTotalPoints > 0 {
+                            let left = Int(round(totalPoints))
+                            let right = Int(round(Double(maxTotalPoints)))
+                            return "\(left) / \(right)"
+                        } else {
+                            return "-"
+                        }
+                    }()
+                    Text(totalPointsDisplay)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(color.opacity(0.15))
+                        .foregroundStyle(color)
+                        .clipShape(Capsule())
+                }
+                .padding(.horizontal)
+
+                HStack {
+                    SummaryCard(title: "Jahresleistungen") {
+                        let yearPointsDisplay: String = {
+                            if maxYearPoints > 0 {
+                                return "\(Int(round(totalYearPoints))) / \(maxYearPoints)"
                             } else {
                                 return "-"
                             }
                         }()
-                        Text(totalPointsDisplay)
+                        Text(yearPointsDisplay)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
-                            .background(color.opacity(0.15))
-                            .foregroundStyle(color)
+                            .background(chipBackgroundColor)
+                            .foregroundStyle(chipForegroundColor)
                             .clipShape(Capsule())
                     }
-                    .padding(.horizontal)
-
-                    HStack {
-                        SummaryCard(title: "Jahresleistungen") {
-                            let yearPointsDisplay: String = {
-                                if maxYearPoints > 0 {
-                                    return "\(Int(round(totalYearPoints))) / \(maxYearPoints)"
-                                } else {
-                                    return "-"
-                                }
-                            }()
-                            Text(yearPointsDisplay)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(Color.blue.opacity(0.1))
-                                .foregroundStyle(.blue)
-                                .clipShape(Capsule())
-                        }
-                        SummaryCard(title: "Abiturprüfungen") {
-                            let examPointsDisplay: String = {
-                                if maxExamPoints > 0 {
-                                    return "\(Int(round(totalExamPoints))) / \(maxExamPoints)"
-                                } else {
-                                    return "-"
-                                }
-                            }()
-                            Text(examPointsDisplay)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(Color.blue.opacity(0.1))
-                                .foregroundStyle(.blue)
-                                .clipShape(Capsule())
-                        }
-                    }
-                    .padding(.horizontal)
-
-                    // Prüfungsfächer Übersicht
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Prüfungsfächer").font(.headline)
-                        Text("Übersicht deiner Prüfungsfächer. Die Auswahl kannst du in den Einstellungen anpassen.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        if store.subjects.isEmpty {
-                            Text("Lege zuerst Fächer und Noten an, um deine Abiturpunkte zu berechnen.")
-                                .foregroundStyle(.secondary)
-                        } else if examSubjects.isEmpty {
-                            Text("Du hast noch keine Prüfungsfächer ausgewählt. Du kannst sie in den Einstellungen festlegen.")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            VStack(spacing: 12) {
-                                ForEach(examSubjects, id: \.name) { subject in
-                                    let avg = averageForSubject(subject)
-                                    overviewCard(subject: subject, avg: avg)
-                                }
+                    SummaryCard(title: "Abiturprüfungen") {
+                        let examPointsDisplay: String = {
+                            if maxExamPoints > 0 {
+                                return "\(Int(round(totalExamPoints))) / \(maxExamPoints)"
+                            } else {
+                                return "-"
                             }
-                        }
-
-                        if oralLimitReached {
-                            Text("Du hast bereits drei mündliche Prüfungsnoten eingetragen. Es können maximal drei mündliche Prüfungen berücksichtigt werden.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
+                        }()
+                        Text(examPointsDisplay)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(chipBackgroundColor)
+                            .foregroundStyle(chipForegroundColor)
+                            .clipShape(Capsule())
                     }
-                    .padding(.horizontal)
+                }
+                .padding(.horizontal)
 
-                    // Abiturnoten Eingabe
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Abiturnoten").font(.headline)
-                        Text("Trage die schriftliche und optional die mündliche Note pro Prüfungsfach ein. Die Abiturnote wird berechnet als ((2 × schriftlich) + mündlich) / 3.")
-                            .font(.caption)
+                // Prüfungsfächer Übersicht
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Prüfungsfächer").font(.headline)
+                    Text("Übersicht deiner Prüfungsfächer. Die Auswahl kannst du in den Einstellungen anpassen.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if store.subjects.isEmpty {
+                        Text("Lege zuerst Fächer und Noten an, um deine Abiturpunkte zu berechnen.")
                             .foregroundStyle(.secondary)
-
-                        if examSubjects.isEmpty {
-                            Text("Lege in den Einstellungen zunächst deine Prüfungsfächer fest, um Abiturnoten einzutragen.")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            VStack(spacing: 12) {
-                                ForEach(examSubjects, id: \.name) { subject in
-                                    let state = examState[subject.name]
-                                    inputCard(subject: subject, state: state, oralLimitReached: oralLimitReached)
-                                }
+                    } else if examSubjects.isEmpty {
+                        Text("Du hast noch keine Prüfungsfächer ausgewählt. Du kannst sie in den Einstellungen festlegen.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        VStack(spacing: 12) {
+                            ForEach(examSubjects, id: \.name) { subject in
+                                let avg = averageForSubject(subject)
+                                overviewCard(subject: subject, avg: avg)
                             }
                         }
                     }
-                    .padding(.horizontal)
 
                     if oralLimitReached {
                         Text("Du hast bereits drei mündliche Prüfungsnoten eingetragen. Es können maximal drei mündliche Prüfungen berücksichtigt werden.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
-                            .padding(.horizontal)
                     }
+                }
+                .padding(.horizontal)
+
+                // Abiturnoten Eingabe
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Abiturnoten").font(.headline)
+                    Text("Trage die schriftliche und optional die mündliche Note pro Prüfungsfach ein. Die Abiturnote wird berechnet als ((2 × schriftlich) + mündlich) / 3.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if examSubjects.isEmpty {
+                        Text("Lege in den Einstellungen zunächst deine Prüfungsfächer fest, um Abiturnoten einzutragen.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        VStack(spacing: 12) {
+                            ForEach(examSubjects, id: \.name) { subject in
+                                let state = examState[subject.name]
+                                inputCard(subject: subject, state: state, oralLimitReached: oralLimitReached)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal)
+
+                if oralLimitReached {
+                    Text("Du hast bereits drei mündliche Prüfungsnoten eingetragen. Es können maximal drei mündliche Prüfungen berücksichtigt werden.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal)
+                }
 
                     // Hinweis
                     Text("Hinweis: Die hier berechneten Punkte dienen dir als Orientierung für dein Abitur an der FOS/BOS in Bayern. Es handelt sich nicht um eine offizielle Berechnung nach FOBOSO. Für verbindliche Auskünfte wende dich bitte an deine Schule.")
@@ -378,49 +441,34 @@ struct AbiturExamView: View {
                 }
                 .padding(.vertical, 8)
             }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { }
-            .sheet(item: $showWrittenPickerFor) { key in
-                let name = key.id
-                PickerSheet(title: "Schriftliche Note", initial: examState[name]?.writtenPoints, onSelect: { value in
-                    if let subject = store.subjects.first(where: { $0.name == name }) {
-                        Task { await handleWrittenPointsChange(subject, points: value) }
-                    }
-                }, onClear: {
-                    if let subject = store.subjects.first(where: { $0.name == name }) {
-                        Task { await handleClearWrittenPoints(subject) }
-                    }
-                })
-            }
-            .sheet(item: $showOralPickerFor) { key in
-                let name = key.id
-                PickerSheet(title: "Mündliche Note", initial: examState[name]?.oralPoints, onSelect: { value in
-                    if let subject = store.subjects.first(where: { $0.name == name }) {
-                        Task { await handleOralPointsChange(subject, points: value) }
-                    }
-                }, onClear: {
-                    if let subject = store.subjects.first(where: { $0.name == name }) {
-                        Task { await handleClearOralPoints(subject) }
-                    }
-                })
-            }
-            .onAppear {
-                Task { await loadExamState() }
-            }
-            .onChange(of: store.subjects) { _ in
-                Task { await loadExamState() }
-            }
-            .onChange(of: store.encryptionKey) { _ in
-                Task { await loadExamState() }
-            }
-            .background(
-                NavigationLinksBackground(
-                    navigateToSettings: $navigateToSettings,
-                    navigateToSubjects: $navigateToSubjects
-                )
-                .environmentObject(store)
-            )
         }
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 2) {
+                    Text("Abschlussprüfung")
+                        .font(.headline)
+                    Text("Abiturnoten verwalten")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .onAppear {
+            Task { await loadExamState() }
+        }
+        .onChange(of: store.subjects) { _ in
+            Task { await loadExamState() }
+        }
+        .onChange(of: store.encryptionKey) { _ in
+            Task { await loadExamState() }
+        }
+        .background(
+            NavigationLinksBackground(
+                navigateToSettings: $navigateToSettings
+            )
+            .environmentObject(store)
+        )
     }
 
     // MARK: - Actions & Persistence
@@ -580,69 +628,15 @@ struct AbiturExamView: View {
     }
 }
 
-// PickerSheet unverändert...
-private struct PickerSheet: View {
-    let title: String
-    let initial: Double?
-    let onSelect: (Double) -> Void
-    let onClear: () -> Void
-
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    ForEach(Array(stride(from: 15, through: 0, by: -1)), id: \.self) { value in
-                        Button {
-                            onSelect(Double(value))
-                            dismiss()
-                        } label: {
-                            HStack {
-                                Text("\(value) Punkte")
-                                if Int(initial ?? -999) == value {
-                                    Spacer()
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-                    }
-                }
-                if initial != nil {
-                    Section {
-                        Button(role: .destructive) {
-                            onClear()
-                            dismiss()
-                        } label: {
-                            Text("Eintrag löschen")
-                        }
-                    }
-                }
-            }
-            .navigationTitle(title)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Schließen") { dismiss() }
-                }
-            }
-        }
-    }
-}
-
 private struct NavigationLinksBackground: View {
     @EnvironmentObject var store: GradesStore
     @Binding var navigateToSettings: Bool
-    @Binding var navigateToSubjects: Bool
 
     var body: some View {
         Group {
             NavigationLink(
                 destination: AppSettingsView().environmentObject(store),
                 isActive: $navigateToSettings
-            ) { EmptyView() }
-            NavigationLink(
-                destination: SubjectsManageView().environmentObject(store),
-                isActive: $navigateToSubjects
             ) { EmptyView() }
         }
     }

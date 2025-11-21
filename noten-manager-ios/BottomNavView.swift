@@ -6,7 +6,7 @@ struct BottomNavView: View {
 
     enum Tab {
         case home
-        case subjects
+        case insights
         case final
         case settings
     }
@@ -18,12 +18,18 @@ struct BottomNavView: View {
     var onOpenHome: (() -> Void)?
     var onOpenFinalGrade: (() -> Void)?
     var onOpenSettings: (() -> Void)?
-    var onOpenSubjects: (() -> Void)?
+    var onOpenInsights: (() -> Void)?
+    var onOpenAbitur: (() -> Void)?
+
+    // Optional: Vorauswahl für "Note hinzufügen" (z. B. auf SubjectDetail)
+    var quickAddPreselectedSubjectName: String? = nil
 
     @State private var isOpen: Bool = false
     @State private var showAddSubject: Bool = false
     @State private var showAddGrade: Bool = false
     @State private var showAddFachreferat: Bool = false
+    @State private var showAddHomework: Bool = false
+    @State private var showAddExam: Bool = false
 
     // Press-Feedback für FAB
     @State private var fabPressed: Bool = false
@@ -68,15 +74,19 @@ struct BottomNavView: View {
 
     private var barBackground: some View {
         Group {
-            if isFeminine {
+            if isDark {
+                // body.dark-mode .bottom-nav-bar – unabhängig vom Theme
+                Color(red: 15/255, green: 23/255, blue: 42/255).opacity(0.96)
+            } else if isFeminine {
+                // body.theme-feminine .bottom-nav-bar
                 LinearGradient(
                     gradient: Gradient(colors: [colorPrimaryFem, colorPrimaryFemHover]),
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
             } else {
-                // default: dunkler Hintergrund; für Dark Mode dichter
-                (isDark ? Color(red: 15/255, green: 23/255, blue: 42/255).opacity(0.96) : colorBgDarkDark)
+                // Standard-Theme im Light Mode
+                colorBgDarkDark
             }
         }
         .clipShape(RoundedBarShape())
@@ -85,56 +95,70 @@ struct BottomNavView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            // Bottom Bar
-            HStack {
-                navItem(icon: "house.fill", active: currentTab == .home) {
-                    onOpenHome?()
-                }
-                navItem(icon: "folder.fill", active: currentTab == .subjects) {
-                    onOpenSubjects?()
-                }
+        GeometryReader { geo in
+            let bottomInset = geo.safeAreaInsets.bottom
+            let barWidth = min(geo.size.width - 32, 420) // 16pt Rand pro Seite, max 420pt Breite
+            ZStack(alignment: .bottom) {
+                // Bottom Bar – volle Breite mit symmetrischem Abstand
+                HStack {
+                    navItem(icon: "house.fill", active: currentTab == .home) {
+                        onOpenHome?()
+                    }
+                    navItem(icon: "chart.bar.fill", active: currentTab == .insights) {
+                        onOpenInsights?()
+                    }
 
-                // Spacer für FAB (56px)
-                Color.clear.frame(width: 56, height: 1)
+                    // Spacer für FAB (56px)
+                    Color.clear.frame(width: 56, height: 1)
 
-                navItem(icon: "book.fill", active: currentTab == .final) {
-                    onOpenFinalGrade?()
+                    navItem(icon: "book.fill", active: currentTab == .final) {
+                        onOpenFinalGrade?()
+                    }
+                    navItem(icon: "gearshape.fill", active: currentTab == .settings) {
+                        onOpenSettings?()
+                    }
                 }
-                navItem(icon: "gearshape.fill", active: currentTab == .settings) {
-                    onOpenSettings?()
-                }
+                .padding(.horizontal, 18)
+                .padding(.top, 10)
+                .padding(.bottom, 14)
+                .background(barBackground)
+                .frame(width: barWidth)
+                .frame(maxWidth: .infinity, alignment: .center)
+                // unten Safe-Area ignorieren: nur 16pt Außenabstand wie links/rechts
+                .padding(.bottom, 16)
+                .overlay(fabOverlay, alignment: .top)
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 10)
-            .padding(.bottom, 14)
-            .background(barBackground)
-            .frame(maxWidth: 420)
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, 16)
-            .overlay(fabOverlay, alignment: .top)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        // Overlay für das Actions-Panel, beeinflusst nicht die Layout-Höhe der Bar
-        .overlay(
-            Group {
-                if isOpen {
-                    actionsOverlay
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            // Overlay für das Actions-Panel, beeinflusst nicht die Layout-Höhe der Bar
+            .overlay(
+                Group {
+                    if isOpen {
+                        actionsOverlay(bottomInset: bottomInset)
+                    }
                 }
+            )
+            .ignoresSafeArea(edges: .bottom)
+            .sheet(isPresented: $showAddSubject) {
+                AddSubjectView()
+                    .environmentObject(store)
             }
-        )
-        .ignoresSafeArea(edges: .bottom)
-        .sheet(isPresented: $showAddSubject) {
-            AddSubjectView()
-                .environmentObject(store)
-        }
-        .sheet(isPresented: $showAddGrade) {
-            AddGradeView()
-                .environmentObject(store)
-        }
-        .sheet(isPresented: $showAddFachreferat) {
-            AddFachreferatView()
-                .environmentObject(store)
+            .sheet(isPresented: $showAddGrade) {
+                // Wichtig: Vorauswahl des Fachnamens weitergeben
+                AddGradeView(preselectedSubjectName: quickAddPreselectedSubjectName)
+                    .environmentObject(store)
+            }
+            .sheet(isPresented: $showAddFachreferat) {
+                AddFachreferatView(preselectedSubjectName: quickAddPreselectedSubjectName)
+                    .environmentObject(store)
+            }
+            .sheet(isPresented: $showAddHomework) {
+                AddHomeworkView(preselectedSubjectName: quickAddPreselectedSubjectName)
+                    .environmentObject(store)
+            }
+            .sheet(isPresented: $showAddExam) {
+                AddExamView(preselectedSubjectName: quickAddPreselectedSubjectName)
+                    .environmentObject(store)
+            }
         }
     }
 
@@ -147,8 +171,8 @@ struct BottomNavView: View {
                     let dotBackground: Color = {
                         guard active else { return .clear }
                         if isFeminine {
-                            // body.theme-feminine .bottom-nav-dot--active
-                            return colorPrimaryFem.opacity(0.30)
+                            // body.theme-feminine(.dark-mode) .bottom-nav-dot--active
+                            return colorPrimaryFem.opacity(isDark ? 0.55 : 0.30)
                         }
                         // rgba(37, 99, 235, 0.22) / 0.5
                         let base = Color(red: 37/255, green: 99/255, blue: 235/255)
@@ -229,7 +253,8 @@ struct BottomNavView: View {
                     .onEnded { _ in withAnimation(.easeOut(duration: 0.12)) { fabPressed = false } }
             )
             .scaleEffect(fabPressed ? 0.96 : 1.0)
-            .offset(y: -22) // SCSS: margin-top: -22px
+            // passt weiterhin; Bar steht nur 16pt vom Rand entfernt
+            .offset(y: -26)
             .accessibilityLabel("Schnelle Aktionen öffnen")
         }
     }
@@ -261,9 +286,8 @@ struct BottomNavView: View {
         .frame(maxWidth: 260)
     }
 
-    private var actionsOverlay: some View {
-        GeometryReader { geo in
-            let bottomInset = geo.safeAreaInsets.bottom
+    private func actionsOverlay(bottomInset: CGFloat) -> some View {
+        GeometryReader { _ in
             ZStack {
                 // Backdrop
                 Color.black.opacity(0.35)
@@ -286,6 +310,30 @@ struct BottomNavView: View {
                         }
 
                         VStack(spacing: 8) {
+                            // Klausur
+                            ActionButton(
+                                iconContent: AnyView(Image(systemName: "calendar.badge.clock").font(.system(size: 18, weight: .semibold))),
+                                label: "Klausur",
+                                description: "Klausurtermin eintragen",
+                                disabled: store.subjects.isEmpty,
+                                title: store.subjects.isEmpty ? "Lege zuerst ein Fach an" : ""
+                            ) {
+                                isOpen = false
+                                showAddExam = true
+                            }
+
+                            // Hausaufgabe
+                            ActionButton(
+                                iconContent: AnyView(Image(systemName: "checklist").font(.system(size: 18, weight: .semibold))),
+                                label: "Hausaufgabe",
+                                description: "Aufgabe mit Fach und Fälligkeit",
+                                disabled: store.subjects.isEmpty,
+                                title: store.subjects.isEmpty ? "Lege zuerst ein Fach an" : ""
+                            ) {
+                                isOpen = false
+                                showAddHomework = true
+                            }
+
                             // Note
                             ActionButton(
                                 iconContent: AnyView(Text("+").font(.system(size: 20, weight: .semibold))),
@@ -340,7 +388,7 @@ struct BottomNavView: View {
                                 title: ""
                             ) {
                                 isOpen = false
-                                onOpenFinalGrade?()
+                                onOpenAbitur?()
                             }
                         }
                     }
@@ -350,12 +398,12 @@ struct BottomNavView: View {
                     .frame(maxWidth: 520)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .background(panelBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 24))
+                    .clipShape(RoundedRectangle(cornerRadius: 32))
                     .shadow(color: Color.black.opacity(isDark ? 0.9 : 0.45),
                             radius: 40, x: 0, y: 18)
                     .padding(.horizontal, 16)
-                    // Abstand zur BottomNav: ca. 94px Bar-Höhe + 12px Margin wie im Web
-                    .padding(.bottom, bottomInset + 94 + 12)
+                    // Abstand zur BottomNav: Bar-Höhe (~94) + Außenabstand (16) + 12
+                    .padding(.bottom, 94 + 16 + 12)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .animation(.easeOut(duration: 0.32), value: isOpen) // SCSS: 0.32s
                 }
@@ -422,11 +470,12 @@ struct BottomNavView: View {
     }
 }
 
-// Abgerundete Form: oben 16, unten 40 (wie SCSS)
+// Abgerundete Form: oben 16, unten 44 (an iPhone-Ecken angelehnt)
 private struct RoundedBarShape: Shape {
     func path(in rect: CGRect) -> Path {
         let topRadius: CGFloat = 16
-        let bottomRadius: CGFloat = 40
+        // Untere Rundung proportional zur Breite, ca. 20 % – stärker abgerundet, näher an der iPhone-Screen-Rundung
+        let bottomRadius: CGFloat = rect.width * 0.14
         var path = Path()
         path.addRoundedRect(in: rect,
                             topLeftRadius: CGSize(width: topRadius, height: topRadius),

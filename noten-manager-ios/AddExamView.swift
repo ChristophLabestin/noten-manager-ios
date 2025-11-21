@@ -1,0 +1,156 @@
+import SwiftUI
+
+struct AddExamView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var store: GradesStore
+
+    let preselectedSubjectName: String?
+
+    @State private var subjectName: String = ""
+    @State private var title: String = ""
+    @State private var date: Date = Date().addingTimeInterval(60 * 60 * 24)
+    @State private var examWeight: Int = 0
+    @State private var hasReminder: Bool = false
+    @State private var reminderDate: Date = Date().addingTimeInterval(60 * 60)
+    @State private var isSaving: Bool = false
+    @State private var error: String?
+    @State private var shareWithGroup: Bool = false
+
+    private var subjects: [Subject] {
+        store.subjects.filter { $0.name != "Fachreferat" }
+    }
+
+    private var canSave: Bool {
+        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !subjectName.isEmpty
+    }
+
+    init(preselectedSubjectName: String? = nil) {
+        self.preselectedSubjectName = preselectedSubjectName
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Klausurtermin") {
+                    Picker("Fach", selection: $subjectName) {
+                        ForEach(subjects, id: \.name) { s in
+                            Text(s.name).tag(s.name)
+                        }
+                    }
+                    if subjects.isEmpty {
+                        Text("Lege zuerst ein Fach an, um Klausuren zuzuordnen.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Notiz")
+                        TextEditor(text: $title)
+                            .frame(minHeight: 80)
+                            .textInputAutocapitalization(.sentences)
+                    }
+
+                    let subjectType = subjects.first(where: { $0.name == subjectName })?.type ?? 0
+                    Picker("Art", selection: $examWeight) {
+                        if subjectType == 0 {
+                            Text("Kurzarbeit").tag(1)
+                            Text("Mündlich / EX").tag(0)
+                        } else {
+                            Text("Schulaufgabe").tag(2)
+                            Text("Kurzarbeit").tag(1)
+                            Text("Mündlich / EX").tag(0)
+                        }
+                    }
+
+                    DatePicker(
+                        "Datum & Uhrzeit",
+                        selection: $date,
+                        displayedComponents: [.date, .hourAndMinute]
+                    )
+
+                    Toggle("Zusätzliche Erinnerung planen", isOn: $hasReminder)
+
+                    if hasReminder {
+                        DatePicker(
+                            "Erinnerung",
+                            selection: $reminderDate,
+                            displayedComponents: [.date, .hourAndMinute]
+                        )
+                    }
+
+                    if store.examGroupId != nil {
+                        Toggle("Mit Klausurgruppe teilen", isOn: $shareWithGroup)
+                    }
+                }
+                if let error {
+                    Text(error)
+                        .foregroundStyle(.red)
+                }
+            }
+            .navigationTitle("Klausur hinzufügen")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        Task { await save() }
+                    } label: {
+                        if isSaving { ProgressView() } else { Text("Speichern") }
+                    }
+                    .disabled(!canSave || isSaving || subjects.isEmpty)
+                }
+            }
+            .onAppear {
+                if subjectName.isEmpty {
+                    if let pre = preselectedSubjectName,
+                       subjects.contains(where: { $0.name == pre }) {
+                        subjectName = pre
+                    } else {
+                        subjectName = subjects.first?.name ?? ""
+                    }
+                }
+                shareWithGroup = (store.examGroupId != nil)
+            }
+        }
+    }
+
+    private func save() async {
+        guard !isSaving else { return }
+        isSaving = true
+        error = nil
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else {
+            error = "Bitte einen Titel für die Klausur eingeben."
+            isSaving = false
+            return
+        }
+        do {
+            let reminder: Date? = hasReminder ? reminderDate : nil
+            if shareWithGroup, store.examGroupId != nil {
+                let sharedId = try await store.addExamToSharedGroup(
+                    subjectName: subjectName,
+                    title: trimmedTitle,
+                    date: date,
+                    weight: examWeight,
+                    reminderAt: reminder
+                )
+                if let reminder {
+                    try await store.setUserReminderForSharedExam(examId: sharedId, reminderAt: reminder)
+                }
+            } else {
+                try await store.addExamToFirestore(
+                    subjectName: subjectName,
+                    title: trimmedTitle,
+                    date: date,
+                    weight: examWeight,
+                    reminderAt: reminder
+                )
+            }
+            dismiss()
+        } catch {
+            self.error = error.localizedDescription
+        }
+        isSaving = false
+    }
+}

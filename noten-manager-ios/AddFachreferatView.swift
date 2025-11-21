@@ -5,6 +5,9 @@ struct AddFachreferatView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var store: GradesStore
 
+    // Optional vorselektiertes Fach (z. B. von SubjectDetail)
+    let preselectedSubjectName: String?
+
     @State private var subjectName: String = ""
     @State private var gradeText: String = ""
     @State private var date: Date = Date()
@@ -17,6 +20,10 @@ struct AddFachreferatView: View {
         guard !subjectName.isEmpty else { return false }
         guard Double(gradeText) != nil else { return false }
         return true
+    }
+
+    init(preselectedSubjectName: String? = nil) {
+        self.preselectedSubjectName = preselectedSubjectName
     }
 
     var body: some View {
@@ -53,7 +60,14 @@ struct AddFachreferatView: View {
             }
             .onAppear {
                 if subjectName.isEmpty {
-                    subjectName = store.fachreferat?.subjectName ?? store.subjects.first(where: { $0.name != "Fachreferat" })?.name ?? ""
+                    if let pre = preselectedSubjectName,
+                       store.subjects.contains(where: { $0.name == pre && $0.name != "Fachreferat" }) {
+                        subjectName = pre
+                    } else {
+                        subjectName = store.fachreferat?.subjectName
+                            ?? store.subjects.first(where: { $0.name != "Fachreferat" })?.name
+                            ?? ""
+                    }
                 }
                 if let fr = store.fachreferat {
                     gradeText = String(fr.grade)
