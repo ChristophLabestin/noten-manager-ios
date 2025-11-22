@@ -31,7 +31,21 @@ struct AddGradeView: View {
         guard !subjectName.isEmpty else { return false }
         guard let value = Double(gradeText),
               value >= 0, value <= 15 else { return false }
+        if linkToExam && selectedLinkedExamId == nil { return false }
         return true
+    }
+
+    private var linkableExams: [Exam] {
+        let now = Date()
+        return store.allExams
+            .filter { exam in
+                let keepIfSelected = exam.id == selectedLinkedExamId
+                if exam.isCompleted && !keepIfSelected { return false }
+                if exam.date > now && !keepIfSelected { return false }
+                let subjectMatches = matchesSubject(for: exam)
+                return subjectMatches
+            }
+            .sorted { $0.date > $1.date }
     }
 
     init(preselectedSubjectName: String? = nil, preselectedWeight: Int? = nil, prefilledNote: String? = nil, linkedExamId: String? = nil, markLinkedExamCompletedByDefault: Bool = false) {
@@ -53,6 +67,8 @@ struct AddGradeView: View {
                     }
                     TextField("Note (0–15)", text: $gradeText)
                         .keyboardType(.numberPad)
+                        .submitLabel(.done)
+                        .onSubmit { hideKeyboard() }
 
                     // Art & Halbjahr wie im React-Client:
                     // Hauptfach: Schulaufgabe (2), Kurzarbeit (1), Mündlich/EX (0)
@@ -76,19 +92,61 @@ struct AddGradeView: View {
                     }
                     .pickerStyle(.segmented)
                     TextField("Notiz (optional)", text: $note)
+                        .submitLabel(.done)
+                        .onSubmit { hideKeyboard() }
                 }
                 Section("Prüfung verknüpfen") {
                     Toggle("Mit Prüfung verknüpfen", isOn: $linkToExam)
+                        .onChange(of: linkToExam) { enabled in
+                            if enabled {
+                                ensureLinkedExamSelection()
+                            } else {
+                                selectedLinkedExamId = nil
+                            }
+                        }
                     if linkToExam {
-                        Toggle("Prüfung als erledigt markieren", isOn: Binding(
-                            get: { true },
-                            set: { _ in }
-                        ))
-                        .disabled(true)
-                        .foregroundStyle(.secondary)
-                        Text("Die Note wird mit der gewählten Prüfung verknüpft und diese als erledigt markiert.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                        if linkableExams.isEmpty {
+                            Text("Keine offenen Termine für dieses Fach gefunden.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            VStack(alignment: .leading, spacing: 10) {
+                                ForEach(linkableExams) { exam in
+                                    let isSelected = selectedLinkedExamId == exam.id
+                                    Button {
+                                        selectedLinkedExamId = exam.id
+                                    } label: {
+                                        HStack(alignment: .top, spacing: 10) {
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(examTitle(exam))
+                                                    .font(.body.weight(.semibold))
+                                                    .foregroundStyle(.primary)
+                                                    .lineLimit(2)
+                                                Text(examDateString(exam))
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                            Spacer()
+                                            Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
+                                                .foregroundStyle(isSelected ? .blue : .secondary)
+                                        }
+                                        .padding(10)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 10)
+                                                .fill(Color(.secondarySystemBackground))
+                                        )
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 10)
+                                                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1)
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                Text("Die ausgewählte Prüfung wird als erledigt markiert.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
                 }
                 if let error {
@@ -109,6 +167,8 @@ struct AddGradeView: View {
                     .disabled(!canSave || isSaving)
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
+            .hideKeyboardOnTap()
             .onAppear {
                 if subjectName.isEmpty {
                     if let pre = preselectedSubjectName,
@@ -140,13 +200,26 @@ struct AddGradeView: View {
                         }
                     }
                 }
-                halfYearSelection = AddGradeView.defaultHalfYear()
+                let referenceDate = examDate(for: selectedLinkedExamId) ?? Date()
+                halfYearSelection = AddGradeView.defaultHalfYear(referenceDate: referenceDate)
 
                 if markLinkedExamCompletedByDefault {
                     linkToExam = true
                 }
+                ensureLinkedExamSelection()
+            }
+            .onChange(of: subjectName) { _ in
+                if linkToExam {
+                    ensureLinkedExamSelection()
+                }
+            }
+            .onChange(of: selectedLinkedExamId) { newValue in
+                if let date = examDate(for: newValue) {
+                    halfYearSelection = AddGradeView.defaultHalfYear(referenceDate: date)
+                }
             }
         }
+        .keyboardDismissToolbar()
     }
 
     private func save() async {
@@ -156,6 +229,11 @@ struct AddGradeView: View {
         do {
             guard let grade = Double(gradeText) else {
                 error = "Bitte eine gültige Note zwischen 0 und 15 eingeben."
+                isSaving = false
+                return
+            }
+            if linkToExam && selectedLinkedExamId == nil {
+                error = "Bitte eine Prüfung auswählen."
                 isSaving = false
                 return
             }
@@ -188,13 +266,54 @@ struct AddGradeView: View {
         isSaving = false
     }
 
-    private static func defaultHalfYear() -> Int {
+    private func ensureLinkedExamSelection() {
+        guard linkToExam else { return }
+        if let current = selectedLinkedExamId, linkableExams.contains(where: { $0.id == current }) {
+            return
+        }
+        selectedLinkedExamId = linkableExams.first?.id
+    }
+
+    private func matchesSubject(for exam: Exam) -> Bool {
+        let target = subjectName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if target.isEmpty { return true }
+        if exam.subjectName.lowercased() == target { return true }
+        if let mapped = store.resolveLocalSubjectNameForExam(exam)?.lowercased(), mapped == target {
+            return true
+        }
+        return false
+    }
+
+    private func examTitle(_ exam: Exam) -> String {
+        let name = exam.title.isEmpty ? "Ohne Titel" : exam.title
+        let subject = exam.subjectName
+        if subject.isEmpty { return name }
+        return "\(name)"
+    }
+
+    private func examDateString(_ exam: Exam) -> String {
+        examDateFormatter.string(from: exam.date)
+    }
+
+    private func examDate(for examId: String?) -> Date? {
+        guard let examId else { return nil }
+        return store.allExams.first(where: { $0.id == examId })?.date
+    }
+
+    private static func defaultHalfYear(referenceDate: Date = Date()) -> Int {
         var components = DateComponents()
         components.year = 2026
         components.month = 2
-        components.day = 23
+        components.day = 13
         let calendar = Calendar.current
         let switchDate = calendar.date(from: components) ?? Date()
-        return Date() < switchDate ? 1 : 2
+        return referenceDate < switchDate ? 1 : 2
     }
 }
+
+private let examDateFormatter: DateFormatter = {
+    let fmt = DateFormatter()
+    fmt.dateStyle = .medium
+    fmt.timeStyle = .none
+    return fmt
+}()

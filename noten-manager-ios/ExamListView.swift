@@ -113,12 +113,20 @@ struct ExamListView: View {
     @ViewBuilder
     private func examRow(_ exam: Exam, isInactiveSection: Bool = false) -> some View {
         let isSharedOwner = exam.isShared && exam.creatorId == currentUserId
+        let isOverdueAttention = !exam.isCompleted && exam.date < Date()
+        let attentionTag = isOverdueAttention ? "Fällig" : nil
+        let attentionColor: Color = .red
 
         HStack {
             VStack(alignment: .leading, spacing: 4) {
-                Text(exam.title)
-                    .font(.body)
-                    .lineLimit(2)
+                HStack(spacing: 6) {
+                    Text(exam.title)
+                        .font(.body)
+                        .lineLimit(2)
+                    if let tag = attentionTag {
+                        attentionBadge(tag, color: attentionColor)
+                    }
+                }
                 if !exam.subjectName.isEmpty {
                     Text(exam.subjectName)
                         .font(.caption)
@@ -143,8 +151,6 @@ struct ExamListView: View {
                         .foregroundStyle(.red)
                 }
 
-                // Erinnerung-Hinweis nur per Icon in der Aktion, kein Text/zusätzliches Icon hier
-
                 if exam.isShared {
                     HStack(spacing: 4) {
                         Image(systemName: "person.2.fill")
@@ -158,7 +164,6 @@ struct ExamListView: View {
             }
             Spacer()
             HStack(spacing: 12) {
-                // Glocke: zeigt Status (grau = aus, grün = an) und öffnet Reminder-Editor
                 Button {
                     reminderExam = exam
                 } label: {
@@ -177,14 +182,16 @@ struct ExamListView: View {
                     }
                 }
 
-                Button {
-                    examForNewGrade = exam
-                } label: {
-                    Image(systemName: "text.badge.plus")
-                        .font(.system(size: 16, weight: .regular))
+                if !exam.isCompleted {
+                    Button {
+                        examForNewGrade = exam
+                    } label: {
+                        Image(systemName: "text.badge.plus")
+                            .font(.system(size: 16, weight: .regular))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Note hinzufügen")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Note hinzufügen")
 
                 Button {
                     editingExam = exam
@@ -196,6 +203,7 @@ struct ExamListView: View {
                 .accessibilityLabel("Klausur bearbeiten")
             }
         }
+        .padding(.vertical, 6)
         .contentShape(Rectangle())
         .onTapGesture {
             detailExam = exam
@@ -215,6 +223,16 @@ struct ExamListView: View {
         formatter.timeStyle = .none
         let dateString = formatter.string(from: exam.date)
         return "Geschrieben am \(dateString)"
+    }
+
+    private func attentionBadge(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(color.opacity(0.12))
+            .foregroundStyle(color)
+            .clipShape(Capsule())
     }
 
     private func markCompleted(_ exam: Exam) async {
@@ -299,9 +317,7 @@ private struct ExamDetailSheet: View {
                 }
 
                 Section("Details") {
-                    if let w = exam.weight {
-                        Text("Gewichtung: \(w)")
-                    }
+                    Text("Art: \(weightLabel)")
                     Text(exam.requiresGrade == false ? "Note nicht erforderlich" : "Note erforderlich")
                         .foregroundStyle(.secondary)
                     if let reminder = exam.reminderAt {
@@ -328,5 +344,13 @@ private struct ExamDetailSheet: View {
         fmt.dateStyle = .medium
         fmt.timeStyle = .short
         return fmt.string(from: date)
+    }
+
+    private var weightLabel: String {
+        switch exam.weight {
+        case 2: return "Schulaufgabe"
+        case 1: return "Kurzarbeit"
+        default: return "Mündlich / EX"
+        }
     }
 }

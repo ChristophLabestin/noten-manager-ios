@@ -16,6 +16,21 @@ enum SchoolYearService {
         return "\(startYear)-\(endSuffix)"
     }
 
+    static func nextSchoolYearId(from currentId: String?) -> String {
+        guard
+            let id = currentId?.trimmingCharacters(in: .whitespacesAndNewlines),
+            id.count >= 7,
+            let start = Int(id.prefix(4))
+        else {
+            let current = currentSchoolYearId()
+            return nextSchoolYearId(from: current)
+        }
+        let nextStart = start + 1
+        let endYear = nextStart + 1
+        let endSuffix = String(format: "%02d", endYear % 100)
+        return "\(nextStart)-\(endSuffix)"
+    }
+
     static func ensureActiveSchoolYear(
         uid: String,
         userData: [String: Any]? = nil,
@@ -110,6 +125,7 @@ enum SchoolYearService {
 
         let simpleCollections = [
             "fachreferat",
+            "practicalPerformance",
             "homeworks",
             "exams",
             "examGroupReminders",
@@ -148,11 +164,21 @@ enum SchoolYearService {
     }
 }
 
+struct SchoolYearSnapshot {
+    let id: String
+    let gradeYear: Int?
+    let schoolType: SchoolType?
+    let subjects: [Subject]
+    let gradesBySubject: [String: [GradeWithId]]
+    let practicalPerformance: PracticalPerformance?
+}
+
 @MainActor
 final class GradesStore: ObservableObject {
     @Published var subjects: [Subject] = []
     @Published var gradesBySubject: [String: [GradeWithId]] = [:] // Key = subjectId (name)
     @Published var fachreferat: Fachreferat?
+    @Published var practicalPerformance: PracticalPerformance?
     @Published var homeworks: [Homework] = []
     @Published var exams: [Exam] = []            // Eigene Prüfungen
     @Published var sharedExams: [Exam] = []      // Prüfungen aus gemeinsamer Gruppe
@@ -167,6 +193,7 @@ final class GradesStore: ObservableObject {
     @Published var groupSubjectMappings: [String: [String: String]] = [:] // gid -> subjectKey -> local name
     @Published var groupExamsByGroup: [String: [Exam]] = [:]
     @Published var groupHomeworksByGroup: [String: [Homework]] = [:]
+    private var schoolYearSnapshotCache: [String: SchoolYearSnapshot] = [:]
 
     @Published var schoolYears: [String] = []
 
@@ -207,7 +234,8 @@ final class GradesStore: ObservableObject {
         default: return nil
         }
     }
-    @Published var gradeYear: Int? = nil // 12 oder 13
+    @Published var gradeYear: Int? = nil // 11, 12 oder 13
+    @Published var schoolType: SchoolType = .bos
     @Published var activeSchoolYearId: String? = nil // z. B. "2025-26"
     @Published var onboardingRequired: Bool = false
 
@@ -225,6 +253,7 @@ final class GradesStore: ObservableObject {
     private var schoolYearListenerId: String?
     private var subjectsListener: ListenerRegistration?
     private var fachreferatListener: ListenerRegistration?
+    private var practicalPerformanceListener: ListenerRegistration?
     private var homeworksListener: ListenerRegistration?
     private var examsListener: ListenerRegistration?
     private var sharedExamsListener: ListenerRegistration?
@@ -318,6 +347,8 @@ final class GradesStore: ObservableObject {
         subjectsListener = nil
         fachreferatListener?.remove()
         fachreferatListener = nil
+        practicalPerformanceListener?.remove()
+        practicalPerformanceListener = nil
         homeworksListener?.remove()
         homeworksListener = nil
         examsListener?.remove()
@@ -384,6 +415,7 @@ final class GradesStore: ObservableObject {
         subjectSortMode = .name
         subjectSortOrder = []
         gradeYear = nil
+        schoolType = .bos
         onboardingRequired = false
         homeworkReminderHour = 19
         homeworkReminderMinute = 0
@@ -396,6 +428,7 @@ final class GradesStore: ObservableObject {
         groupSubjectMappings = [:]
         groupExamsByGroup = [:]
         groupHomeworksByGroup = [:]
+        practicalPerformance = nil
         activeSchoolYearId = nil
         schoolYears = []
 
@@ -417,6 +450,8 @@ final class GradesStore: ObservableObject {
         subjectsListener = nil
         fachreferatListener?.remove()
         fachreferatListener = nil
+        practicalPerformanceListener?.remove()
+        practicalPerformanceListener = nil
         homeworksListener?.remove()
         homeworksListener = nil
         examsListener?.remove()
@@ -445,6 +480,7 @@ final class GradesStore: ObservableObject {
         subjects = []
         gradesBySubject = [:]
         fachreferat = nil
+        practicalPerformance = nil
         homeworks = []
         exams = []
         sharedExams = []
@@ -456,6 +492,7 @@ final class GradesStore: ObservableObject {
         legacySharedExams = []
         legacySharedHomeworks = []
         hasBootstrappedYearData = false
+        schoolType = .bos
 
         // Reset group subjects and mappings
         examGroupSubjectsListener?.remove()
@@ -487,6 +524,7 @@ final class GradesStore: ObservableObject {
         homeworkGroupIds = []
         examGroupName = nil
         homeworkGroupName = nil
+        schoolYearSnapshotCache = [:]
     }
 
     private func schoolYearRef(uid: String, id: String) -> DocumentReference {
@@ -513,6 +551,15 @@ final class GradesStore: ObservableObject {
         }
         let context = try await ensureYearContext(uid: uid)
         return context.ref
+    }
+
+    private func previousSchoolYearId(from id: String?) -> String? {
+        guard let id = id?.trimmingCharacters(in: .whitespacesAndNewlines), id.count >= 7 else { return nil }
+        guard let startYear = Int(id.prefix(4)) else { return nil }
+        let previousStart = startYear - 1
+        let previousEnd = startYear
+        let endSuffix = String(format: "%02d", previousEnd % 100)
+        return "\(previousStart)-\(endSuffix)"
     }
 
     private func startSchoolYearsListener(uid: String) {
@@ -549,6 +596,9 @@ final class GradesStore: ObservableObject {
             await ensureSecondaryListeners(uid: uid, userData: latestUserData)
             await MainActor.run {
                 finishInitialLoadingIfNeeded()
+                isLoading = false
+                progress = 100
+                loadingLabel = "Fertig"
             }
         } catch {
             // optional loggen
@@ -567,7 +617,8 @@ final class GradesStore: ObservableObject {
             }
             try await yearRef.setData([
                 "name": id,
-                "createdAt": Date()
+                "createdAt": Date(),
+                "schoolType": schoolType.rawValue
             ], merge: true)
             try await db.collection("users").document(uid).setData([
                 "activeSchoolYearId": id
@@ -614,6 +665,7 @@ final class GradesStore: ObservableObject {
             "homeworks",
             "exams",
             "fachreferat",
+            "practicalPerformance",
             "examGroupReminders",
             "homeworkGroupReminders",
             "examGroupCompleted",
@@ -794,6 +846,28 @@ final class GradesStore: ObservableObject {
                             // Ohne Key können wir nicht entschlüsseln; als „nicht vorhanden“ behandeln
                             self.fachreferat = nil
                         }
+                        self.finishInitialLoadingIfNeeded()
+                    }
+                }
+        }
+
+        // Praktikums-Jahresleistung (11. Klasse FOS)
+        if practicalPerformanceListener == nil {
+            practicalPerformanceListener = yearRef.collection("practicalPerformance").document("current")
+                .addSnapshotListener { [weak self] snapshot, _ in
+                    Task { @MainActor in
+                        guard let self else { return }
+                        guard let snap = snapshot, snap.exists, let data = snap.data() else {
+                            self.practicalPerformance = nil
+                            self.finishInitialLoadingIfNeeded()
+                            return
+                        }
+                        guard let key = self.encryptionKey else {
+                            self.practicalPerformance = nil
+                            self.finishInitialLoadingIfNeeded()
+                            return
+                        }
+                        self.practicalPerformance = self.decodePracticalPerformance(data: data, key: key)
                         self.finishInitialLoadingIfNeeded()
                     }
                 }
@@ -1454,6 +1528,13 @@ final class GradesStore: ObservableObject {
     // MARK: - User-Settings + Key
 
     private func applyUserSettings(from data: [String: Any]) {
+        if let incomingActive = (data["activeSchoolYearId"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !incomingActive.isEmpty,
+           incomingActive != activeSchoolYearId {
+            resetSchoolYearScopedData()
+            activeSchoolYearId = incomingActive
+        }
+
         compactView = (data["compactView"] as? Bool) ?? compactView
         animationsEnabled = (data["animationsEnabled"] as? Bool) ?? animationsEnabled
 
@@ -1480,17 +1561,6 @@ final class GradesStore: ObservableObject {
         darkMode = effectiveDarkMode(for: darkModeMode)
         // gradeYear wird pro Schuljahr verwaltet (siehe applySchoolYearSettings)
 
-        if let modeStr = data["subjectSortMode"] as? String,
-           let mode = SubjectSortMode(rawValue: modeStr) {
-            subjectSortMode = mode
-        } else {
-            subjectSortMode = .name
-        }
-        if let order = data["subjectSortOrder"] as? [String] {
-            subjectSortOrder = order
-        } else {
-            subjectSortOrder = []
-        }
         if let onboardingDone = data["onboardingCompleted"] as? Bool {
             onboardingRequired = !onboardingDone
         } else {
@@ -1501,6 +1571,12 @@ final class GradesStore: ObservableObject {
             reminderHour: homeworkReminderHour,
             reminderMinute: homeworkReminderMinute
         )
+
+        // Preload potentielles Vorjahres-Snapshot im Hintergrund (z. B. FOS 11 -> 12)
+        Task { [weak self] in
+            guard let self, let sid = self.activeSchoolYearId else { return }
+            await self.preloadPreviousYearSnapshotIfNeeded(currentYearId: sid)
+        }
     }
 
     private func applySchoolYearSettings(from data: [String: Any], uid: String, fallbackUserData: [String: Any]? = nil) {
@@ -1562,12 +1638,32 @@ final class GradesStore: ObservableObject {
         examGroupIds = unionIds
         homeworkGroupIds = unionIds
 
-        if let gy = data["gradeYear"] as? Int, (gy == 12 || gy == 13) {
+        if let gy = data["gradeYear"] as? Int, (11...13).contains(gy) {
             gradeYear = gy
-        } else if let gy = fallback["gradeYear"] as? Int, (gy == 12 || gy == 13) {
+        } else if let gy = fallback["gradeYear"] as? Int, (11...13).contains(gy) {
             gradeYear = gy
         } else {
             gradeYear = nil
+        }
+
+        if let stRaw = data["schoolType"] as? String, let st = SchoolType(rawValue: stRaw) {
+            schoolType = st
+        } else if let stRaw = fallback["schoolType"] as? String, let st = SchoolType(rawValue: stRaw) {
+            schoolType = st
+        } else {
+            schoolType = .bos
+        }
+
+        if let modeStr = data["subjectSortMode"] as? String,
+           let mode = SubjectSortMode(rawValue: modeStr) {
+            subjectSortMode = mode
+        } else {
+            subjectSortMode = .name
+        }
+        if let order = data["subjectSortOrder"] as? [String] {
+            subjectSortOrder = order
+        } else {
+            subjectSortOrder = []
         }
 
         updateGroupObservers(uid: uid, schoolYearId: activeSchoolYearId)
@@ -1790,13 +1886,15 @@ final class GradesStore: ObservableObject {
 
         let code = generateExamGroupCode()
         let yearRef = try await requireYearRef(uid: uid)
+        let activeYearId = activeSchoolYearId
 
         // Gruppe anlegen
         let groupRef = db.collection("groups").document(code)
         try await groupRef.setData([
             "ownerId": uid,
             "createdAt": Date(),
-            "name": name as Any
+            "name": name as Any,
+            "schoolYearId": activeYearId as Any
         ], merge: true)
 
         try await yearRef.setData([
@@ -1862,8 +1960,14 @@ final class GradesStore: ObservableObject {
         if !snap.exists {
             try await groupRef.setData([
                 "ownerId": uid,
-                "createdAt": Date()
+                "createdAt": Date(),
+                "schoolYearId": activeSchoolYearId as Any
             ])
+        } else if let groupYear = snap.data()?["schoolYearId"] as? String,
+                  let currentYear = activeSchoolYearId,
+                  !groupYear.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  groupYear != currentYear {
+            throw NSError(domain: "GradesStore", code: -4, userInfo: [NSLocalizedDescriptionKey: "Diese Gruppe gehört zum Schuljahr \(groupYear) und kann nicht in \(currentYear) beigetreten werden."])
         }
 
         // User-Dokument aktualisieren (beide Arrays + aktive IDs)
@@ -1903,6 +2007,12 @@ final class GradesStore: ObservableObject {
         let snap = try await groupRef.getDocument()
         guard snap.exists else {
             throw NSError(domain: "GradesStore", code: -3, userInfo: [NSLocalizedDescriptionKey: "Diese Gruppe existiert nicht."])
+        }
+        if let groupYear = snap.data()?["schoolYearId"] as? String,
+           let currentYear = activeSchoolYearId,
+           !groupYear.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           groupYear != currentYear {
+            throw NSError(domain: "GradesStore", code: -4, userInfo: [NSLocalizedDescriptionKey: "Diese Gruppe gehört zum Schuljahr \(groupYear) und kann nicht in \(currentYear) beigetreten werden."])
         }
 
         try await yearRef.setData([
@@ -2192,6 +2302,217 @@ final class GradesStore: ObservableObject {
             }
         }
 
+        return imported
+    }
+
+    func loadSchoolYearSnapshot(schoolYearId: String) async -> SchoolYearSnapshot? {
+        guard let uid = Auth.auth().currentUser?.uid else { return nil }
+        guard let key = encryptionKey else { return nil }
+
+        if let cached = schoolYearSnapshotCache[schoolYearId] {
+            return cached
+        }
+
+        let yearRef = schoolYearRef(uid: uid, id: schoolYearId)
+        do {
+            let yearDoc = try await yearRef.getDocument()
+            let yearData = yearDoc.data() ?? [:]
+            let gradeYear = yearData["gradeYear"] as? Int
+            let schoolTypeRaw = yearData["schoolType"] as? String
+            let schoolType = schoolTypeRaw.flatMap { SchoolType(rawValue: $0) }
+
+            let subjectsSnap = try await yearRef.collection("subjects").getDocuments()
+            var subjects: [Subject] = []
+            var gradesBySubject: [String: [GradeWithId]] = [:]
+            subjects.reserveCapacity(subjectsSnap.documents.count)
+
+            for sdoc in subjectsSnap.documents {
+                let data = sdoc.data()
+                let name = sdoc.documentID
+                let type = data["type"] as? Int ?? 0
+                let ts = data["date"] as? Timestamp
+                let date = ts?.dateValue() ?? Date()
+                let order = data["order"] as? Int
+                let teacher = data["teacher"] as? String
+                let room = data["room"] as? String
+                let email = data["email"] as? String
+                let alias = data["alias"] as? String
+                let dropped = data["droppedHalfYear"] as? Int
+                let examSubject = data["examSubject"] as? Bool
+                let examTypeStr = data["examType"] as? String
+                let examType = examTypeStr.flatMap { ExamType(rawValue: $0) }
+                let examPointsEncrypted = data["examPointsEncrypted"] as? String
+                let writtenExamPointsEncrypted = data["writtenExamPointsEncrypted"] as? String
+                let oralExamPointsEncrypted = data["oralExamPointsEncrypted"] as? String
+                let isElective = data["isElective"] as? Bool ?? false
+
+                let subject = Subject(
+                    name: name,
+                    type: type,
+                    date: date,
+                    order: order,
+                    teacher: teacher,
+                    room: room,
+                    email: email,
+                    alias: alias,
+                    droppedHalfYear: dropped,
+                    examSubject: examSubject,
+                    examType: examType,
+                    examPointsEncrypted: examPointsEncrypted,
+                    writtenExamPointsEncrypted: writtenExamPointsEncrypted,
+                    oralExamPointsEncrypted: oralExamPointsEncrypted,
+                    isElective: isElective
+                )
+                subjects.append(subject)
+
+                let gradesSnap = try await sdoc.reference.collection("grades").getDocuments()
+                var grades: [GradeWithId] = []
+                grades.reserveCapacity(gradesSnap.documents.count)
+                for gdoc in gradesSnap.documents {
+                    let gd = gdoc.data()
+                    guard let gradeStr = gd["grade"] as? String else { continue }
+                    guard let decrypted = try? CryptoService.decryptString(gradeStr, key: key),
+                          let value = Double(decrypted),
+                          value.isFinite else { continue }
+                    let weight = (gd["weight"] as? NSNumber)?.doubleValue ?? 1.0
+                    let ts = gd["date"] as? Timestamp
+                    let date = ts?.dateValue() ?? Date()
+                    let note = gd["note"] as? String
+                    let halfYear = gd["halfYear"] as? Int
+                    grades.append(
+                        GradeWithId(
+                            id: gdoc.documentID,
+                            grade: value,
+                            weight: weight,
+                            date: date,
+                            note: note,
+                            halfYear: halfYear
+                        )
+                    )
+                }
+                gradesBySubject[name] = grades
+            }
+
+            var practical: PracticalPerformance? = nil
+            do {
+                let snap = try await yearRef.collection("practicalPerformance").document("current").getDocument()
+                if snap.exists, let data = snap.data() {
+                    practical = decodePracticalPerformance(data: data, key: key)
+                }
+            } catch {
+                // optional loggen
+            }
+
+            let snapshot = SchoolYearSnapshot(
+                id: schoolYearId,
+                gradeYear: gradeYear,
+                schoolType: schoolType,
+                subjects: subjects,
+                gradesBySubject: gradesBySubject,
+                practicalPerformance: practical
+            )
+            schoolYearSnapshotCache[schoolYearId] = snapshot
+            return snapshot
+        } catch {
+            return nil
+        }
+    }
+
+    func cachedSchoolYearSnapshot(for id: String) -> SchoolYearSnapshot? {
+        schoolYearSnapshotCache[id]
+    }
+
+    private func preloadPreviousYearSnapshotIfNeeded(currentYearId: String) async {
+        guard let key = encryptionKey else { return }
+        guard let prevId = previousSchoolYearId(from: currentYearId) else { return }
+        guard schoolYearSnapshotCache[prevId] == nil else { return }
+        // Nur für FOS 12 relevant (kann per Settings später gesetzt werden)
+        if schoolType == .fos, gradeYear == 12 {
+            _ = await loadSchoolYearSnapshot(schoolYearId: prevId)
+        }
+    }
+
+    func loadSubjectsFromSchoolYear(_ sourceYearId: String) async -> [Subject] {
+        guard let uid = Auth.auth().currentUser?.uid else { return [] }
+        let sourceRef = db.collection("users").document(uid).collection("schoolYears").document(sourceYearId)
+        do {
+            let snap = try await sourceRef.collection("subjects").getDocuments()
+            return snap.documents.compactMap { doc in
+                let data = doc.data()
+                let name = doc.documentID
+                let type = data["type"] as? Int ?? 0
+                let ts = data["date"] as? Timestamp
+                let date = ts?.dateValue() ?? Date()
+                let order = data["order"] as? Int
+                let teacher = data["teacher"] as? String
+                let room = data["room"] as? String
+                let email = data["email"] as? String
+                let alias = data["alias"] as? String
+                let dropped = data["droppedHalfYear"] as? Int
+                let examSubject = data["examSubject"] as? Bool
+                let examTypeStr = data["examType"] as? String
+                let examType = examTypeStr.flatMap { ExamType(rawValue: $0) }
+                let isElective = data["isElective"] as? Bool ?? false
+                return Subject(
+                    name: name,
+                    type: type,
+                    date: date,
+                    order: order,
+                    teacher: teacher,
+                    room: room,
+                    email: email,
+                    alias: alias,
+                    droppedHalfYear: dropped,
+                    examSubject: examSubject,
+                    examType: examType,
+                    examPointsEncrypted: nil,
+                    writtenExamPointsEncrypted: nil,
+                    oralExamPointsEncrypted: nil,
+                    isElective: isElective
+                )
+            }
+        } catch {
+            return []
+        }
+    }
+
+    func importSubjectsFromSchoolYear(_ sourceYearId: String, subjectNames: [String]) async -> Int {
+        guard let uid = Auth.auth().currentUser?.uid else { return 0 }
+        guard let yearRef = try? await requireYearRef(uid: uid) else { return 0 }
+        guard !subjectNames.isEmpty else { return 0 }
+
+        let sourceSubjects = await loadSubjectsFromSchoolYear(sourceYearId)
+        let map = Dictionary(uniqueKeysWithValues: sourceSubjects.map { ($0.name, $0) })
+        var imported = 0
+        let now = Date()
+        var existing = Set(subjects.map { $0.name })
+
+        for name in subjectNames {
+            guard let subj = map[name] else { continue }
+            if existing.contains(subj.name) { continue }
+            var data: [String: Any] = [
+                "type": subj.type,
+                "date": subj.date,
+                "isElective": subj.isElective,
+                "teacher": subj.teacher as Any,
+                "room": subj.room as Any,
+                "email": subj.email as Any,
+                "alias": subj.alias as Any,
+                "order": subj.order as Any,
+                "examSubject": subj.examSubject as Any,
+                "examType": subj.examType?.rawValue as Any
+            ]
+            data["date"] = data["date"] ?? now
+            data["droppedHalfYear"] = nil
+
+            do {
+                try await yearRef.collection("subjects").document(subj.name).setData(data, merge: true)
+                imported += 1
+                existing.insert(subj.name)
+            } catch {
+                continue
+            }
+        }
         return imported
     }
 
@@ -2581,6 +2902,209 @@ final class GradesStore: ObservableObject {
         fachreferat = Fachreferat(id: "current", grade: grade, subjectName: subjectName, date: date, note: note)
     }
 
+    func upsertPracticalGrade(id: String? = nil,
+                              grade: Double,
+                              halfYear: Int?,
+                              note: String?,
+                              company: String?,
+                              using key: SymmetricKey) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else { throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"]) }
+        let yearRef = try await requireYearRef(uid: uid)
+        let docRef = yearRef.collection("practicalPerformance").document("current")
+
+        var grades = practicalPerformance?.grades ?? []
+        let normalizedHalfYear: Int? = {
+            guard let hy = halfYear else { return nil }
+            if hy == 1 || hy == 2 { return hy }
+            return nil
+        }()
+        let entryId = id ?? UUID().uuidString
+        let existingDate = grades.first(where: { $0.id == entryId })?.date ?? Date()
+        let newEntry = PracticalGradeEntry(
+            id: entryId,
+            grade: grade,
+            company: company,
+            note: note,
+            halfYear: normalizedHalfYear,
+            date: existingDate
+        )
+
+        if let idx = grades.firstIndex(where: { $0.id == entryId }) {
+            grades[idx] = newEntry
+        } else if let h = normalizedHalfYear, let idx = grades.firstIndex(where: { $0.halfYear == h }) {
+            grades[idx] = newEntry
+        } else {
+            grades.append(newEntry)
+        }
+
+        grades = practicalGradesLimited(sortedPracticalGrades(grades))
+        try await persistPracticalGrades(grades, using: key, docRef: docRef)
+    }
+
+    func deletePracticalGrade(id: String, using key: SymmetricKey) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else { throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"]) }
+        let yearRef = try await requireYearRef(uid: uid)
+        let docRef = yearRef.collection("practicalPerformance").document("current")
+
+        let current = practicalPerformance?.grades ?? []
+        let updated = current.filter { $0.id != id }
+        if updated.isEmpty {
+            try await deletePracticalPerformance()
+            return
+        }
+        try await persistPracticalGrades(updated, using: key, docRef: docRef)
+    }
+
+    func deletePracticalPerformance() async throws {
+        guard let uid = Auth.auth().currentUser?.uid else { throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"]) }
+        let yearRef = try await requireYearRef(uid: uid)
+        let docRef = yearRef.collection("practicalPerformance").document("current")
+        try await docRef.delete()
+        practicalPerformance = nil
+    }
+
+    private func persistPracticalGrades(_ grades: [PracticalGradeEntry], using key: SymmetricKey, docRef: DocumentReference? = nil) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else { throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"]) }
+        let yearRef = try await requireYearRef(uid: uid)
+        let targetDoc = docRef ?? yearRef.collection("practicalPerformance").document("current")
+
+        let sorted = sortedPracticalGrades(grades)
+        let encodedGrades: [[String: Any]] = try sorted.map { entry in
+            let encrypted = try CryptoService.encryptString(String(entry.grade), key: key)
+            return [
+                "id": entry.id,
+                "grade": encrypted,
+                "company": entry.company as Any,
+                "note": entry.note as Any,
+                "halfYear": entry.halfYear as Any,
+                "date": entry.date
+            ]
+        }
+
+        var payload: [String: Any] = [
+            "grades": encodedGrades
+        ]
+
+        if let first = sorted.first {
+            payload["gradeOne"] = try CryptoService.encryptString(String(first.grade), key: key)
+            payload["noteOne"] = first.note as Any
+            payload["companyOne"] = first.company as Any
+        } else {
+            payload["gradeOne"] = FieldValue.delete()
+            payload["noteOne"] = FieldValue.delete()
+            payload["companyOne"] = FieldValue.delete()
+        }
+
+        if sorted.count > 1 {
+            let second = sorted[1]
+            payload["gradeTwo"] = try CryptoService.encryptString(String(second.grade), key: key)
+            payload["noteTwo"] = second.note as Any
+            payload["companyTwo"] = second.company as Any
+        } else {
+            payload["gradeTwo"] = FieldValue.delete()
+            payload["noteTwo"] = FieldValue.delete()
+            payload["companyTwo"] = FieldValue.delete()
+        }
+
+        try await targetDoc.setData(payload, merge: true)
+        practicalPerformance = PracticalPerformance(id: "current", grades: sorted)
+    }
+
+    private func sortedPracticalGrades(_ grades: [PracticalGradeEntry]) -> [PracticalGradeEntry] {
+        grades.sorted { lhs, rhs in
+            if let lh = lhs.halfYear, let rh = rhs.halfYear, lh != rh {
+                return lh < rh
+            }
+            if let lh = lhs.halfYear, rhs.halfYear == nil { return true }
+            if lhs.halfYear == nil, let rh = rhs.halfYear { return false }
+            return lhs.date < rhs.date
+        }
+    }
+
+    private func practicalGradesLimited(_ grades: [PracticalGradeEntry]) -> [PracticalGradeEntry] {
+        var result: [PracticalGradeEntry] = []
+        for entry in grades {
+            if let h = entry.halfYear, let idx = result.firstIndex(where: { $0.halfYear == h }) {
+                result[idx] = entry
+            } else {
+                result.append(entry)
+            }
+        }
+        if result.count <= 2 { return result }
+        return Array(result.prefix(2))
+    }
+
+    private func decodePracticalPerformance(data: [String: Any], key: SymmetricKey) -> PracticalPerformance? {
+        if let gradesPayload = data["grades"] as? [[String: Any]] ?? (data["grades"] as? [Any])?.compactMap({ $0 as? [String: Any] }) {
+            var entries: [PracticalGradeEntry] = []
+            for raw in gradesPayload {
+                guard let encryptedGrade = raw["grade"] as? String else { continue }
+                guard let decrypted = try? CryptoService.decryptString(encryptedGrade, key: key),
+                      let value = Double(decrypted),
+                      value.isFinite else { continue }
+                let id = raw["id"] as? String ?? UUID().uuidString
+                let note = raw["note"] as? String
+                let company = raw["company"] as? String
+                let halfYear = raw["halfYear"] as? Int
+                let ts = raw["date"] as? Timestamp
+                let date = ts?.dateValue() ?? Date()
+                entries.append(
+                    PracticalGradeEntry(
+                        id: id,
+                        grade: value,
+                        company: company,
+                        note: note,
+                        halfYear: halfYear,
+                        date: date
+                    )
+                )
+            }
+            if !entries.isEmpty {
+                return PracticalPerformance(id: "current", grades: sortedPracticalGrades(entries))
+            }
+        }
+
+        let gradeOneStr = data["gradeOne"] as? String ?? data["grade"] as? String
+        let gradeTwoStr = data["gradeTwo"] as? String
+        do {
+            let g1 = try gradeOneStr.flatMap { try CryptoService.decryptString($0, key: key) }.flatMap { Double($0) }
+            let g2 = try gradeTwoStr.flatMap { try CryptoService.decryptString($0, key: key) }.flatMap { Double($0) }
+            var entries: [PracticalGradeEntry] = []
+            if let g1, g1.isFinite {
+                entries.append(
+                    PracticalGradeEntry(
+                        id: "legacy-1",
+                        grade: g1,
+                        company: data["companyOne"] as? String ?? data["company"] as? String,
+                        note: data["noteOne"] as? String ?? data["note"] as? String,
+                        halfYear: 1,
+                        date: Date()
+                    )
+                )
+            }
+            if let g2, g2.isFinite {
+                entries.append(
+                    PracticalGradeEntry(
+                        id: "legacy-2",
+                        grade: g2,
+                        company: data["companyTwo"] as? String ?? data["companyOne"] as? String ?? data["company"] as? String,
+                        note: data["noteTwo"] as? String,
+                        halfYear: 2,
+                        date: Date()
+                    )
+                )
+            }
+
+            if !entries.isEmpty {
+                return PracticalPerformance(id: "current", grades: sortedPracticalGrades(entries))
+            }
+        } catch {
+            return nil
+        }
+
+        return nil
+    }
+
     // MARK: - Update/Delete Grades
 
     func updateGradeInFirestore(subjectId: String, gradeId: String, grade: Double, weight: Double, date: Date, note: String?, halfYear: Int?, using key: SymmetricKey) async throws {
@@ -2652,8 +3176,9 @@ final class GradesStore: ObservableObject {
         subjectSortMode = mode
         subjectSortOrder = order
         guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let yearRef = try? await requireYearRef(uid: uid) else { return }
         do {
-            try await db.collection("users").document(uid).updateData([
+            try await yearRef.updateData([
                 "subjectSortMode": mode.rawValue,
                 "subjectSortOrder": order
             ])
@@ -2775,6 +3300,19 @@ final class GradesStore: ObservableObject {
         }
     }
 
+    func updateSchoolType(_ type: SchoolType) async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let yearRef = try? await requireYearRef(uid: uid) else { return }
+        self.schoolType = type
+        do {
+            try await yearRef.updateData([
+                "schoolType": type.rawValue
+            ])
+        } catch {
+            // optional loggen
+        }
+    }
+
     func markOnboardingCompletedIfPossible() async {
         guard !subjects.isEmpty else { return }
         guard let uid = Auth.auth().currentUser?.uid else { return }
@@ -2853,10 +3391,16 @@ final class GradesStore: ObservableObject {
         }
     }
 
-    func updateDroppedHalfYear(subjectName: String, value: Int?) async {
+    func updateDroppedHalfYear(subjectName: String, value: Int?, inSchoolYear schoolYearId: String? = nil) async {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         do {
-            let yearRef = try await requireYearRef(uid: uid)
+            let yearRef: DocumentReference
+            if let sid = schoolYearId {
+                yearRef = schoolYearRef(uid: uid, id: sid)
+            } else {
+                yearRef = try await requireYearRef(uid: uid)
+            }
+
             try await yearRef
                 .collection("subjects")
                 .document(subjectName)
@@ -2864,26 +3408,28 @@ final class GradesStore: ObservableObject {
                     "droppedHalfYear": value as Any
                 ])
 
-            // Optimistisch lokal (Listener setzt danach korrekt)
-            subjects = subjects.map { s in
-                if s.name == subjectName {
-                    return Subject(name: s.name,
-                                   type: s.type,
-                                   date: s.date,
-                                   order: s.order,
-                                   teacher: s.teacher,
-                                   room: s.room,
-                                   email: s.email,
-                                   alias: s.alias,
-                                   droppedHalfYear: value,
-                                   examSubject: s.examSubject,
-                                   examType: s.examType,
-                                   examPointsEncrypted: s.examPointsEncrypted,
-                                   writtenExamPointsEncrypted: s.writtenExamPointsEncrypted,
-                                   oralExamPointsEncrypted: s.oralExamPointsEncrypted,
-                                   isElective: s.isElective)
+            // Optimistisch lokal nur für das aktive Schuljahr (Listener setzt danach korrekt)
+            if schoolYearId == nil {
+                subjects = subjects.map { s in
+                    if s.name == subjectName {
+                        return Subject(name: s.name,
+                                       type: s.type,
+                                       date: s.date,
+                                       order: s.order,
+                                       teacher: s.teacher,
+                                       room: s.room,
+                                       email: s.email,
+                                       alias: s.alias,
+                                       droppedHalfYear: value,
+                                       examSubject: s.examSubject,
+                                       examType: s.examType,
+                                       examPointsEncrypted: s.examPointsEncrypted,
+                                       writtenExamPointsEncrypted: s.writtenExamPointsEncrypted,
+                                       oralExamPointsEncrypted: s.oralExamPointsEncrypted,
+                                       isElective: s.isElective)
+                    }
+                    return s
                 }
-                return s
             }
         } catch {
             // optional loggen

@@ -14,5 +14,18 @@ extension View {
             including: .subviews // block as little as possible so List/Navigation gestures still work
         )
     }
+
+    /// Shows an "X" button above the keyboard to dismiss it.
+    func keyboardDismissToolbar() -> some View {
+        self.toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Fertig") {
+                    hideKeyboard()
+                }
+                .font(.body.weight(.semibold))
+            }
+        }
+    }
 }
 #endif

@@ -7,6 +7,18 @@ enum ExamType: String, Codable {
     case presentation
 }
 
+enum SchoolType: String, Codable, CaseIterable {
+    case fos
+    case bos
+
+    var displayName: String {
+        switch self {
+        case .fos: return "FOS (Fachabitur 11/12)"
+        case .bos: return "BOS (Abitur 12/13)"
+        }
+    }
+}
+
 struct Subject: Codable, Identifiable, Hashable {
     // In Firestore ist die documentID der Name; wir spiegeln das
     var id: String { name }
@@ -97,6 +109,20 @@ struct Fachreferat: Codable, Identifiable {
     let subjectName: String
     let date: Date
     let note: String?
+}
+
+struct PracticalGradeEntry: Codable, Identifiable, Equatable {
+    let id: String
+    let grade: Double
+    let company: String?
+    let note: String?
+    let halfYear: Int?
+    let date: Date
+}
+
+struct PracticalPerformance: Codable, Identifiable, Equatable {
+    let id: String
+    let grades: [PracticalGradeEntry]
 }
 
 enum SubjectSortMode: String, Codable, CaseIterable {

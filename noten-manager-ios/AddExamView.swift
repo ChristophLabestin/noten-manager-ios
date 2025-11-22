@@ -16,7 +16,6 @@ struct AddExamView: View {
     @State private var isSaving: Bool = false
     @State private var error: String?
     @State private var shareWithGroup: Bool = false
-    @State private var requiresGrade: Bool = true
 
     private var subjects: [Subject] {
         store.subjects.filter { $0.name != "Fachreferat" }
@@ -45,9 +44,17 @@ struct AddExamView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    TextField("Titel / Bezeichnung", text: $title)
-                        .textInputAutocapitalization(.sentences)
-                        .textFieldStyle(.roundedBorder)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Titel / Bezeichnung")
+                            .font(.subheadline.weight(.semibold))
+                        TextField("z. B. Kurzarbeit Mathematik", text: $title)
+                            .textInputAutocapitalization(.sentences)
+                            .submitLabel(.done)
+                            .onSubmit { hideKeyboard() }
+                            .padding(10)
+                            .background(Color(.secondarySystemBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Notizen (optional)")
@@ -88,8 +95,6 @@ struct AddExamView: View {
                         Toggle("Mit Gruppen teilen", isOn: $shareWithGroup)
                     }
 
-                    Toggle("Note verknüpfen erforderlich", isOn: $requiresGrade)
-
                 }
                 if let error {
                     Text(error)
@@ -110,6 +115,8 @@ struct AddExamView: View {
                     .disabled(!canSave || isSaving || subjects.isEmpty)
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
+            .hideKeyboardOnTap()
             .onAppear {
                 if subjectName.isEmpty {
                     if let pre = preselectedSubjectName,
@@ -122,6 +129,7 @@ struct AddExamView: View {
                 shareWithGroup = !store.groupIds.isEmpty
             }
         }
+        .keyboardDismissToolbar()
     }
 
     private func save() async {
@@ -138,6 +146,7 @@ struct AddExamView: View {
             let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
             let storedNotes = trimmedNotes.isEmpty ? nil : trimmedNotes
             let reminder: Date? = hasReminder ? reminderDate : nil
+            let requiresGrade = true
             if shareWithGroup {
                 let sharedIds = try await store.addExamToGroups(
                     subjectName: subjectName,

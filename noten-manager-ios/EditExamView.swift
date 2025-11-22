@@ -68,6 +68,8 @@ struct EditExamView: View {
 
                 TextField("Titel / Bezeichnung", text: $title)
                     .textInputAutocapitalization(.sentences)
+                    .submitLabel(.done)
+                    .onSubmit { hideKeyboard() }
                     .textFieldStyle(.roundedBorder)
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -133,6 +135,8 @@ struct EditExamView: View {
                     .disabled(!canSave || isSaving || subjects.isEmpty)
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
+            .hideKeyboardOnTap()
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 8) {
                     Button(role: .destructive) {
@@ -164,6 +168,7 @@ struct EditExamView: View {
                 Text("Dieser Klausurtermin wird dauerhaft gelöscht.")
             }
         }
+        .keyboardDismissToolbar()
     }
 
     private func save() async {

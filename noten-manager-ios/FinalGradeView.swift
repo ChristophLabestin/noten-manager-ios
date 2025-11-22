@@ -31,9 +31,98 @@ struct FinalGradeView: View {
     @State private var finalGradeToFixed: Int = 1
     @State private var showHomeworkSheet: Bool = false
     @State private var showExamSheet: Bool = false
+    @State private var showStatusDetails: Bool = false
+    @State private var previousYearSnapshot: SchoolYearSnapshot?
+    @State private var isLoadingPreviousYear: Bool = false
 
-    private var subjectsWithoutFachreferat: [Subject] {
-        store.subjects.filter { $0.name != "Fachreferat" && !$0.isElective }
+    private struct SubjectHandle: Identifiable, Hashable {
+        let id: String
+        let schoolYearId: String?
+        let gradeYear: Int?
+        let isCurrentYear: Bool
+        let subject: Subject
+        let grades: [GradeWithId]
+
+        init(schoolYearId: String?, gradeYear: Int?, isCurrentYear: Bool, subject: Subject, grades: [GradeWithId]) {
+            let yearPart = schoolYearId ?? "current"
+            self.id = "\(yearPart)::\(subject.name)"
+            self.schoolYearId = schoolYearId
+            self.gradeYear = gradeYear
+            self.isCurrentYear = isCurrentYear
+            self.subject = subject
+            self.grades = grades
+        }
+
+        var isEligible: Bool {
+            subject.name != "Fachreferat" && !subject.isElective
+        }
+
+        var yearLabel: String? {
+            gradeYear.map { "\($0)." }
+        }
+
+        static func == (lhs: SubjectHandle, rhs: SubjectHandle) -> Bool {
+            lhs.id == rhs.id
+        }
+
+        func hash(into hasher: inout Hasher) {
+            hasher.combine(id)
+        }
+    }
+
+    private var currentSchoolYearId: String? {
+        store.activeSchoolYearId
+    }
+
+    private var previousSchoolYearCandidateId: String? {
+        previousSchoolYearId(from: currentSchoolYearId)
+    }
+
+    private var canUsePreviousYearSnapshot: Bool {
+        guard schoolType == .fos else { return false }
+        guard store.gradeYear == 12 else { return false }
+        guard let candidate = previousSchoolYearCandidateId else { return false }
+        guard let snapshot = previousYearSnapshot, snapshot.id == candidate else { return false }
+        guard let prevGrade = snapshot.gradeYear, prevGrade == 11 else { return false }
+        if let prevType = snapshot.schoolType {
+            return prevType == .fos
+        }
+        return true
+    }
+
+    private var currentSubjectHandles: [SubjectHandle] {
+        store.subjects.map { subject in
+            let grades = store.gradesBySubject[subject.name] ?? []
+            return SubjectHandle(
+                schoolYearId: currentSchoolYearId,
+                gradeYear: store.gradeYear,
+                isCurrentYear: true,
+                subject: subject,
+                grades: grades
+            )
+        }
+    }
+
+    private var previousSubjectHandles: [SubjectHandle] {
+        guard canUsePreviousYearSnapshot, let snapshot = previousYearSnapshot else { return [] }
+        return snapshot.subjects.map { subject in
+            let grades = snapshot.gradesBySubject[subject.name] ?? []
+            return SubjectHandle(
+                schoolYearId: snapshot.id,
+                gradeYear: snapshot.gradeYear,
+                isCurrentYear: false,
+                subject: subject,
+                grades: grades
+            )
+        }
+    }
+
+    private var allSubjectHandles: [SubjectHandle] {
+        currentSubjectHandles + previousSubjectHandles
+    }
+
+    private var eligibleSubjectHandles: [SubjectHandle] {
+        allSubjectHandles.filter { $0.isEligible }
     }
 
     private var hasFachreferat: Bool {
@@ -42,6 +131,7 @@ struct FinalGradeView: View {
 
     private var isFeminine: Bool { store.theme == "feminine" }
     private var isDark: Bool { store.darkMode }
+    private var schoolType: SchoolType { store.schoolType }
 
     private var chipForegroundColor: Color {
         if isFeminine {
@@ -82,273 +172,90 @@ struct FinalGradeView: View {
         }
     }
 
+    private var practicalPerformanceForDisplay: PracticalPerformance? {
+        if canUsePreviousYearSnapshot, let snapshot = previousYearSnapshot, let practical = snapshot.practicalPerformance {
+            return practical
+        }
+        return store.practicalPerformance
+    }
+
+    private var practicalGrades: [PracticalGradeEntry] {
+        practicalPerformanceForDisplay?.grades ?? []
+    }
+
+    private var sortedPracticalGrades: [PracticalGradeEntry] {
+        practicalGrades.sorted { lhs, rhs in
+            if let lh = lhs.halfYear, let rh = rhs.halfYear, lh != rh {
+                return lh < rh
+            }
+            if let lh = lhs.halfYear, rhs.halfYear == nil { return true }
+            if lhs.halfYear == nil, let rh = rhs.halfYear { return false }
+            return lhs.date < rhs.date
+        }
+    }
+
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
-                if store.isLoading {
-                    VStack(spacing: 8) {
-                        ProgressView(value: store.progress, total: 100)
-                        Text(store.loadingLabel).font(.footnote)
-                    }
-                    .padding(.horizontal)
-                }
-
-                // Top-Karten: Abschlussnote + Prüfungsstatus (analog Web)
-                VStack(spacing: 12) {
-                    SummaryCard(title: "") {
-                        HStack(alignment: .center, spacing: 12) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Abschlussnote")
-                                    .font(.headline)
-                            }
-                            Spacer()
-                            let finalAvg = finalAverage
-                            let gradeShown: String = {
-                                if fobosoSummary.maxPoints > 0, let g = fobosoSummary.grade {
-                                    return String(format: "%.\(finalGradeToFixed)f", g)
-                                }
-                                return formatAverage(finalAvg)
-                            }()
-                            Text(gradeShown)
-                                .font(.title2)
-                                .fontWeight(.semibold)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(gradeColor(finalAverage).opacity(0.15))
-                                .foregroundStyle(gradeColor(finalAverage))
-                                .clipShape(Capsule())
-                                .onTapGesture { toggleFinalGradeToFixed() }
-                        }
-                    }
-
-                    if passFailStatus != .open {
-                        SummaryCard(title: "") {
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack(alignment: .center) {
-                                    Text("Prüfungsstatus")
-                                        .font(.headline)
-                                    Spacer()
-                                    Text(passFailStatus == .passed ? "Bestanden" : "Nicht bestanden")
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 6)
-                                        .background(
-                                            Capsule()
-                                                .fill(
-                                                    passFailStatus == .passed
-                                                    ? Color.green.opacity(0.2)
-                                                    : Color(hex: "#ef4444")
-                                                )
-                                        )
-                                        .foregroundStyle(passFailStatus == .passed ? .green : .white)
-                                }
-
-                                if passFailStatus == .failed {
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        if failedByHalfYearTooFew {
-                                            failureReasonRow("zu wenige Halbjahre eingebracht")
-                                        }
-                                        if failedByHalfYearTooMany {
-                                            failureReasonRow("zu viele Halbjahre eingebracht")
-                                        }
-                                        if failedByExamGrade {
-                                            failureReasonRow("benötigter Schnitt nicht erreicht")
-                                        }
-                                        if failedByFinalGrade {
-                                            failureReasonRow("benötigte Abschlussnote nicht erreicht")
-                                        }
-                                        if failedByMissingFachreferat {
-                                            failureReasonRow("Fachreferat Note nicht eingetragen")
-                                        }
-                                        if failedBySubjectPoints {
-                                            failureReasonRow("benötigte Punktzahl nicht erreicht")
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                .padding(.horizontal, 16)
-
-                // Abiturnoten-Übersicht
-                SummaryCard(title: "") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Abiturnoten")
-                            .font(.headline)
-                        if examSubjectFinals.isEmpty {
-                            Text("Trage deine Abiturnoten im Abitur-Bereich ein, um hier eine Übersicht zu sehen.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            VStack(spacing: 8) {
-                                ForEach(examSubjectFinals, id: \.subject.name) { entry in
-                                    HStack {
-                                        Text(entry.subject.name)
-                                        Spacer()
-                                        Text(formatAverage(entry.final))
-                                            .padding(.horizontal, 10)
-                                            .padding(.vertical, 6)
-                                            .background(gradeColor(entry.final).opacity(0.15))
-                                            .foregroundStyle(gradeColor(entry.final))
-                                            .clipShape(Capsule())
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                .padding(.horizontal, 16)
-
-                // Erreichte Punkte
-                if fobosoSummary.maxPoints > 0 {
-                    SummaryCard(title: "") {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Erreichte Punkte")
-                                .font(.headline)
-                            Text("\(Int(round(fobosoSummary.totalPoints))) / \(fobosoSummary.maxPoints)")
-                                .font(.title3).bold()
-                            Text("Prüfungen (zweifach): \(Int(round(fobosoSummary.examPointsDouble))) Punkte")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text("Halbjahresergebnisse: \(Int(round(fobosoSummary.halfYearPoints))) Punkte (\(halfYearSummary.count) HJE).")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            if fachreferatHalfYearSummary.count > 0 {
-                                Text("Fachreferat: \(Int(round(fachreferatHalfYearSummary.totalPoints))) Punkte (\(fachreferatHalfYearSummary.count) HJE).")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                }
-
-                // Fächer/ Halbjahre-Übersicht + Streichen
-                HStack(spacing: 12) {
-                    SummaryCard(title: "Fächer") {
-                        Text("\(subjectsWithoutFachreferat.count)")
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(chipBackgroundColor)
-                            .foregroundStyle(chipForegroundColor)
-                            .clipShape(Capsule())
-                    }
-                    SummaryCard(title: "Halbjahre") {
-                        if maxDroppedHalfYears > 0 {
-                            Text("\(selectedDropCount) / \(maxDroppedHalfYears)")
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(chipBackgroundColor)
-                                .foregroundStyle(chipForegroundColor)
-                                .clipShape(Capsule())
-                        } else {
-                            Text("\(selectedDropCount)")
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(chipBackgroundColor)
-                                .foregroundStyle(chipForegroundColor)
-                                .clipShape(Capsule())
-                        }
-                    }
-                }
-                .padding(.horizontal)
-
-                // Gestrichene Halbjahre Liste
-                SummaryCard(title: "") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Gestrichene Halbjahre")
-                            .font(.headline)
-                        Text(
-                            maxDroppedHalfYears > 0
-                            ? "Du kannst insgesamt bis zu \(maxDroppedHalfYears) Halbjahre streichen."
-                            : "Das Streichen von Halbjahren ist derzeit deaktiviert."
-                        )
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                        if droppedHalfYears.isEmpty {
-                            Text("Du hast noch kein Halbjahr gestrichen.")
-                                .foregroundStyle(.secondary)
-                                .padding(.top, 4)
-                        } else {
-                            VStack(spacing: 8) {
-                                ForEach(droppedHalfYears, id: \.subject.name) { entry in
-                                    let subjectGrades = store.gradesBySubject[entry.subject.name] ?? []
-                                    let droppedAverage = calculateHalfYearAverageForSubject(
-                                        subjectGrades,
-                                        entry.subject.type,
-                                        entry.halfYear
-                                    )
-                                    HStack {
-                                        VStack(alignment: .leading) {
-                                            Text(entry.subject.name)
-                                            Text(entry.halfYear == 1 ? "1. Halbjahr" : "2. Halbjahr")
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        Spacer()
-                                        Text(formatAverage(droppedAverage))
-                                            .padding(.horizontal, 10)
-                                            .padding(.vertical, 6)
-                                            .background(gradeColor(droppedAverage).opacity(0.15))
-                                            .foregroundStyle(gradeColor(droppedAverage))
-                                            .clipShape(Capsule())
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                .padding(.horizontal, 16)
-
-                // Fächerkarten zum Streichen
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Fächer").font(.headline)
-                    Text("Streiche die Noten des gewählten Halbjahres.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    if subjectsWithoutFachreferat.isEmpty {
-                        Text("Lege zuerst Fächer und Noten an, um deine Abschlussnote zu berechnen.")
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 8)
-                    } else {
-                        VStack(spacing: 12) {
-                            ForEach(sortedSubjects, id: \.name) { subject in
-                                subjectCard(subject)
-                            }
-                        }
-                    }
-                }
-                .padding(.horizontal)
-
-                if maxDroppedHalfYears > 0 && limitReached {
-                    Text("Du hast bereits die maximal erlaubte Anzahl an gestrichenen Halbjahren ausgewählt. Entferne zuerst eine Auswahl, um ein weiteres Halbjahr zu streichen.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal)
-                }
-
-                // Hinweis
-                Text("Hinweis: Das Streichen von Halbjahren in dieser Ansicht dient nur dir selbst als Orientierung und Merkhilfe. Es werden keine Daten an deine Schule oder andere Dritte übermittelt. Offizielle Entscheidungen über gestrichene Halbjahren musst du gegebenenfalls separat bei deiner Schule beantragen bzw. mitteilen.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal)
-                    .padding(.bottom, 16)
-            }
-            .padding(.vertical, 8)
+            contentStack
         }
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showHomeworkSheet) {
+            HomeworkListView()
+                .environmentObject(store)
+        }
+        .sheet(isPresented: $showExamSheet) {
+            ExamListView()
+                .environmentObject(store)
+        }
+        .sheet(isPresented: $showStatusDetails) {
+            statusDetailSheet
+        }
+        .onAppear {
+            syncDropSelectionsFromData()
+            recomputeMaxDroppedHalfYears()
+            Task { await loadExamPoints() }
+            Task { await loadPreviousYearSnapshotIfNeeded() }
+        }
+        .onChange(of: store.subjects) { _ in
+            syncDropSelectionsFromData()
+            recomputeMaxDroppedHalfYears()
+            Task { await loadExamPoints() }
+        }
+        .onChange(of: store.gradeYear) { _ in
+            recomputeMaxDroppedHalfYears()
+            Task { await loadPreviousYearSnapshotIfNeeded() }
+        }
+        .onChange(of: store.schoolType) { _ in
+            recomputeMaxDroppedHalfYears()
+            Task { await loadPreviousYearSnapshotIfNeeded() }
+        }
+        .onChange(of: store.schoolYears) { _ in
+            Task { await loadPreviousYearSnapshotIfNeeded() }
+        }
+        .onChange(of: store.activeSchoolYearId) { _ in
+            syncDropSelectionsFromData()
+            recomputeMaxDroppedHalfYears()
+            Task { await loadExamPoints() }
+            Task { await loadPreviousYearSnapshotIfNeeded() }
+        }
+        .onChange(of: previousYearSnapshot?.id) { _ in
+            syncDropSelectionsFromData()
+            recomputeMaxDroppedHalfYears()
+        }
+        .onChange(of: store.encryptionKey == nil) { _ in
+            Task {
+                await loadExamPoints()
+                await loadPreviousYearSnapshotIfNeeded()
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .principal) {
                 VStack(spacing: 2) {
                     Text("Abschlussnote")
                         .font(.headline)
-                    Text("Halbjahre streichen & berechnen")
+                    Text("Übersicht & Status")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(1)
                 }
             }
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -387,77 +294,381 @@ struct FinalGradeView: View {
                 }
             }
         }
-        .sheet(isPresented: $showHomeworkSheet) {
-            HomeworkListView()
-                .environmentObject(store)
-        }
-        .sheet(isPresented: $showExamSheet) {
-            ExamListView()
-                .environmentObject(store)
-        }
-        .onAppear {
-            // Initiale Drop-Selections aus persisted droppedHalfYear
-            var next: [String: HalfYearDropOption] = [:]
-            for s in store.subjects {
-                next[s.name] = HalfYearDropOption.fromPersisted(s.droppedHalfYear)
+    }
+
+    // MARK: - UI Pieces
+
+    @ViewBuilder
+    private var contentStack: some View {
+        VStack(spacing: 16) {
+            loadingSection
+            topSummarySection
+                .padding(.horizontal, 16)
+            abiturOverviewCard
+                .padding(.horizontal, 16)
+            if schoolType == .fos {
+                practicalPerformanceCard
+                    .padding(.horizontal, 16)
             }
-            dropSelections = next
-            recomputeMaxDroppedHalfYears()
-            Task { await loadExamPoints() }
-        }
-        .onChange(of: store.subjects) { _ in
-            var next: [String: HalfYearDropOption] = [:]
-            for s in store.subjects {
-                let persisted = HalfYearDropOption.fromPersisted(s.droppedHalfYear)
-                let prev = dropSelections[s.name] ?? .none
-                next[s.name] = (s.droppedHalfYear == 1 || s.droppedHalfYear == 2) ? persisted : prev
+            if fobosoSummary.maxPoints > 0 {
+                pointsCard
+                    .padding(.horizontal, 16)
             }
-            dropSelections = next
-            recomputeMaxDroppedHalfYears()
-            Task { await loadExamPoints() }
+            subjectCountRow
+                .padding(.horizontal)
+            droppedHalfYearsCard
+                .padding(.horizontal, 16)
+            subjectListSection
+                .padding(.horizontal)
+            if maxDroppedHalfYears > 0 && limitReached {
+                Text("Du hast bereits die maximal erlaubte Anzahl an gestrichenen Halbjahren ausgewählt. Entferne zuerst eine Auswahl, um ein weiteres Halbjahr zu streichen.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
+            }
+            Text("Hinweis: Das Streichen von Halbjahren in dieser Ansicht dient nur dir selbst als Orientierung und Merkhilfe. Es werden keine Daten an deine Schule oder andere Dritte übermittelt. Offizielle Entscheidungen über gestrichene Halbjahren musst du gegebenenfalls separat bei deiner Schule beantragen bzw. mitteilen.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal)
+                .padding(.bottom, 16)
         }
-        .onChange(of: store.gradeYear) { _ in
-            recomputeMaxDroppedHalfYears()
+        .padding(.vertical, 8)
+    }
+
+    @ViewBuilder
+    private var loadingSection: some View {
+        if store.isLoading {
+            VStack(spacing: 8) {
+                ProgressView(value: store.progress, total: 100)
+                Text(store.loadingLabel).font(.footnote)
+            }
+            .padding(.horizontal)
+        } else if isLoadingPreviousYear {
+            HStack(spacing: 10) {
+                ProgressView()
+                Text("Vorjahr wird geladen …")
+                    .font(.footnote)
+            }
+            .padding(.horizontal)
         }
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                VStack(spacing: 2) {
-                    Text("Abschlussnote")
-                        .font(.headline)
-                    Text("Übersicht & Status")
-                        .font(.caption2)
+    }
+
+    @ViewBuilder
+    private var topSummarySection: some View {
+        VStack(spacing: 12) {
+            SettingsCard(
+                title: "Abschlussnote",
+                subtitle: nil,
+                systemImage: "rosette",
+                accent: .indigo
+            ) {
+                SettingsSectionBox {
+                    HStack(alignment: .center, spacing: 12) {
+                        Text("Ergebnis")
+                            .font(.headline)
+                        Spacer()
+                        Text(finalGradeText)
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(finalGradeColor(finalGradeValueForColor).opacity(0.15))
+                            .foregroundStyle(finalGradeColor(finalGradeValueForColor))
+                            .clipShape(Capsule())
+                            .onTapGesture { toggleFinalGradeToFixed() }
+                    }
+                }
+            }
+
+            if passFailStatus != .open {
+                SettingsCard(
+                    title: "Prüfungsstatus",
+                    subtitle: nil,
+                    systemImage: "checkmark.seal.fill",
+                    accent: passFailStatus == .passed ? .green : .red
+                ) {
+                    SettingsSectionBox {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(alignment: .center) {
+                                Text(passFailStatus == .passed ? "Bestanden" : "Nicht bestanden")
+                                    .font(.headline)
+                                Spacer()
+                                Text(passFailStatus == .passed ? "✔︎" : "✖︎")
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(
+                                        Capsule()
+                                            .fill(
+                                                passFailStatus == .passed
+                                                ? Color.green.opacity(0.2)
+                                                : Color(hex: "#ef4444")
+                                            )
+                                    )
+                                    .foregroundStyle(passFailStatus == .passed ? .green : .white)
+                            }
+
+                            if passFailStatus == .failed {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    if failedByHalfYearTooFew {
+                                        failureReasonRow("zu wenige Halbjahre eingebracht")
+                                    }
+                                    if failedByHalfYearTooMany {
+                                        failureReasonRow("zu viele Halbjahre eingebracht")
+                                    }
+                                    if failedByExamGrade {
+                                        failureReasonRow("benötigter Schnitt nicht erreicht")
+                                    }
+                                    if failedByFinalGrade {
+                                        failureReasonRow("benötigte Abschlussnote nicht erreicht")
+                                    }
+                                    if failedByMissingFachreferat {
+                                        failureReasonRow("Fachreferat Note nicht eingetragen")
+                                    }
+                                    if failedByMissingPracticalPerformance {
+                                        failureReasonRow("Praktikums-Jahresleistung fehlt")
+                                    }
+                                    if failedBySubjectPoints {
+                                        failureReasonRow("benötigte Punktzahl nicht erreicht")
+                                    }
+                                }
+                                Text("Hier tippen für mehr Infos")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .center)
+                            } else if passFailStatus == .passed {
+                                Text("Herzlichen Glückwunsch! 🎉")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if passFailStatus == .failed {
+                                showStatusDetails = true
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var abiturOverviewCard: some View {
+        SummaryCard(title: "") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Abiturnoten")
+                    .font(.headline)
+                if examSubjectFinals.isEmpty {
+                    Text("Trage deine Abiturnoten im Abitur-Bereich ein, um hier eine Übersicht zu sehen.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    VStack(spacing: 8) {
+                        ForEach(examSubjectFinals, id: \.handle.id) { entry in
+                            HStack {
+                                Text(entry.handle.subject.name)
+                                Spacer()
+                                Text(formatAverage(entry.final))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(gradeColor(entry.final).opacity(0.15))
+                                    .foregroundStyle(gradeColor(entry.final))
+                                    .clipShape(Capsule())
+                            }
+                        }
+                    }
+                    if let avg = abiturExamAverage {
+                        HStack {
+                            Text("Durchschnitt")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(formatAverage(avg))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(gradeColor(avg).opacity(0.15))
+                                .foregroundStyle(gradeColor(avg))
+                                .clipShape(Capsule())
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var pointsCard: some View {
+        SummaryCard(title: "") {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Erreichte Punkte")
+                    .font(.headline)
+                Text("\(Int(round(fobosoSummary.totalPoints))) / \(fobosoSummary.maxPoints)")
+                    .font(.title3).bold()
+                Text("Prüfungen (\(schoolType == .fos ? "dreifach" : "zweifach")): \(Int(round(fobosoSummary.examPointsDouble))) Punkte")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("Halbjahresergebnisse: \(Int(round(fobosoSummary.halfYearPoints))) Punkte (\(halfYearSummary.count) HJE).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if practicalYearSummary.count > 0 {
+                    Text("Praktikum 11.: \(Int(round(practicalYearSummary.totalPoints))) Punkte (\(practicalYearSummary.count) Jahresleistung).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if fachreferatHalfYearSummary.count > 0 {
+                    Text("Fachreferat: \(Int(round(fachreferatHalfYearSummary.totalPoints))) Punkte (\(fachreferatHalfYearSummary.count) HJE).")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
         }
     }
 
-    // MARK: - UI Pieces
+    @ViewBuilder
+    private var subjectCountRow: some View {
+        HStack(spacing: 12) {
+            SummaryCard(title: "Fächer") {
+                Text("\(eligibleSubjectHandles.count)")
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(chipBackgroundColor)
+                    .foregroundStyle(chipForegroundColor)
+                    .clipShape(Capsule())
+            }
+            SummaryCard(title: "Halbjahre") {
+                if maxDroppedHalfYears > 0 {
+                    Text("\(selectedDropCount) / \(maxDroppedHalfYears)")
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(chipBackgroundColor)
+                        .foregroundStyle(chipForegroundColor)
+                        .clipShape(Capsule())
+                } else {
+                    Text("\(selectedDropCount)")
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(chipBackgroundColor)
+                        .foregroundStyle(chipForegroundColor)
+                        .clipShape(Capsule())
+                }
+            }
+        }
+    }
 
     @ViewBuilder
-    private func subjectCard(_ subject: Subject) -> some View {
-        let dropOption = dropSelections[subject.name] ?? .none
+    private var droppedHalfYearsCard: some View {
+        SummaryCard(title: "") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Gestrichene Halbjahre")
+                    .font(.headline)
+                Text(
+                    maxDroppedHalfYears > 0
+                    ? "Du kannst insgesamt bis zu \(maxDroppedHalfYears) Halbjahre streichen."
+                    : "Das Streichen von Halbjahren ist derzeit deaktiviert."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                if droppedHalfYears.isEmpty {
+                    Text("Du hast noch kein Halbjahr gestrichen.")
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 4)
+                } else {
+                    VStack(spacing: 8) {
+                        ForEach(droppedHalfYears, id: \.handle.id) { entry in
+                            let droppedAverage = calculateHalfYearAverageForSubject(
+                                entry.handle.grades,
+                                entry.handle.subject.type,
+                                entry.halfYear
+                            )
+                            HStack {
+                                VStack(alignment: .leading) {
+                                    Text(entry.handle.subject.name)
+                                    HStack(spacing: 6) {
+                                        Text(entry.halfYear == 1 ? "1. Halbjahr" : "2. Halbjahr")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        if let yearLabel = entry.handle.yearLabel {
+                                            Text("\(yearLabel) Jahrgang")
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                }
+                                Spacer()
+                                Text(formatAverage(droppedAverage))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(gradeColor(droppedAverage).opacity(0.15))
+                                    .foregroundStyle(gradeColor(droppedAverage))
+                                    .clipShape(Capsule())
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var subjectListSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Fächer").font(.headline)
+            Text("Streiche die Noten des gewählten Halbjahres.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if canUsePreviousYearSnapshot {
+                Text("Halbjahre aus dem 11. und 12. Jahrgang werden gemeinsam angezeigt und können gemeinsam gestrichen werden.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if eligibleSubjectHandles.isEmpty {
+                Text("Lege zuerst Fächer und Noten an, um deine Abschlussnote zu berechnen.")
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 8)
+            } else {
+                VStack(spacing: 12) {
+                    ForEach(sortedSubjectHandles, id: \.id) { handle in
+                        subjectCard(handle)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func subjectCard(_ handle: SubjectHandle) -> some View {
+        let dropOption = dropSelections[handle.id] ?? .none
         let isHalfYear1Selected = dropOption == .one
         let isHalfYear2Selected = dropOption == .two
         let disableHalfYear1 = ((limitReached || maxDroppedHalfYears <= 0) && !isHalfYear1Selected) || isHalfYear2Selected
         let disableHalfYear2 = ((limitReached || maxDroppedHalfYears <= 0) && !isHalfYear2Selected) || isHalfYear1Selected
 
-        let subjectGrades = store.gradesBySubject[subject.name] ?? []
-        let firstHalfYearAverage = calculateHalfYearAverageForSubject(subjectGrades, subject.type, 1)
-        let secondHalfYearAverage = calculateHalfYearAverageForSubject(subjectGrades, subject.type, 2)
-        let subjectAverage = subjectAverageFor(subject: subject)
+        let subjectGrades = handle.grades
+        let hasHalfYear1 = subjectGrades.contains { $0.halfYear == 1 }
+        let hasHalfYear2 = subjectGrades.contains { $0.halfYear == 2 }
+        let firstHalfYearAverage = calculateHalfYearAverageForSubject(subjectGrades, handle.subject.type, 1)
+        let secondHalfYearAverage = calculateHalfYearAverageForSubject(subjectGrades, handle.subject.type, 2)
+        let subjectAverage = subjectAverageFor(handle: handle)
 
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(subject.name).font(.headline)
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(handle.subject.name).font(.headline)
+                    if let yearLabel = handle.yearLabel {
+                        Text("\(yearLabel) Jahrgang")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Spacer()
-                if subject.isElective {
-                    Tag(text: "Wahlfach", style: .elective)
-                } else {
+                HStack(spacing: 6) {
                     Tag(
-                        text: subject.type == 1 ? "Hauptfach" : "Nebenfach",
-                        style: subject.type == 1 ? .main : .minor
+                        text: handle.subject.type == 1 ? "Hauptfach" : "Nebenfach",
+                        style: handle.subject.type == 1 ? .main : .minor
                     )
                 }
             }
@@ -474,11 +685,7 @@ struct FinalGradeView: View {
             }
 
             HStack {
-                Toggle(isOn: Binding(
-                    get: { isHalfYear1Selected },
-                    set: { _ in handleToggleHalfYear(subjectName: subject.name, halfYear: 1) }
-                )) { Text("1. Halbjahr") }
-                .disabled(disableHalfYear1)
+                Text("1. Halbjahr")
                 Spacer()
                 Text(formatAverage(firstHalfYearAverage))
                     .padding(.horizontal, 10)
@@ -487,14 +694,18 @@ struct FinalGradeView: View {
                     .foregroundStyle(gradeColor(firstHalfYearAverage))
                     .clipShape(Capsule())
                     .opacity(isHalfYear1Selected ? 0.6 : 1.0)
+                //Spacer()
+                Toggle("", isOn: Binding(
+                    get: { isHalfYear1Selected },
+                    set: { _ in handleToggleHalfYear(handle: handle, halfYear: 1) }
+                ))
+                .labelsHidden()
+                .accessibilityLabel("1. Halbjahr streichen")
+                .disabled(disableHalfYear1 || !hasHalfYear1)
             }
 
             HStack {
-                Toggle(isOn: Binding(
-                    get: { isHalfYear2Selected },
-                    set: { _ in handleToggleHalfYear(subjectName: subject.name, halfYear: 2) }
-                )) { Text("2. Halbjahr") }
-                .disabled(disableHalfYear2)
+                Text("2. Halbjahr")
                 Spacer()
                 Text(formatAverage(secondHalfYearAverage))
                     .padding(.horizontal, 10)
@@ -503,11 +714,80 @@ struct FinalGradeView: View {
                     .foregroundStyle(gradeColor(secondHalfYearAverage))
                     .clipShape(Capsule())
                     .opacity(isHalfYear2Selected ? 0.6 : 1.0)
+                //Spacer()
+                Toggle("", isOn: Binding(
+                    get: { isHalfYear2Selected },
+                    set: { _ in handleToggleHalfYear(handle: handle, halfYear: 2) }
+                ))
+                .labelsHidden()
+                .accessibilityLabel("2. Halbjahr streichen")
+                .disabled(disableHalfYear2 || !hasHalfYear2)
             }
         }
         .padding()
         .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    @ViewBuilder
+    private var practicalPerformanceCard: some View {
+        SummaryCard(title: "") {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Fachpraktische Ausbildung (11.)")
+                        .font(.headline)
+                    Spacer()
+                    if let avg = practicalAverageDisplay {
+                        Text(formatAverage(avg))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(gradeColor(avg).opacity(0.15))
+                            .foregroundStyle(gradeColor(avg))
+                            .clipShape(Capsule())
+                    }
+                }
+                if canUsePreviousYearSnapshot, let snapshot = previousYearSnapshot {
+                    Text("Daten aus dem Schuljahr \(snapshot.id).")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                if sortedPracticalGrades.isEmpty {
+                    Text("Erfasste Praktikumsnoten werden hier angezeigt. Nutze den Praktikumsbereich, um sie zu pflegen.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 4)
+                } else {
+                    VStack(spacing: 10) {
+                        ForEach(sortedPracticalGrades) { entry in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(practicalLabel(for: entry))
+                                        .font(.subheadline)
+                                    if let company = entry.company, !company.isEmpty {
+                                        Text(company)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    if let note = entry.note, !note.isEmpty {
+                                        Text(note)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer()
+                                Text(formatAverage(entry.grade))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(gradeColor(entry.grade).opacity(0.15))
+                                    .foregroundStyle(gradeColor(entry.grade))
+                                    .clipShape(Capsule())
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -549,13 +829,13 @@ struct FinalGradeView: View {
         return total / totalWeight
     }
 
-    private func subjectAverageFor(subject: Subject) -> Double? {
-        let grades = filteredSubjectGrades[subject.name] ?? []
+    private func subjectAverageFor(handle: SubjectHandle) -> Double? {
+        let grades = filteredGradesByHandle[handle.id] ?? []
         guard !grades.isEmpty else { return nil }
         var total = 0.0
         var totalWeight = 0.0
         for g in grades {
-            let w = calculateGradeWeightForSubject(subject.type, g)
+            let w = calculateGradeWeightForSubject(handle.subject.type, g)
             total += g.grade * w
             totalWeight += w
         }
@@ -568,6 +848,17 @@ struct FinalGradeView: View {
         return String(format: "%.2f", v)
     }
 
+    private var finalGradeValueForColor: Double? {
+        fobosoSummary.grade ?? finalAverage
+    }
+
+    private var finalGradeText: String {
+        if fobosoSummary.maxPoints > 0, let g = fobosoSummary.grade {
+            return String(format: "%.\(finalGradeToFixed)f", g)
+        }
+        return formatAverage(finalAverage)
+    }
+
     private func gradeColor(_ value: Double?) -> Color {
         guard let v = value else { return .secondary }
         if v >= 7 { return .green }
@@ -575,60 +866,65 @@ struct FinalGradeView: View {
         return .red
     }
 
+    private func finalGradeColor(_ value: Double?) -> Color {
+        guard let v = value else { return .secondary }
+        if v <= 3 { return .green }
+        if v < 5 { return .orange }
+        return .red
+    }
+
+    private func roundedExamPoints(_ value: Double?) -> Double? {
+        guard let v = value else { return nil }
+        return v.rounded(.toNearestOrAwayFromZero)
+    }
+
     // MARK: - State Berechnungen (entspricht useMemo in React)
 
     private var selectedDropCount: Int {
-        subjectsWithoutFachreferat.reduce(0) { sum, subject in
-            let value = dropSelections[subject.name] ?? .none
+        eligibleSubjectHandles.reduce(0) { sum, handle in
+            let value = dropSelections[handle.id] ?? .none
             return sum + ((value == .one || value == .two) ? 1 : 0)
         }
     }
 
-    private var filteredSubjectGrades: [String: [GradeWithId]] {
+    private var filteredGradesByHandle: [String: [GradeWithId]] {
         var result: [String: [GradeWithId]] = [:]
-        for subject in store.subjects {
-            let grades = store.gradesBySubject[subject.name] ?? []
-            let dropOption = dropSelections[subject.name] ?? .none
-            let filtered = grades.filter { g in
+        for handle in allSubjectHandles {
+            let dropOption = dropSelections[handle.id] ?? .none
+            let filtered = handle.grades.filter { g in
                 if dropOption == .one, g.halfYear == 1 { return false }
                 if dropOption == .two, g.halfYear == 2 { return false }
                 return true
             }
-            result[subject.name] = filtered
+            result[handle.id] = filtered
         }
         return result
     }
 
-    private var droppedHalfYears: [(subject: Subject, halfYear: Int)] {
-        subjectsWithoutFachreferat.compactMap { s in
-            let opt = dropSelections[s.name] ?? .none
+    private var droppedHalfYears: [(handle: SubjectHandle, halfYear: Int)] {
+        eligibleSubjectHandles.compactMap { handle in
+            let opt = dropSelections[handle.id] ?? .none
             switch opt {
-            case .one: return (s, 1)
-            case .two: return (s, 2)
+            case .one: return (handle, 1)
+            case .two: return (handle, 2)
             default: return nil
             }
         }
     }
 
-    private var examSubjects: [Subject] {
-        subjectsWithoutFachreferat.filter { $0.examSubject == true }
+    private var examSubjectHandles: [SubjectHandle] {
+        eligibleSubjectHandles.filter { $0.isCurrentYear && ($0.subject.examSubject == true) }
     }
 
-    private var subjectAverages: [(subject: Subject, average: Double?)] {
-        subjectsWithoutFachreferat.map { s in
-            (s, subjectAverageFor(subject: s))
-        }
-    }
+    private var sortedSubjectHandles: [SubjectHandle] {
+        if eligibleSubjectHandles.isEmpty { return [] }
 
-    private var sortedSubjects: [Subject] {
-        if subjectsWithoutFachreferat.isEmpty { return [] }
-
-        func getSubjectAverageForSort(_ subject: Subject) -> Double? {
-            let grades = filteredSubjectGrades[subject.name] ?? []
+        func getSubjectAverageForSort(_ handle: SubjectHandle) -> Double? {
+            let grades = filteredGradesByHandle[handle.id] ?? []
             guard !grades.isEmpty else { return nil }
             var total = 0.0, totalWeight = 0.0
             for g in grades {
-                let w = calculateGradeWeightForSubject(subject.type, g)
+                let w = calculateGradeWeightForSubject(handle.subject.type, g)
                 total += g.grade * w
                 totalWeight += w
             }
@@ -638,55 +934,94 @@ struct FinalGradeView: View {
 
         switch store.subjectSortMode {
         case .name:
-            return subjectsWithoutFachreferat.sorted { $0.name.lowercased().localizedCompare($1.name.lowercased()) == .orderedAscending }
+            return eligibleSubjectHandles.sorted {
+                if $0.subject.name.caseInsensitiveCompare($1.subject.name) == .orderedSame {
+                    return ($0.gradeYear ?? 0) < ($1.gradeYear ?? 0)
+                }
+                return $0.subject.name.lowercased().localizedCompare($1.subject.name.lowercased()) == .orderedAscending
+            }
         case .name_desc:
-            return subjectsWithoutFachreferat.sorted { $0.name.lowercased().localizedCompare($1.name.lowercased()) == .orderedDescending }
+            return eligibleSubjectHandles.sorted {
+                if $0.subject.name.caseInsensitiveCompare($1.subject.name) == .orderedSame {
+                    return ($0.gradeYear ?? 0) > ($1.gradeYear ?? 0)
+                }
+                return $0.subject.name.lowercased().localizedCompare($1.subject.name.lowercased()) == .orderedDescending
+            }
         case .average:
-            return subjectsWithoutFachreferat.sorted { a, b in
+            return eligibleSubjectHandles.sorted { a, b in
                 let a1 = getSubjectAverageForSort(a)
                 let b1 = getSubjectAverageForSort(b)
                 switch (a1, b1) {
                 case (nil, nil):
-                    return a.name.lowercased().localizedCompare(b.name.lowercased()) == .orderedAscending
+                    if a.subject.name.caseInsensitiveCompare(b.subject.name) == .orderedSame {
+                        return (a.gradeYear ?? 0) < (b.gradeYear ?? 0)
+                    }
+                    return a.subject.name.lowercased().localizedCompare(b.subject.name.lowercased()) == .orderedAscending
                 case (nil, _):
                     return false
                 case (_, nil):
                     return true
                 case let (aa?, bb?):
+                    if aa == bb {
+                        if a.subject.name.caseInsensitiveCompare(b.subject.name) == .orderedSame {
+                            return (a.gradeYear ?? 0) < (b.gradeYear ?? 0)
+                        }
+                        return a.subject.name.lowercased().localizedCompare(b.subject.name.lowercased()) == .orderedAscending
+                    }
                     return aa > bb
                 }
             }
         case .average_worst:
-            return subjectsWithoutFachreferat.sorted { a, b in
+            return eligibleSubjectHandles.sorted { a, b in
                 let a1 = getSubjectAverageForSort(a)
                 let b1 = getSubjectAverageForSort(b)
                 switch (a1, b1) {
                 case (nil, nil):
-                    return a.name.lowercased().localizedCompare(b.name.lowercased()) == .orderedAscending
+                    if a.subject.name.caseInsensitiveCompare(b.subject.name) == .orderedSame {
+                        return (a.gradeYear ?? 0) < (b.gradeYear ?? 0)
+                    }
+                    return a.subject.name.lowercased().localizedCompare(b.subject.name.lowercased()) == .orderedAscending
                 case (nil, _):
                     return true
                 case (_, nil):
                     return false
                 case let (aa?, bb?):
+                    if aa == bb {
+                        if a.subject.name.caseInsensitiveCompare(b.subject.name) == .orderedSame {
+                            return (a.gradeYear ?? 0) < (b.gradeYear ?? 0)
+                        }
+                        return a.subject.name.lowercased().localizedCompare(b.subject.name.lowercased()) == .orderedAscending
+                    }
                     return aa < bb
                 }
             }
         case .custom:
             if store.subjectSortOrder.isEmpty {
-                return subjectsWithoutFachreferat.sorted { $0.name.lowercased().localizedCompare($1.name.lowercased()) == .orderedAscending }
+                return eligibleSubjectHandles.sorted {
+                    if $0.subject.name.caseInsensitiveCompare($1.subject.name) == .orderedSame {
+                        return ($0.gradeYear ?? 0) < ($1.gradeYear ?? 0)
+                    }
+                    return $0.subject.name.lowercased().localizedCompare($1.subject.name.lowercased()) == .orderedAscending
+                }
             }
             let orderMap = Dictionary(uniqueKeysWithValues: store.subjectSortOrder.enumerated().map { ($1, $0) })
-            return subjectsWithoutFachreferat.sorted { a, b in
-                let ia = orderMap[a.name]
-                let ib = orderMap[b.name]
+            return eligibleSubjectHandles.sorted { a, b in
+                let ia = orderMap[a.subject.name]
+                let ib = orderMap[b.subject.name]
                 switch (ia, ib) {
                 case (nil, nil):
-                    return a.name.lowercased().localizedCompare(b.name.lowercased()) == .orderedAscending
+                    if a.subject.name.caseInsensitiveCompare(b.subject.name) == .orderedSame {
+                        return (a.gradeYear ?? 0) < (b.gradeYear ?? 0)
+                    }
+                    return a.subject.name.lowercased().localizedCompare(b.subject.name.lowercased()) == .orderedAscending
                 case (nil, _):
                     return false
                 case (_, nil):
                     return true
                 default:
+                    if ia == ib {
+                        return (a.gradeYear ?? 0) < (b.gradeYear ?? 0)
+                    }
                     return ia! < ib!
                 }
             }
@@ -694,12 +1029,12 @@ struct FinalGradeView: View {
     }
 
     private var gradesOnlyFinalAverage: Double? {
-        guard !store.subjects.isEmpty else { return nil }
+        guard !eligibleSubjectHandles.isEmpty else { return nil }
         var total = 0.0, totalWeight = 0.0
-        for subject in store.subjects {
-            let grades = filteredSubjectGrades[subject.name] ?? []
+        for handle in eligibleSubjectHandles {
+            let grades = filteredGradesByHandle[handle.id] ?? []
             for g in grades {
-                let w = calculateGradeWeightForSubject(subject.type, g)
+                let w = calculateGradeWeightForSubject(handle.subject.type, g)
                 total += g.grade * w
                 totalWeight += w
             }
@@ -709,26 +1044,27 @@ struct FinalGradeView: View {
     }
 
     private var abiturFinalAverage: Double? {
-        let es = examSubjects
+        let es = examSubjectHandles
         guard !es.isEmpty else { return nil }
         var subjectFinals: [Double] = []
+        let examWeight = schoolType == .fos ? 3.0 : 2.0
 
-        for s in es {
-            let examPoints = examPointsBySubject[s.name] ?? nil
-            guard let ep = examPoints else { continue }
+        for handle in es {
+            let examPoints = examPointsBySubject[handle.subject.name] ?? nil
+            guard let rawExam = examPoints else { continue }
+            let ep = roundedExamPoints(rawExam) ?? rawExam
 
-            let subjectGrades = store.gradesBySubject[s.name] ?? []
-            let dropOption = dropSelections[s.name] ?? .none
+            let dropOption = dropSelections[handle.id] ?? .none
             let isHalfYear1Dropped = (dropOption == .one)
             let isHalfYear2Dropped = (dropOption == .two)
 
-            let first = isHalfYear1Dropped ? nil : calculateHalfYearAverageForSubject(subjectGrades, s.type, 1)
-            let second = isHalfYear2Dropped ? nil : calculateHalfYearAverageForSubject(subjectGrades, s.type, 2)
+            let first = isHalfYear1Dropped ? nil : calculateHalfYearAverageForSubject(handle.grades, handle.subject.type, 1)
+            let second = isHalfYear2Dropped ? nil : calculateHalfYearAverageForSubject(handle.grades, handle.subject.type, 2)
 
             var components: [(value: Double, weight: Double)] = []
             if let f = first { components.append((f, 1)) }
             if let sec = second { components.append((sec, 1)) }
-            components.append((ep, 2))
+            components.append((ep, examWeight))
 
             let totalWeight = components.reduce(0) { $0 + $1.weight }
             guard totalWeight > 0 else { continue }
@@ -745,21 +1081,82 @@ struct FinalGradeView: View {
         abiturFinalAverage ?? gradesOnlyFinalAverage
     }
 
-    private var examSubjectsWithPoints: [Subject] {
-        examSubjects.filter { (examPointsBySubject[$0.name] ?? nil) != nil }
+    private var examSubjectsWithPoints: [SubjectHandle] {
+        examSubjectHandles.filter { (examPointsBySubject[$0.subject.name] ?? nil) != nil }
+    }
+
+    private var statusDetailReasons: [String] {
+        var reasons: [String] = []
+        if failedByHalfYearTooFew {
+            let missing = requiredHalfYearCount - halfYearSummary.count
+            reasons.append("Es fehlen noch \(missing) von \(requiredHalfYearCount) erforderlichen HJE.")
+        }
+        if failedByHalfYearTooMany {
+            let extra = halfYearSummary.count - requiredHalfYearCount
+            reasons.append("Du hast \(extra) HJE zu viel eingebracht (maximal \(requiredHalfYearCount) erlaubt).")
+        }
+        if failedByMissingFachreferat {
+            reasons.append("Die Fachreferat-Note fehlt.")
+        }
+        if failedByMissingPracticalPerformance {
+            reasons.append("Die beiden Praktikumsnoten (11.) fehlen für die FOS.")
+        }
+        if failedBySubjectPoints {
+            let threshold: Double
+            if schoolType == .fos {
+                threshold = 198
+            } else if subjectsBelowFourPoints >= 2 {
+                threshold = 156
+            } else {
+                threshold = 130
+            }
+            let missing = max(0, threshold - fobosoSummary.totalPoints)
+            reasons.append("Gesamtpunktzahl zu niedrig (\(Int(fobosoSummary.totalPoints))/\(Int(threshold)); es fehlen ca. \(Int(ceil(missing))) Punkte).")
+        }
+        if failedByExamGrade, let avg = examAveragePoints {
+            reasons.append("Prüfungsdurchschnitt zu niedrig (aktuell \(formatAverage(avg)) statt mindestens 4,0).")
+        }
+        if failedByFinalGrade, let g = fobosoSummary.grade {
+            reasons.append("Abschlussnote zu schlecht (aktuell \(String(format: "%.1f", g)), benötigt höchstens 4,0).")
+        }
+        return reasons
+    }
+
+    private var statusDetailNextSteps: [String] {
+        var tips: [String] = []
+        if failedByHalfYearTooFew {
+            tips.append("Weitere Halbjahre einbringen, bis \(requiredHalfYearCount) erreicht sind.")
+        }
+        if failedByHalfYearTooMany {
+            tips.append("Halbjahre streichen, bis nur \(requiredHalfYearCount) HJE übrig bleiben.")
+        }
+        if failedByMissingFachreferat {
+            tips.append("Fachreferat-Note eintragen.")
+        }
+        if failedByMissingPracticalPerformance {
+            tips.append("Beide Praktikumsnoten (11.) eintragen.")
+        }
+        if failedBySubjectPoints {
+            tips.append("Punkte erhöhen: bessere Halbjahresnoten oder Prüfungen helfen, den Schwellenwert zu erreichen.")
+        }
+        if failedByExamGrade {
+            tips.append("Prüfungsnoten auf mindestens 4,0 im Schnitt bringen.")
+        }
+        if failedByFinalGrade {
+            tips.append("Gesamt-Notenschnitt auf 4,0 oder besser senken.")
+        }
+        return tips
     }
 
     private var halfYearSummary: (totalPoints: Double, count: Int) {
         var totalPoints = 0.0
         var count = 0
-        for subject in store.subjects {
-            if subject.name == "Fachreferat" { continue }
-            let subjectGrades = store.gradesBySubject[subject.name] ?? []
-            let dropOption = dropSelections[subject.name] ?? .none
+        for handle in eligibleSubjectHandles {
+            let dropOption = dropSelections[handle.id] ?? .none
             let isHalfYear1Dropped = (dropOption == .one)
             let isHalfYear2Dropped = (dropOption == .two)
-            let first = isHalfYear1Dropped ? nil : calculateHalfYearAverageForSubject(subjectGrades, subject.type, 1)
-            let second = isHalfYear2Dropped ? nil : calculateHalfYearAverageForSubject(subjectGrades, subject.type, 2)
+            let first = isHalfYear1Dropped ? nil : calculateHalfYearAverageForSubject(handle.grades, handle.subject.type, 1)
+            let second = isHalfYear2Dropped ? nil : calculateHalfYearAverageForSubject(handle.grades, handle.subject.type, 2)
             if let f = first { totalPoints += f; count += 1 }
             if let s = second { totalPoints += s; count += 1 }
         }
@@ -771,6 +1168,21 @@ struct FinalGradeView: View {
         return (fr.grade, 1)
     }
 
+    private var practicalYearSummary: (totalPoints: Double, count: Int) {
+        guard schoolType == .fos else { return (0, 0) }
+        let grades = sortedPracticalGrades
+        guard !grades.isEmpty else { return (0, 0) }
+        let limited = grades.prefix(2)
+        let total = limited.reduce(0.0) { $0 + $1.grade }
+        return (total, limited.count)
+    }
+
+    private var practicalAverageDisplay: Double? {
+        guard !sortedPracticalGrades.isEmpty else { return nil }
+        let total = sortedPracticalGrades.reduce(0.0) { $0 + $1.grade }
+        return total / Double(sortedPracticalGrades.count)
+    }
+
     private var fobosoSummary: (examCount: Int,
                                 halfYearCount: Int,
                                 examPointsDouble: Double,
@@ -780,76 +1192,77 @@ struct FinalGradeView: View {
                                 grade: Double?,
                                 gradeRaw: Double?) {
         let examCount = examSubjectsWithPoints.count
+        let examWeight = schoolType == .fos ? 3 : 2
         var examPointsDouble = 0.0
         for s in examSubjectsWithPoints {
-            if let v = examPointsBySubject[s.name] ?? nil {
-                examPointsDouble += v * 2.0
+            if let raw = examPointsBySubject[s.subject.name] ?? nil {
+                let v = roundedExamPoints(raw) ?? raw
+                examPointsDouble += v * Double(examWeight)
             }
         }
         let halfYearCount = halfYearSummary.count
         let halfYearPoints = halfYearSummary.totalPoints
         let fachreferatCount = fachreferatHalfYearSummary.count
         let fachreferatPoints = fachreferatHalfYearSummary.totalPoints
+        let practicalCount = practicalYearSummary.count
+        let practicalPoints = practicalYearSummary.totalPoints
 
-        let units = examCount * 2 + halfYearCount + fachreferatCount
+        let units = examCount * examWeight + halfYearCount + fachreferatCount + practicalCount
         if units == 0 {
             return (examCount, halfYearCount, 0, 0, 0, 0, nil, nil)
         }
         let maxPoints = units * 15
-        let totalPoints = examPointsDouble + halfYearPoints + fachreferatPoints
+        let totalPoints = examPointsDouble + halfYearPoints + fachreferatPoints + practicalPoints
         let gradeRaw = 17.0 / 3.0 - (5.0 * totalPoints) / Double(maxPoints)
 
-        let grade: Double
-        if gradeRaw < 1 {
-            grade = 1
-        } else {
-            grade = floor(gradeRaw * 10.0) / 10.0
-        }
+        let gradeRounded = (gradeRaw * 10.0).rounded(.toNearestOrAwayFromZero) / 10.0
+        let grade = max(1, gradeRounded)
 
         return (examCount, halfYearCount, examPointsDouble, halfYearPoints, totalPoints, maxPoints, grade, gradeRaw)
     }
 
-    private var subjectFinalResults: [(subject: Subject, finalPoints: Double?)] {
-        let es = examSubjects
+    private var subjectFinalResults: [(handle: SubjectHandle, finalPoints: Double?)] {
+        let es = examSubjectHandles
         guard !es.isEmpty else { return [] }
-        var results: [(Subject, Double?)] = []
-        for s in es {
-            let examPoints = examPointsBySubject[s.name] ?? nil
-            let subjectGrades = store.gradesBySubject[s.name] ?? []
-            let dropOption = dropSelections[s.name] ?? .none
+        var results: [(SubjectHandle, Double?)] = []
+        let examWeight = schoolType == .fos ? 3.0 : 2.0
+        for handle in es {
+            let rawExamPoints = examPointsBySubject[handle.subject.name] ?? nil
+            let examPoints = rawExamPoints.flatMap { roundedExamPoints($0) ?? $0 }
+            let dropOption = dropSelections[handle.id] ?? .none
             let isHalfYear1Dropped = (dropOption == .one)
             let isHalfYear2Dropped = (dropOption == .two)
-            let first = isHalfYear1Dropped ? nil : calculateHalfYearAverageForSubject(subjectGrades, s.type, 1)
-            let second = isHalfYear2Dropped ? nil : calculateHalfYearAverageForSubject(subjectGrades, s.type, 2)
+            let first = isHalfYear1Dropped ? nil : calculateHalfYearAverageForSubject(handle.grades, handle.subject.type, 1)
+            let second = isHalfYear2Dropped ? nil : calculateHalfYearAverageForSubject(handle.grades, handle.subject.type, 2)
             var components: [(Double, Double)] = []
             if let f = first { components.append((f, 1)) }
             if let sec = second { components.append((sec, 1)) }
-            if let ep = examPoints { components.append((ep, 2)) }
+            if let ep = examPoints { components.append((ep, examWeight)) }
             if components.isEmpty {
-                results.append((s, nil))
+                results.append((handle, nil))
                 continue
             }
             let totalWeight = components.reduce(0) { $0 + $1.1 }
             let totalValue = components.reduce(0) { $0 + $1.0 * $1.1 }
-            results.append((s, totalValue / totalWeight))
+            results.append((handle, totalValue / totalWeight))
         }
         return results
     }
 
     private var hasAllExamPoints: Bool {
-        let es = examSubjects
+        let es = examSubjectHandles
         guard !es.isEmpty else { return false }
-        return es.allSatisfy { (examPointsBySubject[$0.name] ?? nil) != nil }
+        return es.allSatisfy { (examPointsBySubject[$0.subject.name] ?? nil) != nil }
     }
 
     private var examAveragePoints: Double? {
         guard hasAllExamPoints else { return nil }
-        let es = examSubjects
+        let es = examSubjectHandles
         guard !es.isEmpty else { return nil }
         var total = 0.0
         var count = 0
-        for s in es {
-            if let v = examPointsBySubject[s.name] ?? nil {
+        for handle in es {
+            if let v = examPointsBySubject[handle.subject.name] ?? nil {
                 total += v
                 count += 1
             }
@@ -876,7 +1289,21 @@ struct FinalGradeView: View {
         return g <= 4
     }
 
-    private let requiredHalfYearCount: Int = 17
+    private var requiredHalfYearCount: Int {
+        switch schoolType {
+        case .fos:
+            return 25
+        case .bos:
+            switch store.gradeYear {
+            case 13:
+                return 16
+            case 12:
+                return 17
+            default:
+                return 17
+            }
+        }
+    }
 
     private var failedByHalfYearTooFew: Bool {
         halfYearSummary.count < requiredHalfYearCount
@@ -890,6 +1317,9 @@ struct FinalGradeView: View {
     private var failedByMissingFachreferat: Bool {
         !hasFachreferat
     }
+    private var failedByMissingPracticalPerformance: Bool {
+        schoolType == .fos && practicalYearSummary.count < 2
+    }
     private var failedBySubjectPoints: Bool {
         hasAllExamPoints && ((subjectsBelowFourPoints == 1 && fobosoSummary.totalPoints < 130) || (subjectsBelowFourPoints >= 2 && fobosoSummary.totalPoints < 156))
     }
@@ -902,22 +1332,105 @@ struct FinalGradeView: View {
 
     private enum PassFailStatus { case open, passed, failed }
     private var passFailStatus: PassFailStatus {
-        let isFailed = failedByHalfYearCount || failedByMissingFachreferat || failedBySubjectPoints || failedByExamGrade || failedByFinalGrade
-        let isPassed = !isFailed && hasAllExamPoints && halfYearSummary.count == requiredHalfYearCount && examResultAtLeastFour == true && finalGradeAtLeastFour == true
+        let isFailed = failedByHalfYearCount || failedByMissingFachreferat || failedByMissingPracticalPerformance || failedBySubjectPoints || failedByExamGrade || failedByFinalGrade
+        let isPassed = !isFailed && hasAllExamPoints && halfYearSummary.count == requiredHalfYearCount && examResultAtLeastFour == true && finalGradeAtLeastFour == true && !failedByMissingPracticalPerformance
         if isFailed { return .failed }
         if isPassed { return .passed }
         return .open
     }
 
-    private var examSubjectFinals: [(subject: Subject, final: Double?)] {
-        examSubjectsWithPoints.map { s in
-            let ep = examPointsBySubject[s.name] ?? nil
-            return (s, ep)
+    private var examSubjectFinals: [(handle: SubjectHandle, final: Double?)] {
+        examSubjectsWithPoints.map { handle in
+            let ep = examPointsBySubject[handle.subject.name] ?? nil
+            return (handle, ep)
         }
+    }
+
+    private var abiturExamAverage: Double? {
+        let finals = examSubjectFinals.compactMap { $0.final }
+        guard !finals.isEmpty else { return nil }
+        let sum = finals.reduce(0, +)
+        return sum / Double(finals.count)
     }
 
     private var limitReached: Bool {
         maxDroppedHalfYears > 0 && selectedDropCount >= maxDroppedHalfYears
+    }
+
+    private var availableHalfYearCount: Int {
+        eligibleSubjectHandles.reduce(0) { sum, handle in
+            let hasFirst = handle.grades.contains { $0.halfYear == 1 }
+            let hasSecond = handle.grades.contains { $0.halfYear == 2 }
+            return sum + (hasFirst ? 1 : 0) + (hasSecond ? 1 : 0)
+        }
+    }
+
+    private func syncDropSelectionsFromData() {
+        var next: [String: HalfYearDropOption] = [:]
+        for handle in allSubjectHandles {
+            next[handle.id] = HalfYearDropOption.fromPersisted(handle.subject.droppedHalfYear)
+        }
+        dropSelections = next
+    }
+
+    private func previousSchoolYearId(from id: String?) -> String? {
+        guard let id = id?.trimmingCharacters(in: .whitespacesAndNewlines), id.count >= 7 else { return nil }
+        guard let startYear = Int(id.prefix(4)) else { return nil }
+        let previousStart = startYear - 1
+        let previousEnd = startYear
+        let endSuffix = String(format: "%02d", previousEnd % 100)
+        return "\(previousStart)-\(endSuffix)"
+    }
+
+    private func loadPreviousYearSnapshotIfNeeded() async {
+        guard schoolType == .fos else {
+            await MainActor.run {
+                previousYearSnapshot = nil
+                isLoadingPreviousYear = false
+                recomputeMaxDroppedHalfYears()
+            }
+            return
+        }
+        guard store.gradeYear == 12 else {
+            await MainActor.run {
+                previousYearSnapshot = nil
+                isLoadingPreviousYear = false
+                recomputeMaxDroppedHalfYears()
+            }
+            return
+        }
+        guard let candidate = previousSchoolYearCandidateId, store.schoolYears.contains(candidate) else {
+            await MainActor.run {
+                previousYearSnapshot = nil
+                isLoadingPreviousYear = false
+                recomputeMaxDroppedHalfYears()
+            }
+            return
+        }
+        if let snapshot = previousYearSnapshot, snapshot.id == candidate, snapshot.gradeYear == 11 {
+            return
+        }
+        if let cached = store.cachedSchoolYearSnapshot(for: candidate), let grade = cached.gradeYear, grade == 11 {
+            await MainActor.run {
+                previousYearSnapshot = cached
+                isLoadingPreviousYear = false
+                syncDropSelectionsFromData()
+                recomputeMaxDroppedHalfYears()
+            }
+            return
+        }
+        await MainActor.run { isLoadingPreviousYear = true }
+        let snapshot = await store.loadSchoolYearSnapshot(schoolYearId: candidate)
+        await MainActor.run {
+            if let snapshot, let grade = snapshot.gradeYear, grade == 11 {
+                previousYearSnapshot = snapshot
+            } else {
+                previousYearSnapshot = nil
+            }
+            isLoadingPreviousYear = false
+            syncDropSelectionsFromData()
+            recomputeMaxDroppedHalfYears()
+        }
     }
 
     private func toggleFinalGradeToFixed() {
@@ -926,8 +1439,9 @@ struct FinalGradeView: View {
 
     // MARK: - Actions
 
-    private func handleToggleHalfYear(subjectName: String, halfYear: Int) {
-        let current = dropSelections[subjectName] ?? .none
+    private func handleToggleHalfYear(handle: SubjectHandle, halfYear: Int) {
+        let key = handle.id
+        let current = dropSelections[key] ?? .none
         var next: HalfYearDropOption = current
 
         if (current == .one && halfYear == 1) || (current == .two && halfYear == 2) {
@@ -943,19 +1457,18 @@ struct FinalGradeView: View {
             next = (halfYear == 1 ? .one : .two)
         }
 
-        dropSelections[subjectName] = next
-        Task { await store.updateDroppedHalfYear(subjectName: subjectName, value: next.persistedValue) }
+        dropSelections[key] = next
+        Task {
+            await store.updateDroppedHalfYear(
+                subjectName: handle.subject.name,
+                value: next.persistedValue,
+                inSchoolYear: handle.isCurrentYear ? nil : handle.schoolYearId
+            )
+        }
     }
 
     private func recomputeMaxDroppedHalfYears() {
-        guard let gradeYear = store.gradeYear, (gradeYear == 12 || gradeYear == 13) else {
-            // Fallback auf altes Verhalten
-            maxDroppedHalfYears = 3
-            return
-        }
-        let requiredHalfYears = (gradeYear == 12 ? 17 : 16)
-        let totalHalfYears = subjectsWithoutFachreferat.count * 2
-        let computed = max(0, totalHalfYears - requiredHalfYears)
+        let computed = max(0, availableHalfYearCount - requiredHalfYearCount)
         maxDroppedHalfYears = computed
     }
 
@@ -982,5 +1495,59 @@ struct FinalGradeView: View {
             next[s.name] = examPoints
         }
         examPointsBySubject = next
+    }
+
+    private func practicalLabel(for entry: PracticalGradeEntry) -> String {
+        if let hy = entry.halfYear {
+            return hy == 1 ? "1. Praktikum" : "2. Praktikum"
+        }
+        return "Praktikum"
+    }
+
+    private var statusDetailSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Warum nicht bestanden?")
+                        .font(.headline)
+                    if statusDetailReasons.isEmpty {
+                        Text("Keine Details verfügbar.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(statusDetailReasons, id: \.self) { reason in
+                                HStack(alignment: .top, spacing: 6) {
+                                    Text("•")
+                                    Text(reason)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                        }
+                    }
+
+                    if !statusDetailNextSteps.isEmpty {
+                        Divider().padding(.vertical, 4)
+                        Text("Was kannst du tun?")
+                            .font(.headline)
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(statusDetailNextSteps, id: \.self) { tip in
+                                HStack(alignment: .top, spacing: 6) {
+                                    Text("→")
+                                    Text(tip)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle("Status-Details")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Schließen") { showStatusDetails = false }
+                }
+            }
+        }
     }
 }

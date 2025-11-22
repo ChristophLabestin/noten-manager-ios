@@ -213,44 +213,32 @@ struct InsightsView: View {
 
             ScrollView {
                 VStack(spacing: 16) {
-                    // Summary
-                    HStack(spacing: 12) {
-                        SummaryCard(title: "Gesamt-Ø") {
-                            let avg = overallAverageValue
-                            Text(formatAverage(avg))
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(gradeColor(avg).opacity(0.15))
-                                .foregroundStyle(gradeColor(avg))
-                                .clipShape(Capsule())
-                        }
-                        SummaryCard(title: "Fächer") {
-                            Text("\(subjectsWithoutFachreferat.count)")
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(chipBackgroundColor)
-                                .foregroundStyle(chipForegroundColor)
-                                .clipShape(Capsule())
-                        }
-                        SummaryCard(title: "Noten") {
-                            Text("\(totalGradesCount)")
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(chipBackgroundColor)
-                                .foregroundStyle(chipForegroundColor)
-                                .clipShape(Capsule())
+                    SettingsCard(
+                        title: "Notenüberblick",
+                        subtitle: "Durchschnitt, Fächer & Noten",
+                        systemImage: "chart.bar.doc.horizontal.fill",
+                        accent: .indigo
+                    ) {
+                        SettingsSectionBox {
+                            HStack(spacing: 10) {
+                                StatChip(title: "Gesamt-Ø", value: formatAverage(overallAverageValue), accent: .indigo)
+                                StatChip(title: "Fächer", value: "\(subjectsWithoutFachreferat.count)", accent: .cyan)
+                                StatChip(title: "Noten", value: "\(totalGradesCount)", accent: .orange)
+                            }
                         }
                     }
-                    .padding(.horizontal)
 
                     // Halbjahresvergleich
                     let hj1 = halfYearAverage(1)
                     let hj2 = halfYearAverage(2)
                     if hj1 != nil || hj2 != nil {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Halbjahresvergleich")
-                                .font(.headline)
-                            SummaryCard(title: "") {
+                        SettingsCard(
+                            title: "Halbjahresvergleich",
+                            subtitle: nil,
+                            systemImage: "rectangle.split.2x1",
+                            accent: .cyan
+                        ) {
+                            SettingsSectionBox {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text("1. Halbjahr")
@@ -280,80 +268,86 @@ struct InsightsView: View {
                                 }
                             }
                         }
-                        .padding(.horizontal)
                     }
 
                     // Top-Fächer
                     if !topSubjects.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Deine Top-Fächer")
-                                .font(.headline)
-                            Text("Fächer mit den aktuell besten Durchschnittsnoten.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            VStack(spacing: 8) {
-                                ForEach(topSubjects, id: \.name) { subject in
-                                    NavigationLink {
-                                        SubjectDetailView(subject: subject)
-                                            .environmentObject(store)
-                                    } label: {
-                                        subjectInsightRow(subject: subject)
+                        SettingsCard(
+                            title: "Deine Top-Fächer",
+                            subtitle: "Aktuell beste Durchschnittsnoten",
+                            systemImage: "arrow.up.right.circle.fill",
+                            accent: .green
+                        ) {
+                            SettingsSectionBox {
+                                VStack(spacing: 8) {
+                                    ForEach(topSubjects, id: \.name) { subject in
+                                        NavigationLink {
+                                            SubjectDetailView(subject: subject)
+                                                .environmentObject(store)
+                                        } label: {
+                                            subjectInsightRow(subject: subject)
+                                        }
+                                        .buttonStyle(.plain)
                                     }
-                                    .buttonStyle(.plain)
                                 }
                             }
                         }
-                        .padding(.horizontal)
                     }
 
                     // Fächer mit Potenzial
                     if !bottomSubjects.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Fächer mit Potenzial")
-                                .font(.headline)
-                            Text("Hier kannst du mit etwas zusätzlicher Vorbereitung besonders viel rausholen.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            VStack(spacing: 8) {
-                                ForEach(bottomSubjects, id: \.name) { subject in
-                                    NavigationLink {
-                                        SubjectDetailView(subject: subject)
-                                            .environmentObject(store)
-                                    } label: {
-                                        subjectInsightRow(subject: subject)
+                        SettingsCard(
+                            title: "Fächer mit Potenzial",
+                            subtitle: "Hier lohnt sich extra Vorbereitung",
+                            systemImage: "arrow.down.forward.and.arrow.up.backward.circle.fill",
+                            accent: .orange
+                        ) {
+                            SettingsSectionBox {
+                                VStack(spacing: 8) {
+                                    ForEach(bottomSubjects, id: \.name) { subject in
+                                        NavigationLink {
+                                            SubjectDetailView(subject: subject)
+                                                .environmentObject(store)
+                                        } label: {
+                                            subjectInsightRow(subject: subject)
+                                        }
+                                        .buttonStyle(.plain)
                                     }
-                                    .buttonStyle(.plain)
                                 }
                             }
                         }
-                        .padding(.horizontal)
                     }
 
                     // Alle Fächer
                     if !subjectsWithoutFachreferat.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Übersicht aller Fächer")
-                                .font(.headline)
-                            VStack(spacing: 8) {
-                                ForEach(sortedByAverageDesc, id: \.name) { subject in
-                                    NavigationLink {
-                                        SubjectDetailView(subject: subject)
-                                            .environmentObject(store)
-                                    } label: {
-                                        subjectOverviewRow(subject: subject)
+                        SettingsCard(
+                            title: "Übersicht aller Fächer",
+                            subtitle: nil,
+                            systemImage: "list.bullet.rectangle.portrait.fill",
+                            accent: .cyan
+                        ) {
+                            SettingsSectionBox {
+                                VStack(spacing: 8) {
+                                    ForEach(sortedByAverageDesc, id: \.name) { subject in
+                                        NavigationLink {
+                                            SubjectDetailView(subject: subject)
+                                                .environmentObject(store)
+                                        } label: {
+                                            subjectOverviewRow(subject: subject)
+                                        }
+                                        .buttonStyle(.plain)
                                     }
-                                    .buttonStyle(.plain)
                                 }
                             }
                         }
-                        .padding(.horizontal)
                     } else {
                         Text("Lege zuerst Fächer an, um Insights zu sehen.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
-                            .padding(.horizontal)
+                            .padding(.horizontal, 16)
                     }
                 }
+                .padding(.horizontal, 16)
                 .padding(.vertical, 8)
             }
         }
@@ -369,36 +363,18 @@ struct InsightsView: View {
                 }
             }
             ToolbarItem(placement: .navigationBarTrailing) {
-                HStack {
+                HStack(spacing: 12) {
                     Button {
                         showExamSheet = true
                     } label: {
-                        ZStack(alignment: .topTrailing) {
-                            Image(systemName: "calendar.badge.clock")
-                                .imageScale(.large)
-                            if hasOverdueExams {
-                                Circle()
-                                    .fill(Color.red)
-                                    .frame(width: 8, height: 8)
-                                    .offset(x: 4, y: -4)
-                            }
-                        }
+                        ToolbarIcon(symbol: "calendar.badge.clock", showDot: hasOverdueExams)
                     }
                     .accessibilityLabel("Klausurtermine anzeigen")
 
                     Button {
                         showHomeworkSheet = true
                     } label: {
-                        ZStack(alignment: .topTrailing) {
-                            Image(systemName: "checklist")
-                                .imageScale(.large)
-                            if hasOverdueHomeworks || hasHomeworkDueTomorrow {
-                                Circle()
-                                    .fill(Color.red)
-                                    .frame(width: 8, height: 8)
-                                    .offset(x: 4, y: -4)
-                            }
-                        }
+                        ToolbarIcon(symbol: "checklist", showDot: hasOverdueHomeworks || hasHomeworkDueTomorrow)
                     }
                     .accessibilityLabel("Aktive Hausaufgaben anzeigen")
                 }
@@ -448,9 +424,15 @@ struct InsightsView: View {
                 .foregroundStyle(gradeColor(avg))
                 .clipShape(Capsule())
         }
-        .padding(10)
-        .background(.thinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color(.separator).opacity(0.15), lineWidth: 1)
+        )
     }
 
     @ViewBuilder
@@ -477,8 +459,44 @@ struct InsightsView: View {
                 .foregroundStyle(gradeColor(avg))
                 .clipShape(Capsule())
         }
-        .padding(10)
-        .background(Color.black.opacity(isDark ? 0.18 : 0.03))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color(.separator).opacity(0.12), lineWidth: 1)
+        )
+    }
+}
+
+private struct StatChip: View {
+    let title: String
+    let value: String
+    let accent: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title.uppercased())
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .monospacedDigit()
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(accent.opacity(0.2), lineWidth: 1)
+        )
     }
 }

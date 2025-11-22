@@ -104,11 +104,27 @@ struct HomeworkListView: View {
     private func homeworkRow(_ hw: Homework, isInactiveSection: Bool = false) -> some View {
         let currentUserId = Auth.auth().currentUser?.uid
         let isSharedOwner = hw.isShared && hw.creatorId == currentUserId
+        let now = Date()
+        let isOverdue = !hw.isCompleted && ((hw.dueDate ?? hw.createdAt) < now || (hw.reminderAt ?? hw.dueDate ?? hw.createdAt) < now)
+        let isDueTomorrow: Bool = {
+            guard !hw.isCompleted, let due = hw.dueDate else { return false }
+            return Calendar.current.isDateInTomorrow(due)
+        }()
+        let attentionTag: (text: String, color: Color)? = {
+            if isOverdue { return ("Überfällig", .red) }
+            if isDueTomorrow { return ("Morgen fällig", .orange) }
+            return nil
+        }()
         HStack {
             VStack(alignment: .leading, spacing: 4) {
-                Text(hw.title)
-                    .font(.body)
-                    .lineLimit(2)
+                HStack(spacing: 6) {
+                    Text(hw.title)
+                        .font(.body)
+                        .lineLimit(2)
+                    if let tag = attentionTag {
+                        attentionBadge(tag.text, color: tag.color)
+                    }
+                }
                 if !hw.subjectName.isEmpty {
                     Text(hw.subjectName)
                         .font(.caption)
@@ -241,6 +257,7 @@ struct HomeworkListView: View {
                 }
             }
         }
+        .padding(.vertical, 6)
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             if !isInactiveSection && !hw.isCompleted {
                 Button {
@@ -326,6 +343,16 @@ struct HomeworkListView: View {
 
     private func reminderAccessibilityLabel(_ hw: Homework) -> String {
         return "Erinnerung bearbeiten"
+    }
+
+    private func attentionBadge(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(color.opacity(0.12))
+            .foregroundStyle(color)
+            .clipShape(Capsule())
     }
 }
 

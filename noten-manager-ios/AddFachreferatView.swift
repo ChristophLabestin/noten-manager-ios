@@ -37,8 +37,12 @@ struct AddFachreferatView: View {
                     }
                     TextField("Note (z. B. 10.0)", text: $gradeText)
                         .keyboardType(.decimalPad)
+                        .submitLabel(.done)
+                        .onSubmit { hideKeyboard() }
                     DatePicker("Datum", selection: $date, displayedComponents: .date)
                     TextField("Notiz (optional)", text: $note)
+                        .submitLabel(.done)
+                        .onSubmit { hideKeyboard() }
                 }
                 if let error {
                     Text(error).foregroundStyle(.red)
@@ -58,6 +62,8 @@ struct AddFachreferatView: View {
                     .disabled(!canSave || isSaving)
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
+            .hideKeyboardOnTap()
             .onAppear {
                 if subjectName.isEmpty {
                     if let pre = preselectedSubjectName,
@@ -76,6 +82,7 @@ struct AddFachreferatView: View {
                 }
             }
         }
+        .keyboardDismissToolbar()
     }
 
     private func save() async {

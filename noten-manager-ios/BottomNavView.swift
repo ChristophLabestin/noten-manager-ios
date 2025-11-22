@@ -20,6 +20,7 @@ struct BottomNavView: View {
     var onOpenSettings: (() -> Void)?
     var onOpenInsights: (() -> Void)?
     var onOpenAbitur: (() -> Void)?
+    var onOpenPractical: (() -> Void)?
 
     // Optional: Vorauswahl für "Note hinzufügen" (z. B. auf SubjectDetail)
     var quickAddPreselectedSubjectName: String? = nil
@@ -30,6 +31,7 @@ struct BottomNavView: View {
     @State private var showAddFachreferat: Bool = false
     @State private var showAddHomework: Bool = false
     @State private var showAddExam: Bool = false
+    @State private var showPractical: Bool = false
 
     // Press-Feedback für FAB
     @State private var fabPressed: Bool = false
@@ -50,6 +52,10 @@ struct BottomNavView: View {
 
     private var hasFachreferat: Bool {
         store.fachreferat != nil
+    }
+
+    private var showPracticalTab: Bool {
+        store.schoolType == .fos && (store.gradeYear == 11 || store.gradeYear == 12)
     }
 
     // Theme/Colors aus variables.scss
@@ -154,12 +160,16 @@ struct BottomNavView: View {
             .sheet(isPresented: $showAddHomework) {
                 AddHomeworkView(preselectedSubjectName: quickAddPreselectedSubjectName)
                     .environmentObject(store)
-            }
-            .sheet(isPresented: $showAddExam) {
-                AddExamView(preselectedSubjectName: quickAddPreselectedSubjectName)
-                    .environmentObject(store)
-            }
         }
+        .sheet(isPresented: $showAddExam) {
+            AddExamView(preselectedSubjectName: quickAddPreselectedSubjectName)
+                .environmentObject(store)
+        }
+        .sheet(isPresented: $showPractical) {
+            PracticalTrainingView()
+                .environmentObject(store)
+        }
+    }
     }
 
     // MARK: - Subviews
@@ -357,6 +367,20 @@ struct BottomNavView: View {
                             ) {
                                 isOpen = false
                                 showAddSubject = true
+                            }
+
+                            if showPracticalTab {
+                                ActionButton(
+                                    iconContent: AnyView(Image(systemName: "briefcase.fill").font(.system(size: 18, weight: .semibold))),
+                                    label: "Praktikum",
+                                    description: "Fachpraktische Ausbildung eintragen",
+                                    disabled: false,
+                                    title: ""
+                                ) {
+                                    isOpen = false
+                                    showPractical = true
+                                    onOpenPractical?()
+                                }
                             }
 
                             // Fachreferat

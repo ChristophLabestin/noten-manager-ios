@@ -123,6 +123,8 @@ struct AddHomeworkView: View {
                     .disabled(!canSave || isSaving || subjects.isEmpty)
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
+            .hideKeyboardOnTap()
             .onAppear {
                 if subjectName.isEmpty {
                     if let pre = preselectedSubjectName,
@@ -138,6 +140,7 @@ struct AddHomeworkView: View {
                 selectedGroupId = store.groupIds.first
             }
         }
+        .keyboardDismissToolbar()
     }
 
     private func save() async {

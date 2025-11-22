@@ -32,6 +32,7 @@ struct AppSettingsView: View {
     @State private var schoolYearMessage: String?
     @State private var schoolYearError: String?
     @State private var schoolYearInputIsValid: Bool = false
+    @State private var showSchoolYearWizard: Bool = false
 
     // Reset
     @State private var showResetAccountSheet: Bool = false
@@ -85,6 +86,39 @@ struct AppSettingsView: View {
         return Calendar.current.date(from: comps) ?? Date()
     }
 
+    private var reminderTimeText: String {
+        String(format: "%02d:%02d", store.homeworkReminderHour, store.homeworkReminderMinute)
+    }
+
+    private var overdueHomeworksCount: Int {
+        let now = Date()
+        return store.allHomeworks.filter { hw in
+            guard !hw.isCompleted else { return false }
+            if let due = hw.dueDate { return due < now }
+            if let reminder = hw.reminderAt { return reminder < now }
+            return false
+        }.count
+    }
+
+    private var homeworkDueTomorrowCount: Int {
+        let cal = Calendar.current
+        return store.allHomeworks.filter { hw in
+            guard !hw.isCompleted, let due = hw.dueDate else { return false }
+            return cal.isDateInTomorrow(due)
+        }.count
+    }
+
+    private var overdueExamsCount: Int {
+        let now = Date()
+        return store.allExams.filter { exam in
+            !exam.isCompleted && exam.date < now
+        }.count
+    }
+
+    private var gradeOptions: [Int] {
+        store.schoolType == .fos ? [11, 12, 13] : [12, 13]
+    }
+
     private func isValidSchoolYear(_ value: String) -> Bool {
         let pattern = "^(\\d{4})-(\\d{2})$"
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
@@ -101,21 +135,162 @@ struct AppSettingsView: View {
         return ((start + 1) % 100) == suffix
     }
 
+    private var headerCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Einstellungs-Board")
+                        .font(.title3.weight(.bold))
+                    Text("Status, Thema und Erinnerungen ohne Gedränge.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                PillBadge(
+                    text: store.schoolType == .fos ? "FOS" : "BOS",
+                    systemImage: "seal.fill",
+                    foreground: Color.indigo,
+                    background: Color.indigo.opacity(0.14)
+                )
+            }
+
+            VStack(spacing: 12) {
+                HStack(spacing: 12) {
+                    HeaderTile(
+                        title: "Schuljahr",
+                        value: store.activeSchoolYearId ?? "—",
+                        icon: "calendar",
+                        accent: .cyan
+                    )
+                    HeaderTile(
+                        title: "Jahrgang",
+                        value: store.gradeYear.map { "\($0)." } ?? "—",
+                        icon: "graduationcap.fill",
+                        accent: .mint
+                    )
+                }
+                HStack(spacing: 12) {
+                    HeaderTile(
+                        title: "Erinnerung",
+                        value: reminderTimeText,
+                        icon: "bell.fill",
+                        accent: .orange
+                    )
+                    HeaderTile(
+                        title: "Prüfungsfächer",
+                        value: "\(currentExamSubjectsCount)/\(maxExamSubjects)",
+                        icon: "checkmark.seal.fill",
+                        accent: .indigo
+                    )
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    PillBadge(
+                        text: store.theme == "feminine" ? "Soft/Pink" : "Klassisch",
+                        systemImage: "paintpalette.fill",
+                        foreground: Color.orange,
+                        background: Color.orange.opacity(0.15)
+                    )
+                    if overdueHomeworksCount > 0 {
+                        PillBadge(
+                            text: "HW fällig: \(overdueHomeworksCount)",
+                            systemImage: "exclamationmark.triangle.fill",
+                            foreground: .orange,
+                            background: Color.orange.opacity(0.16)
+                        )
+                    }
+                    if homeworkDueTomorrowCount > 0 {
+                        PillBadge(
+                            text: "HW morgen: \(homeworkDueTomorrowCount)",
+                            systemImage: "clock.badge.exclamationmark",
+                            foreground: .yellow,
+                            background: Color.yellow.opacity(0.16)
+                        )
+                    }
+                    if overdueExamsCount > 0 {
+                        PillBadge(
+                            text: "Prüfungen fällig: \(overdueExamsCount)",
+                            systemImage: "calendar.badge.exclamationmark",
+                            foreground: .red,
+                            background: Color.red.opacity(0.16)
+                        )
+                    }
+                    if overdueHomeworksCount == 0 && homeworkDueTomorrowCount == 0 && overdueExamsCount == 0 {
+                        PillBadge(
+                            text: "Alles im Plan",
+                            systemImage: "checkmark.circle.fill",
+                            foreground: .green,
+                            background: Color.green.opacity(0.15)
+                        )
+                    }
+                }
+                .padding(.vertical, 2)
+                .padding(.leading, 2)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(Color(.systemBackground))
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.cyan.opacity(0.10),
+                                Color.indigo.opacity(0.08)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .opacity(0.7)
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(Color(.separator).opacity(0.18), lineWidth: 1)
+            }
+        )
+        .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 8)
+    }
+
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 18) {
+                    headerCard
                     generalCard
-                    groupsCard
                     schoolYearCard
+                    groupsCard
                     onboardingCard
                     resetCard
                     accountCard
                     infoCard
+
+                    NavigationLink(
+                        destination: AbiturExamView().environmentObject(store),
+                        isActive: $navigateToFinal
+                    ) { EmptyView() }
+                    .frame(width: 0, height: 0)
+                    .hidden()
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+                .padding(.vertical, 12)
             }
+            .background(
+                LinearGradient(
+                    colors: [
+                        Color(.systemGray6),
+                        Color(.systemBackground)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
+            )
+            .scrollDismissesKeyboard(.interactively)
+            .hideKeyboardOnTap()
             .navigationTitle("Einstellungen")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -126,34 +301,18 @@ struct AppSettingsView: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
+                    .frame(maxWidth: .infinity)
+                    .multilineTextAlignment(.center)
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack {
+                    HStack(spacing: 12) {
                         Button { showExamSheet = true } label: {
-                            ZStack(alignment: .topTrailing) {
-                                Image(systemName: "calendar.badge.clock")
-                                    .imageScale(.large)
-                                if hasOverdueExams {
-                                    Circle()
-                                        .fill(Color.red)
-                                        .frame(width: 8, height: 8)
-                                        .offset(x: 4, y: -4)
-                                }
-                            }
+                            ToolbarIcon(symbol: "calendar.badge.clock", showDot: hasOverdueExams)
                         }
                         .accessibilityLabel("Klausurtermine anzeigen")
 
                         Button { showHomeworkSheet = true } label: {
-                            ZStack(alignment: .topTrailing) {
-                                Image(systemName: "checklist")
-                                    .imageScale(.large)
-                                if hasOverdueHomeworks || hasHomeworkDueTomorrow {
-                                    Circle()
-                                        .fill(Color.red)
-                                        .frame(width: 8, height: 8)
-                                        .offset(x: 4, y: -4)
-                                }
-                            }
+                            ToolbarIcon(symbol: "checklist", showDot: hasOverdueHomeworks || hasHomeworkDueTomorrow)
                         }
                         .accessibilityLabel("Aktive Hausaufgaben anzeigen")
                     }
@@ -164,17 +323,18 @@ struct AppSettingsView: View {
                 nameSavedSuccess = false
                 selectedSubjectsForNewGroup = []
             }
-            .background(
-                Group {
-                    NavigationLink(
-                        destination: AbiturExamView().environmentObject(store),
-                        isActive: $navigateToFinal
-                    ) { EmptyView() }
-                }
-            )
             .sheet(isPresented: $showHomeworkSheet) {
                 HomeworkListView()
                     .environmentObject(store)
+            }
+            .sheet(isPresented: $showSchoolYearWizard) {
+                OnboardingFunnelView(
+                    isSchoolYearChange: true,
+                    previousSchoolYearId: store.activeSchoolYearId
+                ) {
+                    showSchoolYearWizard = false
+                }
+                .environmentObject(store)
             }
             .sheet(isPresented: $showExamSheet) {
                 ExamListView()
@@ -230,112 +390,131 @@ struct AppSettingsView: View {
                 Text("Möchtest du diese Gruppe wirklich verlassen?")
             }
         }
+        .keyboardDismissToolbar()
     }
 
     private var generalCard: some View {
         SettingsCard(
-            title: "Allgemein",
-            subtitle: "Allgemeine App- und Account-Einstellungen"
+            title: "Profil & Oberfläche",
+            subtitle: "Name, Farben und Interaktionen",
+            systemImage: "slider.horizontal.3",
+            accent: .cyan
         ) {
             VStack(alignment: .leading, spacing: 12) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Anzeigename")
-                        .font(sectionHeaderFont)
-                    HStack {
-                        TextField("Dein Name", text: $newName)
-                            .textContentType(.name)
-                        Button {
-                            Task { await saveName() }
-                        } label: {
-                            if isSavingName { ProgressView() } else { Text("Name speichern") }
-                        }
-                        .disabled(isSavingName || newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-                    if nameSavedSuccess {
-                        Text("✅ Name erfolgreich gespeichert!")
-                            .font(.footnote)
-                            .foregroundStyle(.green)
-                    }
-                }
-
-                Divider().padding(.vertical, 4)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Farbschema")
-                        .font(sectionHeaderFont)
-                    Picker(
-                        "",
-                        selection: Binding(
-                            get: { store.theme },
-                            set: { val in Task { await store.updatePreferences(theme: val) } }
-                        )
-                    ) {
-                        Text("Klassisch").tag("default")
-                        Text("Pink").tag("feminine")
-                    }
-                    .pickerStyle(.segmented)
-
-                    Text("Wähle, ob die Oberfläche eher klassisch oder mit einem weicheren Farbschema angezeigt wird.")
-                        .font(helperFont)
-                        .foregroundStyle(.secondary)
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Dark Mode")
-                        .font(sectionHeaderFont)
-                    Picker("", selection: Binding(
-                        get: { store.darkModeMode },
-                        set: { val in Task { await store.updatePreferences(darkModeMode: val) } }
-                    )) {
-                        Text("Geräteeinstellung").tag("system")
-                        Text("Light Mode").tag("light")
-                        Text("Dark Mode").tag("dark")
-                    }
-                    .pickerStyle(.segmented)
-                    Text("Geräteeinstellung folgt dem iOS-Modus, Light/Dark sind fest gewählt.")
-                        .font(helperFont)
-                        .foregroundStyle(.secondary)
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Weitere Einstellungen")
-                        .font(sectionHeaderFont)
-
-                    Toggle(
-                        isOn: Binding(
-                            get: { store.compactView },
-                            set: { val in Task { await store.updatePreferences(compactView: val) } }
-                        )
-                    ) {
-                        Text(store.compactView ? "Kompakte Tabellen-Ansicht aktiviert" : "Kompakte Tabellen-Ansicht deaktiviert")
-                    }
-
-                    Toggle(
-                        isOn: Binding(
-                            get: { store.animationsEnabled },
-                            set: { val in Task { await store.updatePreferences(animationsEnabled: val) } }
-                        )
-                    ) {
-                        Text(store.animationsEnabled ? "Animationen aktiviert" : "Animationen deaktiviert")
-                    }
-
-                    DatePicker(
-                        "Hausaufgaben-Erinnerung (täglich, 1 Tag vor Fälligkeit)",
-                        selection: Binding(
-                            get: { homeworkReminderDate },
-                            set: { newVal in
-                                let comps = Calendar.current.dateComponents([.hour, .minute], from: newVal)
-                                let h = comps.hour ?? 19
-                                let m = comps.minute ?? 0
-                                Task { await store.updateHomeworkReminderTime(hour: h, minute: m) }
+                SettingsSectionBox {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Anzeigename")
+                            .font(sectionHeaderFont)
+                        Text("Wird in Dashboard und Übersichten angezeigt.")
+                            .font(helperFont)
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 10) {
+                            TextField("Dein Name", text: $newName)
+                                .textContentType(.name)
+                                .submitLabel(.done)
+                                .onSubmit { hideKeyboard() }
+                                .padding(12)
+                                .background(Color(.secondarySystemBackground))
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            Button {
+                                Task { await saveName() }
+                            } label: {
+                                if isSavingName { ProgressView() } else { Text("Name speichern") }
                             }
-                        ),
-                        displayedComponents: .hourAndMinute
-                    )
-                    .datePickerStyle(.compact)
-                    Text("Standard ist 19:00 Uhr. Wir erinnern am Vortag, falls die Hausaufgabe dann noch offen ist.")
-                        .font(helperFont)
-                        .foregroundStyle(.secondary)
+                            .buttonStyle(.borderedProminent)
+                            .tint(.cyan)
+                            .disabled(isSavingName || newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                        if nameSavedSuccess {
+                            Text("✅ Name erfolgreich gespeichert!")
+                                .font(.footnote)
+                                .foregroundStyle(.green)
+                        }
+                    }
+                }
+
+                SettingsSectionBox {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Farbschema")
+                            .font(sectionHeaderFont)
+                        Picker(
+                            "",
+                            selection: Binding(
+                                get: { store.theme },
+                                set: { val in Task { await store.updatePreferences(theme: val) } }
+                            )
+                        ) {
+                            Text("Klassisch").tag("default")
+                            Text("Soft / Pink").tag("feminine")
+                        }
+                        .pickerStyle(.segmented)
+
+                        Text("Wähle, ob die Oberfläche eher klassisch oder mit einem weicheren Farbschema angezeigt wird.")
+                            .font(helperFont)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                SettingsSectionBox {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Darstellung & Animationen")
+                            .font(sectionHeaderFont)
+                        Picker("", selection: Binding(
+                            get: { store.darkModeMode },
+                            set: { val in Task { await store.updatePreferences(darkModeMode: val) } }
+                        )) {
+                            Text("Geräteeinstellung").tag("system")
+                            Text("Light Mode").tag("light")
+                            Text("Dark Mode").tag("dark")
+                        }
+                        .pickerStyle(.segmented)
+                        Text("Geräteeinstellung folgt dem iOS-Modus, Light/Dark sind fest gewählt.")
+                            .font(helperFont)
+                            .foregroundStyle(.secondary)
+
+                        Toggle(
+                            isOn: Binding(
+                                get: { store.compactView },
+                                set: { val in Task { await store.updatePreferences(compactView: val) } }
+                            )
+                        ) {
+                            Text(store.compactView ? "Kompakte Tabellen-Ansicht aktiviert" : "Kompakte Tabellen-Ansicht deaktiviert")
+                        }
+
+                        Toggle(
+                            isOn: Binding(
+                                get: { store.animationsEnabled },
+                                set: { val in Task { await store.updatePreferences(animationsEnabled: val) } }
+                            )
+                        ) {
+                            Text(store.animationsEnabled ? "Animationen aktiviert" : "Animationen deaktiviert")
+                        }
+                    }
+                }
+
+                SettingsSectionBox {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Hausaufgaben-Erinnerung")
+                            .font(sectionHeaderFont)
+
+                        DatePicker(
+                            "1 Tag vor Fälligkeit erinnern",
+                            selection: Binding(
+                                get: { homeworkReminderDate },
+                                set: { newVal in
+                                    let comps = Calendar.current.dateComponents([.hour, .minute], from: newVal)
+                                    let h = comps.hour ?? 19
+                                    let m = comps.minute ?? 0
+                                    Task { await store.updateHomeworkReminderTime(hour: h, minute: m) }
+                                }
+                            ),
+                            displayedComponents: .hourAndMinute
+                        )
+                        .datePickerStyle(.compact)
+                        Text("Standard ist 19:00 Uhr. Wir erinnern am Vortag, falls die Hausaufgabe dann noch offen ist.")
+                            .font(helperFont)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
@@ -346,147 +525,188 @@ struct AppSettingsView: View {
     private var schoolYearCard: some View {
         SettingsCard(
             title: "Schuljahr",
-            subtitle: "Aktives Schuljahr, Jahrgang und Prüfungsfächer"
+            subtitle: "Aktives Schuljahr, Jahrgang und Prüfungsfächer",
+            systemImage: "graduationcap.fill",
+            accent: .mint
         ) {
             VStack(alignment: .leading, spacing: 12) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Aktives Schuljahr")
-                        .font(sectionHeaderFont)
-                    if store.schoolYears.isEmpty {
-                        Text("Noch keine Schuljahre gefunden. Lege eines an oder warte, bis es automatisch erstellt wird.")
-                            .font(helperFont)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(store.schoolYears, id: \.self) { sy in
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(sy)
-                                        .font(.headline)
-                                    if store.activeSchoolYearId == sy {
-                                        Text("Aktiv")
-                                            .font(helperFont)
-                                            .foregroundStyle(.green)
-                                    }
-                                }
-                                Spacer()
-                                Button {
-                                    Task { await store.setActiveSchoolYear(id: sy) }
-                                } label: {
-                                    Image(systemName: store.activeSchoolYearId == sy ? "largecircle.fill.circle" : "circle")
-                                        .font(.title3)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            .padding(10)
-                            .background(Color(.secondarySystemBackground))
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                        }
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Neues Schuljahr anlegen")
-                        .font(sectionHeaderFont)
-                    TextField("z. B. 2026-27", text: Binding(
-                        get: { newSchoolYearName },
-                        set: { val in
-                            let trimmed = val.trimmingCharacters(in: .whitespacesAndNewlines)
-                            newSchoolYearName = trimmed
-                            schoolYearInputIsValid = isValidSchoolYear(trimmed)
-                            schoolYearError = nil
-                            schoolYearMessage = nil
-                        }
-                    ))
-                    .textInputAutocapitalization(.none)
-                    .disableAutocorrection(true)
-                    .keyboardType(.numbersAndPunctuation)
-
-                    Button {
-                        Task { await createSchoolYear() }
-                    } label: {
-                        if isCreatingSchoolYearLocal {
-                            ProgressView()
+                SettingsSectionBox {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Aktives Schuljahr")
+                            .font(sectionHeaderFont)
+                        if store.schoolYears.isEmpty {
+                            Text("Noch keine Schuljahre gefunden. Lege eines an oder warte, bis es automatisch erstellt wird.")
+                                .font(helperFont)
+                                .foregroundStyle(.secondary)
                         } else {
-                            Text("Anlegen & aktivieren")
-                                .foregroundColor(.blue)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!schoolYearInputIsValid || store.schoolYears.contains(where: { $0 == newSchoolYearName }))
-
-                    if let msg = schoolYearMessage {
-                        Text(msg)
-                            .font(helperFont)
-                            .foregroundStyle(.green)
-                    }
-                    if let err = schoolYearError {
-                        Text(err)
-                            .font(helperFont)
-                            .foregroundStyle(.red)
-                    }
-                }
-
-                Divider().padding(.vertical, 4)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Jahrgangsstufe")
-                        .font(sectionHeaderFont)
-                    Text("Wähle deine Jahrgangsstufe für das aktive Schuljahr.")
-                        .font(helperFont)
-                        .foregroundStyle(.secondary)
-
-                    Picker(
-                        "",
-                        selection: Binding(
-                            get: { store.gradeYear ?? 0 },
-                            set: { val in
-                                let year = (val == 12 || val == 13) ? val : 0
-                                if year != 0 {
-                                    Task { await store.updateGradeYear(year) }
+                            VStack(spacing: 10) {
+                                ForEach(store.schoolYears, id: \.self) { sy in
+                                    let isActive = store.activeSchoolYearId == sy
+                                    Button {
+                                        Task { await store.setActiveSchoolYear(id: sy) }
+                                    } label: {
+                                        HStack {
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(sy)
+                                                    .font(.headline)
+                                                if isActive {
+                                                    Text("Aktiv")
+                                                        .font(helperFont)
+                                                        .foregroundStyle(.green)
+                                                }
+                                            }
+                                            Spacer()
+                                            Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
+                                                .font(.title3)
+                                                .foregroundStyle(isActive ? .green : .secondary)
+                                        }
+                                        .padding(12)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                .fill(Color(.secondarySystemBackground))
+                                        )
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                .stroke(isActive ? Color.green : Color.clear, lineWidth: 1)
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
                                 }
                             }
-                        )
-                    ) {
-                        Text("Bitte auswählen").tag(0)
-                        Text("12. Jahrgang").tag(12)
-                        Text("13. Jahrgang").tag(13)
+                        }
                     }
-                    .pickerStyle(.segmented)
                 }
 
-                Divider().padding(.vertical, 4)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Prüfungsfächer")
-                        .font(sectionHeaderFont)
-                    Text("Maximal 4 Prüfungsfächer auswählen.")
-                        .font(helperFont)
-                        .foregroundStyle(.secondary)
-
-                    if store.subjects.isEmpty {
-                        Text("Lege zuerst Fächer an, um Prüfungsfächer zu wählen.")
+                SettingsSectionBox {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Neues Schuljahr anlegen")
+                            .font(sectionHeaderFont)
+                        Text("Starte den Schuljahrs-Setup (wie im Onboarding), um Jahr, Schulart, Jahrgang und Gruppen festzulegen.")
+                            .font(helperFont)
                             .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(store.subjects, id: \.name) { subject in
-                            ExamSubjectRow(
-                                subject: subject,
-                                isDisabled: !(subject.examSubject ?? false) && currentExamSubjectsCount >= maxExamSubjects,
-                                onToggle: { isOn in
-                                    let nextExamType = subject.examType ?? .written
+
+                        Button {
+                            showSchoolYearWizard = true
+                        } label: {
+                            Text("Schuljahrs-Setup starten")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.mint)
+                    }
+                }
+
+                SettingsSectionBox {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Schulart")
+                            .font(sectionHeaderFont)
+                        Text("Bestimmt die Berechnung der Abschlussnote (FOS: 11./12. + Praktikum, BOS: 12./13.).")
+                            .font(helperFont)
+                            .foregroundStyle(.secondary)
+
+                        Picker(
+                            "",
+                            selection: Binding(
+                                get: { store.schoolType },
+                                set: { val in
                                     Task {
-                                        await store.updateSubjectExamFlags(
-                                            subjectName: subject.name,
-                                            examSubject: isOn,
-                                            examType: nextExamType
-                                        )
+                                        await store.updateSchoolType(val)
+                                        if val == .bos, store.gradeYear == 11 {
+                                            await store.updateGradeYear(12)
+                                        }
                                     }
                                 }
                             )
+                        ) {
+                            Text("FOS").tag(SchoolType.fos)
+                            Text("BOS").tag(SchoolType.bos)
                         }
-                        if currentExamSubjectsCount >= maxExamSubjects {
-                            Text("Du hast bereits 4 Prüfungsfächer ausgewählt. Entferne eines, um ein anderes Fach als Prüfungsfach zu markieren.")
-                                .font(helperFont)
+                        .pickerStyle(.segmented)
+                    }
+                }
+
+                SettingsSectionBox {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Jahrgangsstufe")
+                            .font(sectionHeaderFont)
+                        Text("Wähle deine Jahrgangsstufe für das aktive Schuljahr.")
+                            .font(helperFont)
+                            .foregroundStyle(.secondary)
+
+                        VStack(spacing: 10) {
+                            ForEach(gradeOptions, id: \.self) { grade in
+                                let selected = store.gradeYear == grade
+                                Button {
+                                    Task { await store.updateGradeYear(grade) }
+                                } label: {
+                                    HStack {
+                                        Text("\(grade). Jahrgang")
+                                            .font(.body)
+                                        Spacer()
+                                        if selected {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .foregroundStyle(.green)
+                                        }
+                                    }
+                                    .padding(12)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .fill(selected ? Color.accentColor.opacity(0.12) : Color(.secondarySystemBackground))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .stroke(selected ? Color.accentColor : Color.clear, lineWidth: 1)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+
+                SettingsSectionBox {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Prüfungsfächer")
+                            .font(sectionHeaderFont)
+                        Text("Maximal 4 Prüfungsfächer auswählen.")
+                            .font(helperFont)
+                            .foregroundStyle(.secondary)
+
+                        if store.subjects.isEmpty {
+                            Text("Lege zuerst Fächer an, um Prüfungsfächer zu wählen.")
                                 .foregroundStyle(.secondary)
+                        } else {
+                            VStack(spacing: 8) {
+                                ForEach(store.subjects, id: \.name) { subject in
+                                    ExamSubjectRow(
+                                        subject: subject,
+                                        isDisabled: !(subject.examSubject ?? false) && currentExamSubjectsCount >= maxExamSubjects,
+                                        onToggle: { isOn in
+                                            let nextExamType = subject.examType ?? .written
+                                            Task {
+                                                await store.updateSubjectExamFlags(
+                                                    subjectName: subject.name,
+                                                    examSubject: isOn,
+                                                    examType: nextExamType
+                                                )
+                                            }
+                                        }
+                                    )
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 8)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .fill(Color(.secondarySystemBackground))
+                                    )
+                                }
+                            }
+                            if currentExamSubjectsCount >= maxExamSubjects {
+                                Text("Du hast bereits 4 Prüfungsfächer ausgewählt. Entferne eines, um ein anderes Fach als Prüfungsfach zu markieren.")
+                                    .font(helperFont)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
@@ -498,204 +718,248 @@ struct AppSettingsView: View {
 
     private var groupsCard: some View {
         SettingsCard(
-            title: "Gruppen",
-            subtitle: "Gemeinsame Gruppen für Klausuren und Hausaufgaben"
+            title: "Gruppen & Sync",
+            subtitle: "Gemeinsame Gruppen für Klausuren und Hausaufgaben",
+            systemImage: "person.3.sequence.fill",
+            accent: .indigo
         ) {
             VStack(alignment: .leading, spacing: 12) {
-                if store.groupIds.isEmpty {
-                    Text("Lege eine Gruppe an oder tritt mit einem Code bei. Fächer werden gruppenbezogen geteilt.")
-                        .font(helperFont)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(store.groupIds, id: \.self) { gid in
-                        VStack(alignment: .leading, spacing: 6) {
-                            let isCopied = copiedGroupId == gid
-                            VStack(alignment: .leading, spacing: 10) {
-                                // Top row: Name left, Code + Kopieren rechts
-                                HStack(alignment: .top) {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(store.groupNames[gid] ?? "Ohne Namen")
-                                            .font(.headline)
-                                    }
-                                    Spacer()
-                                    VStack(alignment: .trailing, spacing: 6) {
-                                        Text(gid)
-                                            .font(.system(.caption, design: .monospaced))
-                                            .foregroundStyle(.secondary)
-                                        Button {
-                                            UIPasteboard.general.string = gid
-                                            withAnimation { copiedGroupId = gid }
-                                            Task {
-                                                try? await Task.sleep(nanoseconds: 1_200_000_000)
-                                                await MainActor.run {
-                                                    if copiedGroupId == gid {
-                                                        withAnimation { copiedGroupId = nil }
-                                                    }
-                                                }
-                                            }
-                                        } label: {
-                                            HStack(spacing: 6) {
-                                                Image(systemName: isCopied ? "checkmark.circle.fill" : "doc.on.doc")
-                                                    .foregroundStyle(isCopied ? .green : .blue)
-                                                Text(isCopied ? "Kopiert" : "Kopieren")
-                                                    .font(.caption)
-                                                    .foregroundStyle(isCopied ? .green : .blue)
-                                            }
-                                        }
-                                        .buttonStyle(.plain)
-                                        .accessibilityLabel("Gruppencode kopieren")
-                                    }
-                                }
+                SettingsSectionBox {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Deine Gruppen")
+                            .font(sectionHeaderFont)
 
-                                // Bottom row: Abgleichen links, Verlassen rechts
-                                HStack {
-                                    Button("Fächer abgleichen") {
-                                        showMappingGroupId = gid
-                                    }
-                                    Spacer()
-                                    Button(role: .destructive) {
-                                        groupPendingLeave = gid
-                                    } label: {
-                                        HStack(spacing: 6) {
-                                            Image(systemName: "rectangle.portrait.and.arrow.right")
-                                            Text("Verlassen")
-                                                .font(.caption)
-                                        }
-                                        .foregroundStyle(.red)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .accessibilityLabel("Gruppe verlassen")
-                                }
-                            }
-                        }
-                        .padding(12)
-                        .background(.thinMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                    }
-                }
-
-                Divider().padding(.vertical, 4)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Neue Gruppe erstellen")
-                        .font(sectionHeaderFont)
-                    TextField("Gruppenname (Pflichtfeld)", text: $groupNameInput)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Fächer einbringen")
-                            .font(helperFont)
-                        if store.availableSubjectsForNewGroup().isEmpty {
-                            Text("Alle Fächer sind bereits einer Gruppe zugeordnet.")
+                        if store.groupIds.isEmpty {
+                            Text("Lege eine Gruppe an oder tritt mit einem Code bei. Fächer werden gruppenbezogen geteilt.")
                                 .font(helperFont)
                                 .foregroundStyle(.secondary)
                         } else {
-                            ForEach(store.availableSubjectsForNewGroup(), id: \.name) { subj in
-                                Toggle(subj.name, isOn: Binding(
-                                    get: { selectedSubjectsForNewGroup.contains(subj.name) },
-                                    set: { val in
-                                        if val { selectedSubjectsForNewGroup.insert(subj.name) }
-                                        else { selectedSubjectsForNewGroup.remove(subj.name) }
+                            VStack(spacing: 10) {
+                                ForEach(store.groupIds, id: \.self) { gid in
+                                    let isCopied = copiedGroupId == gid
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        HStack(alignment: .top) {
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(store.groupNames[gid] ?? "Ohne Namen")
+                                                    .font(.headline)
+                                                Text("Code: \(gid)")
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                            Spacer()
+                                            Button {
+                                                UIPasteboard.general.string = gid
+                                                withAnimation { copiedGroupId = gid }
+                                                Task {
+                                                    try? await Task.sleep(nanoseconds: 1_200_000_000)
+                                                    await MainActor.run {
+                                                        if copiedGroupId == gid {
+                                                            withAnimation { copiedGroupId = nil }
+                                                        }
+                                                    }
+                                                }
+                                            } label: {
+                                                HStack(spacing: 6) {
+                                                    Image(systemName: isCopied ? "checkmark.circle.fill" : "doc.on.doc")
+                                                        .foregroundStyle(isCopied ? .green : .blue)
+                                                    Text(isCopied ? "Kopiert" : "Kopieren")
+                                                        .font(.caption)
+                                                        .foregroundStyle(isCopied ? .green : .blue)
+                                                }
+                                                .padding(.horizontal, 10)
+                                                .padding(.vertical, 6)
+                                                .background(
+                                                    Capsule(style: .continuous)
+                                                        .fill(Color(.secondarySystemBackground))
+                                                )
+                                            }
+                                            .buttonStyle(.plain)
+                                            .accessibilityLabel("Gruppencode kopieren")
+                                        }
+
+                                        HStack {
+                                            Button("Fächer abgleichen") {
+                                                showMappingGroupId = gid
+                                            }
+                                            Spacer()
+                                            Button(role: .destructive) {
+                                                groupPendingLeave = gid
+                                            } label: {
+                                                HStack(spacing: 6) {
+                                                    Image(systemName: "rectangle.portrait.and.arrow.right")
+                                                    Text("Verlassen")
+                                                        .font(.caption)
+                                                }
+                                                .foregroundStyle(.red)
+                                            }
+                                            .buttonStyle(.plain)
+                                            .accessibilityLabel("Gruppe verlassen")
+                                        }
                                     }
-                                ))
+                                    .padding(12)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                            .fill(Color(.secondarySystemBackground))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                            .stroke(Color.indigo.opacity(0.12), lineWidth: 1)
+                                    )
+                                }
                             }
                         }
                     }
                 }
-                Button {
-                    Task {
-                        guard !isCreatingGroup else { return }
-                        let trimmedName = groupNameInput.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !trimmedName.isEmpty else {
-                            groupErrorMessage = "Bitte einen Gruppennamen eingeben."
-                            return
+
+                SettingsSectionBox {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Neue Gruppe erstellen")
+                            .font(sectionHeaderFont)
+                        TextField("Gruppenname (Pflichtfeld)", text: $groupNameInput)
+                            .padding(12)
+                            .background(Color(.secondarySystemBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Fächer einbringen")
+                                .font(helperFont)
+                            if store.availableSubjectsForNewGroup().isEmpty {
+                                Text("Alle Fächer sind bereits einer Gruppe zugeordnet.")
+                                    .font(helperFont)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                ForEach(store.availableSubjectsForNewGroup(), id: \.name) { subj in
+                                    Toggle(subj.name, isOn: Binding(
+                                        get: { selectedSubjectsForNewGroup.contains(subj.name) },
+                                        set: { val in
+                                            if val { selectedSubjectsForNewGroup.insert(subj.name) }
+                                            else { selectedSubjectsForNewGroup.remove(subj.name) }
+                                        }
+                                    ))
+                                }
+                            }
                         }
-                        let subjects = selectedSubjectsForNewGroup.isEmpty ? store.availableSubjectsForNewGroup().map { $0.name } : Array(selectedSubjectsForNewGroup)
-                        guard !subjects.isEmpty else {
-                            groupErrorMessage = "Keine verfügbaren Fächer für diese Gruppe."
-                            return
+                        Button {
+                            Task {
+                                guard !isCreatingGroup else { return }
+                                let trimmedName = groupNameInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                                guard !trimmedName.isEmpty else {
+                                    groupErrorMessage = "Bitte einen Gruppennamen eingeben."
+                                    return
+                                }
+                                let subjects = selectedSubjectsForNewGroup.isEmpty ? store.availableSubjectsForNewGroup().map { $0.name } : Array(selectedSubjectsForNewGroup)
+                                guard !subjects.isEmpty else {
+                                    groupErrorMessage = "Keine verfügbaren Fächer für diese Gruppe."
+                                    return
+                                }
+                                isCreatingGroup = true
+                                groupErrorMessage = nil
+                                groupInfoMessage = nil
+                                defer { isCreatingGroup = false }
+                                do {
+                                    let code = try await store.createSharedGroup(name: trimmedName, subjects: subjects)
+                                    groupJoinCode = code
+                                    groupInfoMessage = "Neue Gruppe erstellt. Teile den Code mit deinen Mitschülern."
+                                    groupNameInput = ""
+                                    selectedSubjectsForNewGroup = []
+                                } catch {
+                                    groupErrorMessage = error.localizedDescription
+                                }
+                            }
+                        } label: {
+                            if isCreatingGroup { ProgressView() } else { Text("Gruppe erstellen") }
                         }
-                        isCreatingGroup = true
-                        groupErrorMessage = nil
-                        groupInfoMessage = nil
-                        defer { isCreatingGroup = false }
-                        do {
-                            let code = try await store.createSharedGroup(name: trimmedName, subjects: subjects)
-                            groupJoinCode = code
-                            groupInfoMessage = "Neue Gruppe erstellt. Teile den Code mit deinen Mitschülern."
-                            groupNameInput = ""
-                            selectedSubjectsForNewGroup = []
-                        } catch {
-                            groupErrorMessage = error.localizedDescription
+                        .buttonStyle(.borderedProminent)
+                        .tint(.indigo)
+                        .disabled(groupNameInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+
+                SettingsSectionBox {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Einer Gruppe beitreten")
+                            .font(sectionHeaderFont)
+                        TextField("Gruppencode", text: $groupJoinCode)
+                            .textInputAutocapitalization(.characters)
+                            .autocorrectionDisabled(true)
+                            .padding(12)
+                            .background(Color(.secondarySystemBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        Button {
+                            Task {
+                                guard !isJoiningGroup else { return }
+                                isJoiningGroup = true
+                                groupErrorMessage = nil
+                                groupInfoMessage = nil
+                                defer { isJoiningGroup = false }
+                                do {
+                                    try await store.joinSharedGroup(with: groupJoinCode)
+                                    groupInfoMessage = "Erfolgreich der Gruppe beigetreten."
+                                } catch {
+                                    groupErrorMessage = error.localizedDescription
+                                }
+                            }
+                        } label: {
+                            if isJoiningGroup { ProgressView() } else { Text("Mit Code beitreten") }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.indigo)
+                        .disabled(groupJoinCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                        if let msg = groupInfoMessage {
+                            Text(msg)
+                                .font(helperFont)
+                                .foregroundStyle(.green)
+                        }
+                        if let err = groupErrorMessage {
+                            Text(err)
+                                .font(helperFont)
+                                .foregroundStyle(.red)
                         }
                     }
-                } label: {
-                    if isCreatingGroup { ProgressView() } else { Text("Gruppe erstellen") }
-                }
-                .disabled(groupNameInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                Divider().padding(.vertical, 4)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Einer Gruppe beitreten")
-                        .font(sectionHeaderFont)
-                    TextField("Gruppencode", text: $groupJoinCode)
-                        .textInputAutocapitalization(.characters)
-                        .autocorrectionDisabled(true)
-                }
-                Button {
-                    Task {
-                        guard !isJoiningGroup else { return }
-                        isJoiningGroup = true
-                        groupErrorMessage = nil
-                        groupInfoMessage = nil
-                        defer { isJoiningGroup = false }
-                        do {
-                            try await store.joinSharedGroup(with: groupJoinCode)
-                            groupInfoMessage = "Erfolgreich der Gruppe beigetreten."
-                        } catch {
-                            groupErrorMessage = error.localizedDescription
-                        }
-                    }
-                } label: {
-                    if isJoiningGroup { ProgressView() } else { Text("Mit Code beitreten") }
-                }
-                .disabled(groupJoinCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                if let msg = groupInfoMessage {
-                    Text(msg)
-                        .font(helperFont)
-                        .foregroundStyle(.green)
-                }
-                if let err = groupErrorMessage {
-                    Text(err)
-                        .font(helperFont)
-                        .foregroundStyle(.red)
                 }
             }
         }
     }
 
     private var infoCard: some View {
-        SettingsCard(title: "Info", subtitle: nil) {
-            Text("App Version 1.4")
-                .font(helperFont)
-                .foregroundStyle(.secondary)
+        SettingsCard(
+            title: "Info",
+            subtitle: "Version & Hinweise",
+            systemImage: "info.circle",
+            accent: .gray
+        ) {
+            SettingsSectionBox {
+                Text("App Version 1.4")
+                    .font(helperFont)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
     private var accountCard: some View {
-        SettingsCard(title: "Account", subtitle: nil) {
-            Button(role: .destructive) {
-                Task {
-                    store.stopListening()
-                    try? Auth.auth().signOut()
+        SettingsCard(
+            title: "Account",
+            subtitle: "Sitzung verwalten",
+            systemImage: "person.crop.circle.badge.xmark",
+            accent: .gray
+        ) {
+            SettingsSectionBox {
+                Button(role: .destructive) {
+                    Task {
+                        store.stopListening()
+                        try? Auth.auth().signOut()
+                    }
+                } label: {
+                    HStack {
+                        Spacer()
+                        Text("Abmelden")
+                            .font(.body)
+                        Spacer()
+                    }
                 }
-            } label: {
-                HStack {
-                    Spacer()
-                    Text("Abmelden")
-                        .font(.body)
-                    Spacer()
-                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
             }
         }
     }
@@ -703,36 +967,52 @@ struct AppSettingsView: View {
     private var resetCard: some View {
         SettingsCard(
             title: "Daten zurücksetzen",
-            subtitle: "Account oder aktuelles Schuljahr bereinigen"
+            subtitle: "Account oder aktuelles Schuljahr bereinigen",
+            systemImage: "exclamationmark.triangle.fill",
+            accent: .red
         ) {
             VStack(alignment: .leading, spacing: 12) {
-                Button(role: .destructive) {
-                    resetAccountPassword = ""
-                    resetAccountSlideDone = false
-                    resetError = nil
-                    showResetAccountSheet = true
-                } label: {
-                    Text("Account komplett zurücksetzen")
-                        .frame(maxWidth: .infinity)
+                SettingsSectionBox {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Account komplett zurücksetzen")
+                            .font(sectionHeaderFont)
+                        Text("Alle Daten werden gelöscht. Bestätige im nächsten Schritt mit Slider und Passwort.")
+                            .font(helperFont)
+                            .foregroundStyle(.secondary)
+                        Button(role: .destructive) {
+                            resetAccountPassword = ""
+                            resetAccountSlideDone = false
+                            resetError = nil
+                            showResetAccountSheet = true
+                        } label: {
+                            Text("Account löschen")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.red)
+                    }
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
 
-                Button(role: .destructive) {
-                    resetYearPassword = ""
-                    resetYearSlideDone = false
-                    resetError = nil
-                    showResetYearSheet = true
-                } label: {
-                    Text("Aktives Schuljahr zurücksetzen")
-                        .frame(maxWidth: .infinity)
+                SettingsSectionBox {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Aktives Schuljahr zurücksetzen")
+                            .font(sectionHeaderFont)
+                        Text("Bereinigt alle Daten des aktuellen Schuljahres. Optimal, wenn du neu starten möchtest.")
+                            .font(helperFont)
+                            .foregroundStyle(.secondary)
+                        Button(role: .destructive) {
+                            resetYearPassword = ""
+                            resetYearSlideDone = false
+                            resetError = nil
+                            showResetYearSheet = true
+                        } label: {
+                            Text("Schuljahr zurücksetzen")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.orange)
+                    }
                 }
-                .buttonStyle(.bordered)
-                .tint(.orange)
-
-                Text("Diese Aktionen löschen Daten unwiderruflich. Bestätige mit Slider und Passwort.")
-                    .font(helperFont)
-                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -740,16 +1020,21 @@ struct AppSettingsView: View {
     private var onboardingCard: some View {
         SettingsCard(
             title: "Onboarding",
-            subtitle: "Setup-Assistent erneut durchlaufen"
+            subtitle: "Setup-Assistent erneut durchlaufen",
+            systemImage: "sparkles",
+            accent: .teal
         ) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Starte den Einrichtungs-Assistenten erneut, um Schuljahr, Gruppen und Fächer neu zu setzen. Bestehende Daten bleiben erhalten.")
-                    .font(helperFont)
-                    .foregroundStyle(.secondary)
-                Button("Onboarding neu starten") {
-                    Task { await store.restartOnboarding() }
+            SettingsSectionBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Starte den Einrichtungs-Assistenten erneut, um Schuljahr, Gruppen und Fächer neu zu setzen. Bestehende Daten bleiben erhalten.")
+                        .font(helperFont)
+                        .foregroundStyle(.secondary)
+                    Button("Onboarding neu starten") {
+                        Task { await store.restartOnboarding() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.teal)
                 }
-                .buttonStyle(.borderedProminent)
             }
         }
     }
@@ -821,30 +1106,6 @@ struct AppSettingsView: View {
     }
 }
 
-private struct SettingsCard<Content: View>: View {
-    let title: String
-    let subtitle: String?
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.title3.weight(.semibold))
-                if let subtitle, !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            content
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.thinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-    }
-}
 
 private struct ExamSubjectRow: View {
     let subject: Subject

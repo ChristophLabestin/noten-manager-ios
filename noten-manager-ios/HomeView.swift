@@ -32,6 +32,11 @@ struct HomeView: View {
         store.fachreferat != nil
     }
 
+    private var hasPracticalPerformance: Bool {
+        guard let perf = store.practicalPerformance else { return false }
+        return !perf.grades.isEmpty
+    }
+
     // MARK: - Data preparation
 
     private func filteredSubjectGrades() -> [String: [Grade]] {
@@ -61,6 +66,20 @@ struct HomeView: View {
                 Grade(grade: fr.grade, weight: 3, date: fr.date, note: fr.note, halfYear: nil)
             ]
         }
+        if let practical = store.practicalPerformance {
+            let entries = practical.grades.map { entry in
+                Grade(
+                    grade: entry.grade,
+                    weight: 0,
+                    date: entry.date,
+                    note: entry.note ?? entry.company,
+                    halfYear: entry.halfYear
+                )
+            }
+            if !entries.isEmpty {
+                result["Praktikum"] = entries
+            }
+        }
         return result
     }
 
@@ -82,6 +101,9 @@ struct HomeView: View {
         var base = subjectsWithoutFachreferat
         if hasFachreferat {
             base.append(Subject(name: "Fachreferat", type: 0, date: Date()))
+        }
+        if hasPracticalPerformance {
+            base.append(Subject(name: "Praktikum", type: 0, date: Date()))
         }
         return base
     }
@@ -222,7 +244,7 @@ struct HomeView: View {
                                subjectGrades: [String: [Grade]],
                                fachreferatSubjectName: String?) -> some View {
         let grades = subjectGrades[subject.name] ?? []
-        if subject.name == "Fachreferat" {
+        if subject.name == "Fachreferat" || subject.name == "Praktikum" {
             SubjectRowView(
                 subject: subject,
                 grades: grades,
@@ -301,47 +323,177 @@ struct HomeView: View {
         }
     }
 
+    private var overdueHomeworksCount: Int {
+        let now = Date()
+        return store.allHomeworks.filter { hw in
+            guard !hw.isCompleted else { return false }
+            if let due = hw.dueDate {
+                return due < now
+            }
+            if let reminder = hw.reminderAt {
+                return reminder < now
+            }
+            return false
+        }.count
+    }
+
+    private var homeworkDueTomorrowCount: Int {
+        let cal = Calendar.current
+        return store.allHomeworks.filter { hw in
+            guard !hw.isCompleted, let due = hw.dueDate else { return false }
+            return cal.isDateInTomorrow(due)
+        }.count
+    }
+
+    private var overdueExamsCount: Int {
+        let now = Date()
+        return store.allExams.filter { exam in
+            !exam.isCompleted && exam.date < now
+        }.count
+    }
+
+    private var examSubjectsCount: Int {
+        store.subjects.filter { $0.examSubject ?? false }.count
+    }
+
+    // MARK: - Header & Overview
+
+    private var headerCard: some View {
+        SettingsCard(
+            title: greeting.isEmpty ? "Hallo" : greeting,
+            subtitle: displayName.isEmpty ? "Willkommen zurück" : "\(displayName)!",
+            systemImage: "hand.wave.fill",
+            accent: .indigo
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    PillBadge(
+                        text: store.schoolType == .fos ? "FOS" : "BOS",
+                        systemImage: "seal.fill",
+                        foreground: Color.indigo,
+                        background: Color.indigo.opacity(0.15)
+                    )
+                    if let year = store.activeSchoolYearId {
+                        PillBadge(
+                            text: year,
+                            systemImage: "calendar",
+                            foreground: Color.cyan,
+                            background: Color.cyan.opacity(0.14)
+                        )
+                    }
+                    if let grade = store.gradeYear {
+                        PillBadge(
+                            text: "\(grade). Jahrgang",
+                            systemImage: "graduationcap.fill",
+                            foreground: Color.mint,
+                            background: Color.mint.opacity(0.16)
+                        )
+                    }
+                }
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        StatChip(title: "Gesamt", value: formatAverage(overallComputed), accent: .indigo)
+                        StatChip(title: "Fächer", value: "\(subjectsWithoutFachreferat.count)", accent: .cyan)
+                        StatChip(title: "Noten", value: "\(totalGradesCountComputed)", accent: .orange)
+                    }
+                    .padding(.vertical, 2)
+                }
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        if overdueHomeworksCount > 0 {
+                            PillBadge(
+                                text: "Hausaufgaben fällig: \(overdueHomeworksCount)",
+                                systemImage: "exclamationmark.triangle.fill",
+                                foreground: .orange,
+                                background: Color.orange.opacity(0.16)
+                            )
+                        }
+                        if homeworkDueTomorrowCount > 0 {
+                            PillBadge(
+                                text: "Hausaufgaben morgen: \(homeworkDueTomorrowCount)",
+                                systemImage: "clock.badge.exclamationmark",
+                                foreground: .yellow,
+                                background: Color.yellow.opacity(0.16)
+                            )
+                        }
+                        if overdueExamsCount > 0 {
+                            PillBadge(
+                                text: "Prüfungen fällig: \(overdueExamsCount)",
+                                systemImage: "calendar.badge.exclamationmark",
+                                foreground: .red,
+                                background: Color.red.opacity(0.16)
+                            )
+                        }
+                        if overdueHomeworksCount == 0 && homeworkDueTomorrowCount == 0 && overdueExamsCount == 0 {
+                            PillBadge(
+                                text: "Alles im Plan",
+                                systemImage: "checkmark.circle.fill",
+                                foreground: .green,
+                                background: Color.green.opacity(0.14)
+                            )
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        }
+    }
+
+    private var filterCard: some View {
+        SettingsCard(
+            title: "Anzeige & Reihenfolge",
+            subtitle: "Filter und Sortierung anpassen",
+            systemImage: "slider.horizontal.3",
+            accent: .cyan
+        ) {
+            SettingsSectionBox {
+                FilterAndReorderRow(
+                    halfYear: $halfYear,
+                    enableDrag: enableDrag,
+                    isEditingOrder: $isEditingOrder,
+                    onToggleEdit: {
+                        toggleEditMode(sortedNames: sortedSubjectsComputed.map { $0.name })
+                    }
+                )
+            }
+        }
+    }
+
     // MARK: - Body
 
     var body: some View {
         List {
-            // Section 1: Loading, Filter, Summary
             Section {
-                VStack(spacing: 12) {
-                    if store.isLoading {
-                        VStack(spacing: 8) {
-                            ProgressView(value: store.progress, total: 100)
-                            Text(store.loadingLabel).font(.footnote)
-                        }
+            if store.isLoading {
+                SettingsCard(
+                    title: "Sync läuft...",
+                    subtitle: store.loadingLabel,
+                    systemImage: "arrow.triangle.2.circlepath",
+                        accent: .cyan
+                    ) {
+                        ProgressView(value: store.progress, total: 100)
                     }
-
-                    // Halbjahresfilter + Reorder
-                    FilterAndReorderRow(
-                        halfYear: $halfYear,
-                        enableDrag: enableDrag,
-                        isEditingOrder: $isEditingOrder,
-                        onToggleEdit: {
-                            toggleEditMode(sortedNames: sortedSubjectsComputed.map { $0.name })
-                        }
-                    )
-
-                    // Summary
-                    SummaryRow(
-                        overall: overallComputed,
-                        subjectsCount: subjectsWithoutFachreferat.count,
-                        totalGradesCount: totalGradesCountComputed,
-                        gradeColor: gradeColor
-                    )
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    .listRowBackground(Color.clear)
                 }
+
+                headerCard
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    .listRowBackground(Color.clear)
+
+                filterCard
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
+                    .listRowBackground(Color.clear)
             }
-            .listRowBackground(Color.clear)
             .listSectionSeparator(.hidden)
 
-            // Section 2: Fächerliste (inkl. Reorder)
             Section {
                 SectionHeader()
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
                     .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
 
                 if isEditingOrder && enableDrag {
                     ForEach(customOrderWorkingCopy, id: \.self) { name in
@@ -350,6 +502,8 @@ struct HomeView: View {
                             grades: subjectGradesComputed[name] ?? [],
                             fachreferatSubjectName: store.fachreferat?.subjectName
                         )
+                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                        .listRowBackground(Color.clear)
                     }
                     .onMove { indices, newOffset in
                         customOrderWorkingCopy.move(fromOffsets: indices, toOffset: newOffset)
@@ -361,16 +515,28 @@ struct HomeView: View {
                             subjectGrades: subjectGradesComputed,
                             fachreferatSubjectName: store.fachreferat?.subjectName
                         )
+                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                        .listRowBackground(Color.clear)
                     }
                 }
             }
-            .listRowBackground(Color.clear)
             .listSectionSeparator(.hidden)
         }
         .environment(\.editMode, .constant(editModeBinding))
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .listRowSeparator(.hidden)
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(.systemGray6),
+                    Color(.systemBackground)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+        )
 
         // Unsichtbare NavigationLinks (NavigationStack-Ziele)
         .background(
@@ -385,36 +551,18 @@ struct HomeView: View {
                 ToolbarTitleView(greeting: greeting, displayName: displayName)
             }
             ToolbarItem(placement: .navigationBarTrailing) {
-                HStack {
+                HStack(spacing: 12) {
                     Button {
                         showExamSheet = true
                     } label: {
-                        ZStack(alignment: .topTrailing) {
-                            Image(systemName: "calendar.badge.clock")
-                                .imageScale(.large)
-                            if hasOverdueExams {
-                                Circle()
-                                    .fill(Color.red)
-                                    .frame(width: 8, height: 8)
-                                    .offset(x: 4, y: -4)
-                            }
-                        }
+                        ToolbarIcon(symbol: "calendar.badge.clock", showDot: hasOverdueExams)
                     }
                     .accessibilityLabel("Klausurtermine anzeigen")
 
                     Button {
                         showHomeworkSheet = true
                     } label: {
-                        ZStack(alignment: .topTrailing) {
-                            Image(systemName: "checklist")
-                                .imageScale(.large)
-                            if hasOverdueHomeworks || hasHomeworkDueTomorrow {
-                                Circle()
-                                    .fill(Color.red)
-                                    .frame(width: 8, height: 8)
-                                    .offset(x: 4, y: -4)
-                            }
-                        }
+                        ToolbarIcon(symbol: "checklist", showDot: hasOverdueHomeworks || hasHomeworkDueTomorrow)
                     }
                     .accessibilityLabel("Aktive Hausaufgaben anzeigen")
                 }
@@ -502,6 +650,16 @@ private struct SectionHeader: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color(.separator).opacity(0.15), lineWidth: 1)
+        )
     }
 }
 
@@ -541,43 +699,6 @@ struct SegmentButton: View {
     }
 }
 
-struct SummaryCard<Content: View>: View {
-    @Environment(\.colorScheme) private var colorScheme
-
-    let title: String
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if !title.isEmpty {
-                Text(title)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            content
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(cardBackground)
-                .shadow(color: shadowColor,
-                        radius: colorScheme == .dark ? 16 : 8,
-                        x: 0, y: colorScheme == .dark ? 10 : 6)
-        )
-    }
-
-    private var cardBackground: Color {
-        colorScheme == .dark
-            ? Color(red: 15 / 255, green: 23 / 255, blue: 42 / 255).opacity(0.95)
-            : .white
-    }
-
-    private var shadowColor: Color {
-        Color.black.opacity(colorScheme == .dark ? 0.6 : 0.06)
-    }
-}
-
 struct SubjectRowView: View {
     let subject: Subject
     let grades: [Grade]
@@ -587,6 +708,7 @@ struct SubjectRowView: View {
         guard !grades.isEmpty else { return nil }
         func calculateGradeWeight(_ subject: Subject, _ grade: Grade) -> Double {
             if subject.name == "Fachreferat" { return 3 }
+            if subject.name == "Praktikum" { return 1 }
             let t = subject.type
             if t == 1 {
                 return (grade.weight == 3 ? 2 : (grade.weight == 2 ? 2 : 1))
@@ -624,14 +746,18 @@ struct SubjectRowView: View {
         let gradesCount = grades.count
 
         let isFachreferat = subject.name == "Fachreferat"
+        let isPraktikum = subject.name == "Praktikum"
         let displayName: String = {
             if isFachreferat, let frName = fachreferatSubjectName, !frName.isEmpty {
                 return "Fachreferat in \(frName)"
             }
+            if isPraktikum {
+                return "Praktikum (11.)"
+            }
             return subject.name
         }()
 
-        HStack {
+        HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(displayName)
                     .font(.headline)
@@ -640,6 +766,11 @@ struct SubjectRowView: View {
                 HStack(spacing: 8) {
                     if isFachreferat {
                         Tag(text: "Halbjahresleistung", style: .main)
+                    } else if isPraktikum {
+                        Tag(text: "Praktikum", style: .minor)
+                        Text("\(gradesCount) \(gradesCount == 1 ? "Note" : "Noten")")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     } else if subject.isElective {
                         Tag(text: "Wahlfach", style: .elective)
                         Text("\(gradesCount) \(gradesCount == 1 ? "Note" : "Noten")")
@@ -655,12 +786,21 @@ struct SubjectRowView: View {
             }
             Spacer()
             Text(formatAverage(average))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
                 .background(gradeClassColor(average).opacity(0.15))
                 .foregroundStyle(gradeClassColor(average))
                 .clipShape(Capsule())
         }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color(.separator).opacity(0.15), lineWidth: 1)
+        )
     }
 }
 
@@ -807,67 +947,36 @@ private struct FilterAndReorderRow: View {
     }
 }
 
-
-private struct SummaryRow: View {
-    @EnvironmentObject var store: GradesStore
-
-    let overall: Double?
-    let subjectsCount: Int
-    let totalGradesCount: Int
-    let gradeColor: (Double?) -> Color
+private struct StatChip: View {
+    let title: String
+    let value: String
+    let accent: Color
 
     var body: some View {
-        let overallColor = gradeColor(overall)
-        HStack(spacing: 12) {
-            SummaryCard(title: "Gesamt") {
-                Text(formatAverage(overall))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(overallColor.opacity(0.15))
-                    .foregroundStyle(overallColor)
-                    .clipShape(Capsule())
-            }
-            SummaryCard(title: "Fächer") {
-                Text("\(subjectsCount)")
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(chipBackgroundColor)
-                    .foregroundStyle(chipForegroundColor)
-                    .clipShape(Capsule())
-            }
-            SummaryCard(title: "Noten") {
-                Text("\(totalGradesCount)")
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(chipBackgroundColor)
-                    .foregroundStyle(chipForegroundColor)
-                    .clipShape(Capsule())
-            }
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title.uppercased())
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .monospacedDigit()
         }
-    }
-
-    private func formatAverage(_ value: Double?) -> String {
-        guard let v = value else { return "-" }
-        return String(format: "%.2f", v)
-    }
-
-    private var isFeminine: Bool { store.theme == "feminine" }
-    private var isDark: Bool { store.darkMode }
-
-    private var chipForegroundColor: Color {
-        if isFeminine {
-            return Color(hex: isDark ? "#f472b6" : "#ec4899")
-        }
-        return .blue
-    }
-
-    private var chipBackgroundColor: Color {
-        if isFeminine {
-            return chipForegroundColor.opacity(isDark ? 0.30 : 0.15)
-        }
-        return Color.blue.opacity(0.1)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(accent.opacity(0.2), lineWidth: 1)
+        )
     }
 }
+
 
 private struct ToolbarTitleView: View {
     let greeting: String
