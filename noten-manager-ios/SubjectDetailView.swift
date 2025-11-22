@@ -53,6 +53,10 @@ struct SubjectDetailView: View {
     @State private var navigateToSettings: Bool = false
     @State private var navigateToFinal: Bool = false
     @State private var showAddGradeSheet: Bool = false
+    @State private var showAddHomeworkSheet: Bool = false
+    @State private var showAddExamSheet: Bool = false
+    @State private var showAddActions: Bool = false
+    @State private var showExamListSheet: Bool = false
 
     init(subject: Subject) {
         self.subject = subject
@@ -122,6 +126,43 @@ struct SubjectDetailView: View {
 
     private var isFeminine: Bool { store.theme == "feminine" }
     private var isDark: Bool { store.darkMode }
+
+    private var subjectExams: [Exam] {
+        store.allExams.filter { matchesSubject(name: $0.subjectName) }
+            .sorted { $0.date < $1.date }
+    }
+
+    private var subjectHomeworks: [Homework] {
+        store.allHomeworks.filter { matchesSubject(name: $0.subjectName) }
+            .sorted { lhs, rhs in
+                // Sort by dueDate first, fallback to createdAt so we have a stable order
+                let left = lhs.dueDate ?? lhs.createdAt
+                let right = rhs.dueDate ?? rhs.createdAt
+                return left < right
+            }
+    }
+
+    private var upcomingExamsCount: Int {
+        subjectExams.filter { $0.isActive }.count
+    }
+
+    private var subjectFilterNames: [String] {
+        var names: [String] = []
+        names.append(currentSubjectName)
+        names.append(subject.name)
+        if let alias = currentAlias, !alias.isEmpty {
+            names.append(alias)
+        }
+        return Array(Set(names))
+    }
+
+    private func matchesSubject(name: String) -> Bool {
+        let target = currentSubjectName.lowercased()
+        let alias = currentAlias?.lowercased()
+        let original = subject.name.lowercased()
+        let lookup = name.lowercased()
+        return lookup == target || lookup == original || (alias != nil && lookup == alias)
+    }
 
     private var chipForegroundColor: Color {
         if isFeminine {
@@ -217,6 +258,19 @@ struct SubjectDetailView: View {
                                 .foregroundStyle(chipForegroundColor)
                                 .clipShape(Capsule())
                         }
+                        Button {
+                            showExamListSheet = true
+                        } label: {
+                            SummaryCard(title: "Klausuren") {
+                                Text("\(upcomingExamsCount)")
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(Color.blue.opacity(0.12))
+                                    .foregroundStyle(Color.blue)
+                                    .clipShape(Capsule())
+                            }
+                        }
+                        .buttonStyle(.plain)
                     }
                     .padding(.horizontal)
 
@@ -248,19 +302,61 @@ struct SubjectDetailView: View {
                         .padding(.horizontal)
                     }
 
+                    // Klausurtermine
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Klausurtermine").font(.title3).bold()
+                        if subjectExams.isEmpty {
+                            Text("Keine Klausurtermine für dieses Fach")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            VStack(spacing: 10) {
+                                ForEach(subjectExams, id: \.id) { exam in
+                                    examRow(exam)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+
+                    // Hausaufgaben
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Hausaufgaben").font(.title3).bold()
+                        if subjectHomeworks.isEmpty {
+                            Text("Keine Hausaufgaben für dieses Fach")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            VStack(spacing: 10) {
+                                ForEach(subjectHomeworks, id: \.id) { hw in
+                                    homeworkRow(hw)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+
                     // Notenliste
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Noten").font(.title3).bold()
+
+                        if sortedGrades.isEmpty {
+                            Text("Keine Noten für dieses Fach")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
                         Text("Tippe auf eine Note, um diese zu bearbeiten")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-
-                        if sortedGrades.isEmpty {
-                            Text("Keine Noten vorhanden").foregroundStyle(.secondary).padding(.top, 8)
-                        } else {
                             VStack(spacing: 12) {
                                 ForEach(sortedGrades, id: \.id) { g in
                                     gradeCard(g)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
                                 }
                             }
                         }
@@ -375,7 +471,9 @@ struct SubjectDetailView: View {
                         .font(.headline)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
-                    if subject.type == 0 || subject.type == 1 {
+                    if subject.isElective {
+                        Tag(text: "Wahlfach", style: .elective)
+                    } else if subject.type == 0 || subject.type == 1 {
                         Tag(
                             text: subject.type == 1 ? "Hauptfach" : "Nebenfach",
                             style: subject.type == 1 ? .main : .minor
@@ -393,7 +491,7 @@ struct SubjectDetailView: View {
                     }
 
                     Button {
-                        showAddGradeSheet = true
+                        showAddActions = true
                     } label: {
                         Image(systemName: "plus.circle.fill")
                             .font(.title3)
@@ -401,11 +499,37 @@ struct SubjectDetailView: View {
                 }
             }
         }
+        .sheet(isPresented: $showAddActions) {
+            AddActionChooserView(
+                onHomework: { showAddHomeworkSheet = true },
+                onGrade: { showAddGradeSheet = true },
+                onExam: { showAddExamSheet = true }
+            )
+            #if os(iOS)
+            .presentationDetents([.medium])
+            #endif
+        }
         .sheet(isPresented: $showAddGradeSheet) {
             NavigationStack {
                 AddGradeView(preselectedSubjectName: currentSubjectName)
                     .environmentObject(store)
             }
+        }
+        .sheet(isPresented: $showAddHomeworkSheet) {
+            NavigationStack {
+                AddHomeworkView(preselectedSubjectName: currentSubjectName)
+                    .environmentObject(store)
+            }
+        }
+        .sheet(isPresented: $showAddExamSheet) {
+            NavigationStack {
+                AddExamView(preselectedSubjectName: currentSubjectName)
+                    .environmentObject(store)
+            }
+        }
+        .sheet(isPresented: $showExamListSheet) {
+            ExamListView(subjectFilter: currentSubjectName, alternateSubjectNames: subjectFilterNames)
+                .environmentObject(store)
         }
         .background(
             Group {
@@ -445,6 +569,159 @@ struct SubjectDetailView: View {
             } else {
                 Text(value).font(.subheadline)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func examRow(_ exam: Exam) -> some View {
+        let now = Date()
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(exam.title.isEmpty ? "Klausur" : exam.title)
+                    .font(.headline)
+                    .lineLimit(1)
+                Text(exam.date.formatted(date: .abbreviated, time: .omitted))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let notes = exam.notes, !notes.isEmpty {
+                    Text(notes)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            Spacer()
+            statusBadge(
+                exam.isCompleted ? "Erledigt" : (exam.date < now ? "Überfällig" : "Geplant"),
+                color: exam.isCompleted ? .green : (exam.date < now ? .red : .blue)
+            )
+        }
+        .padding()
+        .background(.thinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    @ViewBuilder
+    private func homeworkRow(_ homework: Homework) -> some View {
+        let now = Date()
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(homework.title)
+                    .font(.headline)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let due = homework.dueDate {
+                    Text("Fällig: \(due.formatted(date: .abbreviated, time: .omitted))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Kein Fälligkeitsdatum")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            let isOverdue = (homework.dueDate ?? Date.distantFuture) < now && !homework.isCompleted
+            HStack(spacing: 8) {
+                statusBadge(
+                    homework.isCompleted ? "Erledigt" : (isOverdue ? "Überfällig" : "Offen"),
+                    color: homework.isCompleted ? .green : (isOverdue ? .red : .blue)
+                )
+                Button {
+                    Task { await toggleHomeworkCompletion(homework) }
+                } label: {
+                    Image(systemName: homework.isCompleted ? "arrow.uturn.backward.circle" : "checkmark.circle")
+                        .font(.system(size: 18, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding()
+        .background(.thinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+private func statusBadge(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.caption)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(color.opacity(0.15))
+            .foregroundStyle(color)
+            .clipShape(Capsule())
+    }
+
+    // MARK: - FAB-Action Sheet
+
+    private struct AddActionChooserView: View {
+        let onHomework: () -> Void
+        let onGrade: () -> Void
+        let onExam: () -> Void
+
+        var body: some View {
+            NavigationStack {
+                VStack(spacing: 16) {
+                    Text("Hinzufügen")
+                        .font(.title3).bold()
+                        .padding(.top, 12)
+
+                    VStack(spacing: 12) {
+                        actionRow(icon: "checklist", title: "Hausaufgabe", subtitle: "Aufgabe mit Fälligkeit", action: onHomework)
+                        actionRow(icon: "list.bullet.rectangle.portrait.fill", title: "Note", subtitle: "Leistung eintragen", action: onGrade)
+                        actionRow(icon: "calendar.badge.clock", title: "Klausurtermin", subtitle: "Prüfung mit Datum", action: onExam)
+                    }
+
+                    Spacer()
+                }
+                .padding()
+                .background(Color(UIColor.systemGroupedBackground).ignoresSafeArea())
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Schließen") {
+                            dismissSheet()
+                        }
+                    }
+                }
+            }
+        }
+
+        private func actionRow(icon: String, title: String, subtitle: String, action: @escaping () -> Void) -> some View {
+            Button {
+                dismissSheet()
+                // Call after slight delay to allow sheet to dismiss smoothly
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    action()
+                }
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: icon)
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 34, height: 34)
+                        .background(Color.blue.opacity(0.12))
+                        .foregroundStyle(Color.blue)
+                        .clipShape(Circle())
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title).font(.headline)
+                        Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding()
+                .background(RoundedRectangle(cornerRadius: 14).fill(Color(.systemBackground)))
+            }
+            .buttonStyle(.plain)
+        }
+
+        @Environment(\.dismiss) private var dismiss
+        private func dismissSheet() {
+            dismiss()
+        }
+    }
+
+    private func toggleHomeworkCompletion(_ homework: Homework) async {
+        if homework.isShared {
+            await store.setUserCompletedForSharedHomework(homeworkId: homework.id, completed: !homework.isCompleted, groupId: homework.groupId)
+        } else {
+            await store.setHomeworkCompleted(id: homework.id, completed: !homework.isCompleted)
         }
     }
 
@@ -675,6 +952,7 @@ struct SubjectDetailView: View {
 
     private func handleSaveSubject() async {
         guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let schoolYearId = store.activeSchoolYearId else { return }
         guard !isSavingSubject else { return }
 
         let originalName = subject.name
@@ -690,11 +968,12 @@ struct SubjectDetailView: View {
         defer { isSavingSubject = false }
 
         let db = Firestore.firestore()
+        let yearRef = db.collection("users").document(uid).collection("schoolYears").document(schoolYearId)
         guard let original = store.subjects.first(where: { $0.name == originalName }) else { return }
 
         do {
             if newName == originalName {
-                let subjectDocRef = db.collection("users").document(uid).collection("subjects").document(originalName)
+                let subjectDocRef = yearRef.collection("subjects").document(originalName)
                 try await subjectDocRef.updateData([
                     "teacher": editTeacher.isEmpty ? NSNull() : editTeacher,
                     "room": editRoom.isEmpty ? NSNull() : editRoom,
@@ -702,8 +981,8 @@ struct SubjectDetailView: View {
                     "alias": editAlias.isEmpty ? NSNull() : editAlias
                 ])
             } else {
-                let oldRef = db.collection("users").document(uid).collection("subjects").document(originalName)
-                let newRef = db.collection("users").document(uid).collection("subjects").document(newName)
+                let oldRef = yearRef.collection("subjects").document(originalName)
+                let newRef = yearRef.collection("subjects").document(newName)
 
                 var payload: [String: Any] = [
                     "type": original.type,
@@ -718,7 +997,8 @@ struct SubjectDetailView: View {
                     "examType": original.examType?.rawValue as Any,
                     "examPointsEncrypted": original.examPointsEncrypted as Any,
                     "writtenExamPointsEncrypted": original.writtenExamPointsEncrypted as Any,
-                    "oralExamPointsEncrypted": original.oralExamPointsEncrypted as Any
+                    "oralExamPointsEncrypted": original.oralExamPointsEncrypted as Any,
+                    "isElective": original.isElective
                 ]
                 payload["type"] = original.type
                 payload["date"] = original.date
@@ -767,4 +1047,3 @@ struct SubjectDetailView: View {
         await MainActor.run { dismiss() }
     }
 }
-

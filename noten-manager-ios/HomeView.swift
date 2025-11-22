@@ -187,6 +187,7 @@ struct HomeView: View {
         var total = 0.0
         var totalWeight = 0.0
         for subject in store.subjects {
+            if subject.isElective { continue }
             let grades = subjectGrades[subject.name] ?? []
             for g in grades {
                 let w = store.calculateGradeWeightForOverall(subject: subject, grade: g)
@@ -210,7 +211,9 @@ struct HomeView: View {
         return .red
     }
 
-    private var enableDrag: Bool { store.subjectSortMode == .custom }
+    private var enableDrag: Bool {
+        store.subjects.count > 1
+    }
 
     // MARK: - Small subviews for body
 
@@ -227,10 +230,7 @@ struct HomeView: View {
             )
             .contentShape(Rectangle())
         } else {
-            NavigationLink {
-                SubjectDetailView(subject: subject)
-                    .environmentObject(store)
-            } label: {
+            NavigationLink(value: subject) {
                 SubjectRowView(
                     subject: subject,
                     grades: grades,
@@ -274,7 +274,7 @@ struct HomeView: View {
 
     private var hasOverdueHomeworks: Bool {
         let now = Date()
-        return store.homeworks.contains { hw in
+        return store.allHomeworks.contains { hw in
             guard !hw.isCompleted else { return false }
             if let due = hw.dueDate {
                 return due < now
@@ -283,6 +283,14 @@ struct HomeView: View {
                 return reminder < now
             }
             return false
+        }
+    }
+
+    private var hasHomeworkDueTomorrow: Bool {
+        let cal = Calendar.current
+        return store.allHomeworks.contains { hw in
+            guard !hw.isCompleted, let due = hw.dueDate else { return false }
+            return cal.isDateInTomorrow(due)
         }
     }
 
@@ -400,7 +408,7 @@ struct HomeView: View {
                         ZStack(alignment: .topTrailing) {
                             Image(systemName: "checklist")
                                 .imageScale(.large)
-                            if hasOverdueHomeworks {
+                            if hasOverdueHomeworks || hasHomeworkDueTomorrow {
                                 Circle()
                                     .fill(Color.red)
                                     .frame(width: 8, height: 8)
@@ -632,6 +640,11 @@ struct SubjectRowView: View {
                 HStack(spacing: 8) {
                     if isFachreferat {
                         Tag(text: "Halbjahresleistung", style: .main)
+                    } else if subject.isElective {
+                        Tag(text: "Wahlfach", style: .elective)
+                        Text("\(gradesCount) \(gradesCount == 1 ? "Note" : "Noten")")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     } else {
                         Tag(text: subject.type == 1 ? "Hauptfach" : "Nebenfach", style: subject.type == 1 ? .main : .minor)
                         Text("\(gradesCount) \(gradesCount == 1 ? "Note" : "Noten")")
@@ -654,7 +667,7 @@ struct SubjectRowView: View {
 struct Tag: View {
     @EnvironmentObject var store: GradesStore
 
-    enum Style { case main, minor }
+    enum Style { case main, minor, elective }
     let text: String
     let style: Style
 
@@ -679,6 +692,8 @@ struct Tag: View {
             case .minor:
                 // body.theme-feminine .subject-tag--minor
                 return bgPinkBase.opacity(isDark ? 0.55 : 0.08)
+            case .elective:
+                return bgGrayBase.opacity(isDark ? 0.45 : 0.10)
             }
         }
 
@@ -689,6 +704,8 @@ struct Tag: View {
                 return bgBlueBase.opacity(0.35)
             case .minor:
                 return bgGrayBase.opacity(0.55)
+            case .elective:
+                return bgGrayBase.opacity(0.35)
             }
         }
 
@@ -698,6 +715,8 @@ struct Tag: View {
             return bgBlueBase.opacity(0.12)
         case .minor:
             return bgGrayBase.opacity(0.18)
+        case .elective:
+            return bgGrayBase.opacity(0.12)
         }
     }
 
@@ -712,6 +731,8 @@ struct Tag: View {
                 return primaryFeminine
             case .minor:
                 return bgPinkBase.opacity(0.85)
+            case .elective:
+                return textMedium
             }
         }
 
@@ -725,6 +746,8 @@ struct Tag: View {
         case .main:
             return primaryDefault
         case .minor:
+            return textMedium
+        case .elective:
             return textMedium
         }
     }

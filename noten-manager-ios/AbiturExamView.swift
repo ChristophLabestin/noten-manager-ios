@@ -199,10 +199,14 @@ struct AbiturExamView: View {
             HStack {
                 Text(subject.name).font(.headline)
                 Spacer()
-                Tag(
-                    text: subject.type == 1 ? "Hauptfach" : "Nebenfach",
-                    style: subject.type == 1 ? .main : .minor
-                )
+                if subject.isElective {
+                    Tag(text: "Wahlfach", style: .elective)
+                } else {
+                    Tag(
+                        text: subject.type == 1 ? "Hauptfach" : "Nebenfach",
+                        style: subject.type == 1 ? .main : .minor
+                    )
+                }
             }
             HStack {
                 Text("Jahresdurchschnitt").font(.subheadline).foregroundStyle(.secondary)
@@ -512,8 +516,9 @@ struct AbiturExamView: View {
 
     private func persistExamPoints(subject: Subject, written: Double?, oral: Double?, combined: Double?) async {
         guard let uid = Auth.auth().currentUser?.uid, let key = store.encryptionKey else { return }
+        guard let schoolYearId = store.activeSchoolYearId else { return }
         let db = Firestore.firestore()
-        let subjectDocRef = db.collection("users").document(uid).collection("subjects").document(subject.name)
+        let subjectDocRef = db.collection("users").document(uid).collection("schoolYears").document(schoolYearId).collection("subjects").document(subject.name)
 
         var writtenEncrypted: String? = nil
         var oralEncrypted: String? = nil

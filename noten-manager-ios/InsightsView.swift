@@ -42,6 +42,7 @@ struct InsightsView: View {
         var total = 0.0
         var totalWeight = 0.0
         for subject in subjectsWithoutFachreferat {
+            if subject.isElective { continue }
             let list = grades(for: subject)
             for g in list {
                 let w = store.calculateGradeWeightForOverall(subject: subject, grade: g)
@@ -58,6 +59,7 @@ struct InsightsView: View {
         var total = 0.0
         var totalWeight = 0.0
         for subject in subjectsWithoutFachreferat {
+            if subject.isElective { continue }
             let list = grades(for: subject).filter { $0.halfYear == halfYear }
             for g in list {
                 let w = store.calculateGradeWeightForOverall(subject: subject, grade: g)
@@ -182,11 +184,19 @@ struct InsightsView: View {
 
     private var hasOverdueHomeworks: Bool {
         let now = Date()
-        return store.homeworks.contains { hw in
+        return store.allHomeworks.contains { hw in
             guard !hw.isCompleted else { return false }
             if let due = hw.dueDate { return due < now }
             if let reminder = hw.reminderAt { return reminder < now }
             return false
+        }
+    }
+
+    private var hasHomeworkDueTomorrow: Bool {
+        let cal = Calendar.current
+        return store.allHomeworks.contains { hw in
+            guard !hw.isCompleted, let due = hw.dueDate else { return false }
+            return cal.isDateInTomorrow(due)
         }
     }
 
@@ -382,7 +392,7 @@ struct InsightsView: View {
                         ZStack(alignment: .topTrailing) {
                             Image(systemName: "checklist")
                                 .imageScale(.large)
-                            if hasOverdueHomeworks {
+                            if hasOverdueHomeworks || hasHomeworkDueTomorrow {
                                 Circle()
                                     .fill(Color.red)
                                     .frame(width: 8, height: 8)
@@ -416,10 +426,14 @@ struct InsightsView: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                 HStack(spacing: 8) {
-                    Tag(
-                        text: subject.type == 1 ? "Hauptfach" : "Nebenfach",
-                        style: subject.type == 1 ? .main : .minor
-                    )
+                    if subject.isElective {
+                        Tag(text: "Wahlfach", style: .elective)
+                    } else {
+                        Tag(
+                            text: subject.type == 1 ? "Hauptfach" : "Nebenfach",
+                            style: subject.type == 1 ? .main : .minor
+                        )
+                    }
                     Text("\(gradesCount) \(gradesCount == 1 ? "Note" : "Noten")")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -468,4 +482,3 @@ struct InsightsView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
-

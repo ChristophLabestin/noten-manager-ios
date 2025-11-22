@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import FirebaseAuth
 
+@MainActor
 final class AuthManager: ObservableObject {
     @Published var isAuthenticated: Bool = false
     @Published var isLoading: Bool = false
@@ -20,7 +21,7 @@ final class AuthManager: ObservableObject {
         }
     }
 
-    deinit {
+    @MainActor deinit {
         if let handle = authHandle {
             Auth.auth().removeStateDidChangeListener(handle)
         }
@@ -51,7 +52,7 @@ final class AuthManager: ObservableObject {
 
             let saltB64 = CryptoService.generateSalt(length: 16)
             let profile = UserProfile(id: uid, name: name, email: email, encryptionSalt: saltB64)
-            try await FirestoreService.shared.setUserProfile(profile: profile)
+            try await FirestoreService.shared.setUserProfile(profile: profile, onboardingCompleted: false)
 
             await MainActor.run { self.isLoading = false }
         } catch {

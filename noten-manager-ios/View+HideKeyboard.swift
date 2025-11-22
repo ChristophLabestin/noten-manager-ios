@@ -9,9 +9,9 @@ extension View {
 
     /// Adds a global tap gesture to hide the keyboard when tapping anywhere.
     func hideKeyboardOnTap() -> some View {
-        self.gesture(
+        self.simultaneousGesture(
             TapGesture().onEnded { hideKeyboard() },
-            including: .all
+            including: .subviews // block as little as possible so List/Navigation gestures still work
         )
     }
 }

@@ -176,12 +176,22 @@ enum ExamNotificationManager {
 
     private static func markExamCompleted(_ id: String) {
         guard let uid = Auth.auth().currentUser?.uid else { return }
-        let docRef = Firestore.firestore()
-            .collection("users")
-            .document(uid)
-            .collection("exams")
-            .document(id)
-        docRef.updateData(["isCompleted": true]) { _ in
+        Task {
+            let db = Firestore.firestore()
+            do {
+                let schoolYearId = try await SchoolYearService.ensureActiveSchoolYear(uid: uid, db: db)
+                let docRef = db
+                    .collection("users")
+                    .document(uid)
+                    .collection("schoolYears")
+                    .document(schoolYearId)
+                    .collection("exams")
+                    .document(id)
+                try await docRef.updateData(["isCompleted": true])
+            } catch {
+                // optional: Fehler ignorieren, Notification trotzdem entfernen
+            }
+
             let center = UNUserNotificationCenter.current()
             let identifiers = [
                 "exam_due_\(id)",

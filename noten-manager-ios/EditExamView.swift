@@ -9,6 +9,7 @@ struct EditExamView: View {
 
     @State private var subjectName: String
     @State private var title: String
+    @State private var notes: String
     @State private var date: Date
     @State private var examWeight: Int
     @State private var hasReminder: Bool
@@ -24,6 +25,7 @@ struct EditExamView: View {
         self.exam = exam
         _subjectName = State(initialValue: exam.subjectName)
         _title = State(initialValue: exam.title)
+        _notes = State(initialValue: exam.notes ?? "")
         _date = State(initialValue: exam.date)
         _examWeight = State(initialValue: exam.weight ?? 0)
         let initialReminder = exam.reminderAt ?? Date().addingTimeInterval(60 * 60)
@@ -64,9 +66,13 @@ struct EditExamView: View {
                             .foregroundStyle(.secondary)
                     }
 
+                TextField("Titel / Bezeichnung", text: $title)
+                    .textInputAutocapitalization(.sentences)
+                    .textFieldStyle(.roundedBorder)
+
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Notiz")
-                    TextEditor(text: $title)
+                    Text("Notizen (optional)")
+                    TextEditor(text: $notes)
                         .frame(minHeight: 80)
                         .textInputAutocapitalization(.sentences)
                 }
@@ -126,14 +132,25 @@ struct EditExamView: View {
                     }
                     .disabled(!canSave || isSaving || subjects.isEmpty)
                 }
-                ToolbarItem(placement: .destructiveAction) {
-                    Button {
+            }
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 8) {
+                    Button(role: .destructive) {
                         showDeleteConfirm = true
                     } label: {
-                        Image(systemName: "trash")
+                        if isDeleting {
+                            ProgressView()
+                        } else {
+                            Text("Klausur löschen")
+                                .frame(maxWidth: .infinity)
+                        }
                     }
-                    .disabled(isDeleting)
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                    .padding(.horizontal)
+                    .padding(.bottom, 12)
                 }
+                .background(.thinMaterial)
             }
             .alert(
                 "Klausur löschen?",
@@ -159,6 +176,8 @@ struct EditExamView: View {
             isSaving = false
             return
         }
+        let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        let storedNotes = trimmedNotes.isEmpty ? nil : trimmedNotes
         do {
             let reminder: Date? = hasReminder ? reminderDate : nil
             if exam.isShared {
@@ -172,6 +191,7 @@ struct EditExamView: View {
                     id: exam.id,
                     subjectName: subjectName,
                     title: trimmedTitle,
+                    notes: storedNotes,
                     date: date,
                     weight: examWeight,
                     reminderAt: reminder
@@ -182,6 +202,7 @@ struct EditExamView: View {
                     id: exam.id,
                     subjectName: subjectName,
                     title: trimmedTitle,
+                    notes: storedNotes,
                     date: date,
                     weight: examWeight,
                     reminderAt: reminder,

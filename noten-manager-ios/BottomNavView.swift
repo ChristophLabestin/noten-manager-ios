@@ -101,20 +101,20 @@ struct BottomNavView: View {
             ZStack(alignment: .bottom) {
                 // Bottom Bar – volle Breite mit symmetrischem Abstand
                 HStack {
-                    navItem(icon: "house.fill", active: currentTab == .home) {
+                    navItem(icon: "house.fill", active: currentTab == .home, disabled: false) {
                         onOpenHome?()
                     }
-                    navItem(icon: "chart.bar.fill", active: currentTab == .insights) {
+                    navItem(icon: "chart.bar.fill", active: currentTab == .insights, disabled: isFirstSubject) {
                         onOpenInsights?()
                     }
 
                     // Spacer für FAB (56px)
                     Color.clear.frame(width: 56, height: 1)
 
-                    navItem(icon: "book.fill", active: currentTab == .final) {
+                    navItem(icon: "book.fill", active: currentTab == .final, disabled: isFirstSubject) {
                         onOpenFinalGrade?()
                     }
-                    navItem(icon: "gearshape.fill", active: currentTab == .settings) {
+                    navItem(icon: "gearshape.fill", active: currentTab == .settings, disabled: false) {
                         onOpenSettings?()
                     }
                 }
@@ -164,7 +164,7 @@ struct BottomNavView: View {
 
     // MARK: - Subviews
 
-    private func navItem(icon: String, active: Bool, action: @escaping () -> Void) -> some View {
+    private func navItem(icon: String, active: Bool, disabled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 4) {
                 ZStack {
@@ -194,9 +194,8 @@ struct BottomNavView: View {
                     }()
 
                     let iconColor: Color = {
-                        if active {
-                            return colorTextDarkDark
-                        }
+                        if disabled { return Color.gray.opacity(0.5) }
+                        if active { return colorTextDarkDark }
                         return colorTextMediumDark
                     }()
 
@@ -222,6 +221,8 @@ struct BottomNavView: View {
             .frame(minWidth: 64)
         }
         .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(disabled ? 0.5 : 1.0)
         .accessibilityLabel(iconAccessibilityLabel(icon))
     }
 
@@ -229,7 +230,7 @@ struct BottomNavView: View {
         ZStack {
             if isFirstSubject && !isOpen {
                 hintBubble
-                    .offset(y: -72) // SCSS: bottom: 72px (über FAB)
+                    .offset(y: -108) // SCSS: bottom: 72px (über FAB)
             }
 
             Button {
@@ -373,8 +374,8 @@ struct BottomNavView: View {
                                 ),
                                 label: hasFachreferat ? "Fachreferat bearbeiten" : "Fachreferat",
                                 description: hasFachreferat ? "Bestehendes Fachreferat bearbeiten" : "Fachreferatsnote eintragen",
-                                disabled: store.encryptionKey == nil,
-                                title: store.encryptionKey == nil ? "Lade Schlüssel..." : ""
+                                disabled: store.encryptionKey == nil || isFirstSubject,
+                                title: store.encryptionKey == nil ? "Lade Schlüssel..." : (isFirstSubject ? "Lege zuerst ein Fach an" : "")
                             ) {
                                 isOpen = false
                                 showAddFachreferat = true
@@ -385,8 +386,8 @@ struct BottomNavView: View {
                                 iconContent: AnyView(Image(systemName: "graduationcap.fill").font(.system(size: 18, weight: .semibold))),
                                 label: "Abitur",
                                 description: "Abschlussprüfung eintragen",
-                                disabled: false,
-                                title: ""
+                                disabled: isFirstSubject,
+                                title: isFirstSubject ? "Lege zuerst ein Fach an" : ""
                             ) {
                                 isOpen = false
                                 onOpenAbitur?()
@@ -471,18 +472,36 @@ struct BottomNavView: View {
     }
 }
 
-// Abgerundete Form: oben 16, unten 44 (an iPhone-Ecken angelehnt)
+// Abgerundete Form: oben 16, unten ~20 % der Breite
 private struct RoundedBarShape: Shape {
     func path(in rect: CGRect) -> Path {
-        let topRadius: CGFloat = 16
-        // Untere Rundung proportional zur Breite, ca. 20 % – stärker abgerundet, näher an der iPhone-Screen-Rundung
-        let bottomRadius: CGFloat = rect.width * 0.14
+        let topR: CGFloat = 16
+        let bottomR: CGFloat = rect.width * 0.14
+
+        let tl = CGSize(width: topR, height: topR)
+        let tr = CGSize(width: topR, height: topR)
+        let bl = CGSize(width: bottomR, height: bottomR)
+        let br = CGSize(width: bottomR, height: bottomR)
+
         var path = Path()
-        path.addRoundedRect(in: rect,
-                            topLeftRadius: CGSize(width: topRadius, height: topRadius),
-                            topRightRadius: CGSize(width: topRadius, height: topRadius),
-                            bottomLeftRadius: CGSize(width: bottomRadius, height: bottomRadius),
-                            bottomRightRadius: CGSize(width: bottomRadius, height: bottomRadius))
+        path.move(to: CGPoint(x: rect.minX + tl.width, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX - tr.width, y: rect.minY))
+        path.addQuadCurve(to: CGPoint(x: rect.maxX, y: rect.minY + tr.height),
+                          control: CGPoint(x: rect.maxX, y: rect.minY))
+
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - br.height))
+        path.addQuadCurve(to: CGPoint(x: rect.maxX - br.width, y: rect.maxY),
+                          control: CGPoint(x: rect.maxX, y: rect.maxY))
+
+        path.addLine(to: CGPoint(x: rect.minX + bl.width, y: rect.maxY))
+        path.addQuadCurve(to: CGPoint(x: rect.minX, y: rect.maxY - bl.height),
+                          control: CGPoint(x: rect.minX, y: rect.maxY))
+
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + tl.height))
+        path.addQuadCurve(to: CGPoint(x: rect.minX + tl.width, y: rect.minY),
+                          control: CGPoint(x: rect.minX, y: rect.minY))
+
+        path.closeSubpath()
         return path
     }
 }
@@ -533,7 +552,7 @@ private struct ActionButton: View {
                     Text(label)
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(labelColor)
-                    Text(description)
+                    Text(title.isEmpty ? description : title)
                         .font(.system(size: 12))
                         .foregroundStyle(descriptionColor)
                 }
@@ -547,14 +566,6 @@ private struct ActionButton: View {
         .disabled(disabled)
         .buttonStyle(.plain)
         .opacity(disabled ? 0.55 : 1.0)
-        .overlay(
-            Group {
-                if !title.isEmpty {
-                    Text(title).font(.footnote).foregroundStyle(.secondary)
-                        .padding(.top, 4)
-                }
-            }, alignment: .bottom
-        )
     }
 
     private var buttonBackground: Color {

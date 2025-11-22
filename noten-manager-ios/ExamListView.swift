@@ -5,20 +5,38 @@ struct ExamListView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var store: GradesStore
 
+    let subjectFilter: String?
+    let alternateSubjectNames: [String]
+
     @State private var visibleInactiveCount: Int = 5
     @State private var editingExam: Exam? = nil
     @State private var examForNewGrade: Exam? = nil
     @State private var reminderExam: Exam? = nil
+    @State private var detailExam: Exam? = nil
+
+    init(subjectFilter: String? = nil, alternateSubjectNames: [String] = []) {
+        self.subjectFilter = subjectFilter
+        self.alternateSubjectNames = alternateSubjectNames
+    }
 
     private var activeExams: [Exam] {
-        store.allExams.filter { $0.isActive }.sorted {
+        filteredExams.filter { $0.isActive }.sorted {
             $0.date < $1.date
         }
     }
 
     private var inactiveExams: [Exam] {
-        store.allExams.filter { !$0.isActive }.sorted {
+        filteredExams.filter { !$0.isActive }.sorted {
             $0.date > $1.date
+        }
+    }
+
+    private var filteredExams: [Exam] {
+        guard let subjectFilter else { return store.allExams }
+        let candidates = ([subjectFilter] + alternateSubjectNames).map { $0.lowercased() }
+        return store.allExams.filter { exam in
+            let name = exam.subjectName.lowercased()
+            return candidates.contains(name)
         }
     }
 
@@ -83,6 +101,10 @@ struct ExamListView: View {
             }
             .sheet(item: $reminderExam) { exam in
                 ExamReminderView(exam: exam)
+                    .environmentObject(store)
+            }
+            .sheet(item: $detailExam) { exam in
+                ExamDetailSheet(exam: exam)
                     .environmentObject(store)
             }
         }
@@ -156,6 +178,15 @@ struct ExamListView: View {
                 }
 
                 Button {
+                    examForNewGrade = exam
+                } label: {
+                    Image(systemName: "text.badge.plus")
+                        .font(.system(size: 16, weight: .regular))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Note hinzufügen")
+
+                Button {
                     editingExam = exam
                 } label: {
                     Image(systemName: "pencil")
@@ -167,7 +198,7 @@ struct ExamListView: View {
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            examForNewGrade = exam
+            detailExam = exam
         }
     }
 
@@ -200,6 +231,7 @@ struct ExamListView: View {
                     id: exam.id,
                     subjectName: exam.subjectName,
                     title: exam.title,
+                    notes: exam.notes,
                     date: exam.date,
                     weight: exam.weight,
                     reminderAt: newValue,
@@ -221,5 +253,80 @@ struct ExamListView: View {
 
     private func reminderAccessibilityLabel(_ exam: Exam) -> String {
         return "Erinnerung bearbeiten"
+    }
+}
+
+private struct ExamDetailSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var store: GradesStore
+    let exam: Exam
+
+    private var groupName: String {
+        guard let gid = exam.groupId else { return "" }
+        return store.groupNames[gid] ?? gid
+    }
+
+    private var formattedDate: String {
+        let fmt = DateFormatter()
+        fmt.dateStyle = .full
+        fmt.timeStyle = .short
+        return fmt.string(from: exam.date)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Termin") {
+                    Text(exam.title.isEmpty ? "Ohne Titel" : exam.title)
+                        .font(.headline)
+                    Text(formattedDate)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Fach & Gruppe") {
+                    Text(exam.subjectName.isEmpty ? "Unbekanntes Fach" : exam.subjectName)
+                    if !groupName.isEmpty {
+                        Text("Gruppe: \(groupName)")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if let notes = exam.notes, !notes.isEmpty {
+                    Section("Notizen") {
+                        Text(notes)
+                            .font(.body)
+                    }
+                }
+
+                Section("Details") {
+                    if let w = exam.weight {
+                        Text("Gewichtung: \(w)")
+                    }
+                    Text(exam.requiresGrade == false ? "Note nicht erforderlich" : "Note erforderlich")
+                        .foregroundStyle(.secondary)
+                    if let reminder = exam.reminderAt {
+                        Text("Erinnerung: \(formattedDateTime(reminder))")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Keine Erinnerung").foregroundStyle(.secondary)
+                    }
+                    Text(exam.isCompleted ? "Status: Erledigt" : "Status: Offen")
+                        .foregroundStyle(exam.isCompleted ? .green : .primary)
+                }
+            }
+            .navigationTitle("Klausurdetails")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Schließen") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func formattedDateTime(_ date: Date) -> String {
+        let fmt = DateFormatter()
+        fmt.dateStyle = .medium
+        fmt.timeStyle = .short
+        return fmt.string(from: date)
     }
 }

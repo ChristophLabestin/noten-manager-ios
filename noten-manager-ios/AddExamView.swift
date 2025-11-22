@@ -8,6 +8,7 @@ struct AddExamView: View {
 
     @State private var subjectName: String = ""
     @State private var title: String = ""
+    @State private var notes: String = ""
     @State private var date: Date = Date().addingTimeInterval(60 * 60 * 24)
     @State private var examWeight: Int = 0
     @State private var hasReminder: Bool = false
@@ -44,9 +45,13 @@ struct AddExamView: View {
                             .foregroundStyle(.secondary)
                     }
 
+                    TextField("Titel / Bezeichnung", text: $title)
+                        .textInputAutocapitalization(.sentences)
+                        .textFieldStyle(.roundedBorder)
+
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Notiz")
-                        TextEditor(text: $title)
+                        Text("Notizen (optional)")
+                        TextEditor(text: $notes)
                             .frame(minHeight: 80)
                             .textInputAutocapitalization(.sentences)
                     }
@@ -130,11 +135,14 @@ struct AddExamView: View {
             return
         }
         do {
+            let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+            let storedNotes = trimmedNotes.isEmpty ? nil : trimmedNotes
             let reminder: Date? = hasReminder ? reminderDate : nil
             if shareWithGroup {
                 let sharedIds = try await store.addExamToGroups(
                     subjectName: subjectName,
                     title: trimmedTitle,
+                    notes: storedNotes,
                     date: date,
                     weight: examWeight,
                     reminderAt: reminder,
@@ -144,6 +152,7 @@ struct AddExamView: View {
                     try await store.addExamToFirestore(
                         subjectName: subjectName,
                         title: trimmedTitle,
+                        notes: storedNotes,
                         date: date,
                         weight: examWeight,
                         reminderAt: reminder,
@@ -158,6 +167,7 @@ struct AddExamView: View {
                 try await store.addExamToFirestore(
                     subjectName: subjectName,
                     title: trimmedTitle,
+                    notes: storedNotes,
                     date: date,
                     weight: examWeight,
                     reminderAt: reminder,

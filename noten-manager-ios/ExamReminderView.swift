@@ -68,6 +68,7 @@ struct ExamReminderView: View {
                     id: exam.id,
                     subjectName: exam.subjectName,
                     title: exam.title,
+                    notes: exam.notes,
                     date: exam.date,
                     weight: exam.weight,
                     reminderAt: reminderAt,
@@ -81,4 +82,3 @@ struct ExamReminderView: View {
         isSaving = false
     }
 }
-

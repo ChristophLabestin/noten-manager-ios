@@ -114,14 +114,25 @@ struct EditHomeworkView: View {
                     }
                     .disabled(!canSave || isSaving || subjects.isEmpty)
                 }
-                ToolbarItem(placement: .destructiveAction) {
-                    Button {
+            }
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 8) {
+                    Button(role: .destructive) {
                         showDeleteConfirm = true
                     } label: {
-                        Image(systemName: "trash")
+                        if isDeleting {
+                            ProgressView()
+                        } else {
+                            Text("Hausaufgabe löschen")
+                                .frame(maxWidth: .infinity)
+                        }
                     }
-                    .disabled(isDeleting)
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                    .padding(.horizontal)
+                    .padding(.bottom, 12)
                 }
+                .background(.thinMaterial)
             }
             .alert(
                 "Hausaufgabe löschen?",

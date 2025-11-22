@@ -6,6 +6,7 @@ struct Exam: Codable, Identifiable, Hashable {
     let subjectName: String
     let subjectKey: String?
     let title: String
+    let notes: String?
     let date: Date
     let weight: Int?
     let reminderAt: Date?

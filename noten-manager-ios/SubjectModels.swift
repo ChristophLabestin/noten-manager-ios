@@ -24,6 +24,7 @@ struct Subject: Codable, Identifiable, Hashable {
     let examPointsEncrypted: String?
     let writtenExamPointsEncrypted: String?
     let oralExamPointsEncrypted: String?
+    let isElective: Bool
 
     init(name: String,
          type: Int,
@@ -38,7 +39,8 @@ struct Subject: Codable, Identifiable, Hashable {
          examType: ExamType? = nil,
          examPointsEncrypted: String? = nil,
          writtenExamPointsEncrypted: String? = nil,
-         oralExamPointsEncrypted: String? = nil) {
+         oralExamPointsEncrypted: String? = nil,
+         isElective: Bool = false) {
         self.name = name
         self.type = type
         self.date = date
@@ -53,6 +55,7 @@ struct Subject: Codable, Identifiable, Hashable {
         self.examPointsEncrypted = examPointsEncrypted
         self.writtenExamPointsEncrypted = writtenExamPointsEncrypted
         self.oralExamPointsEncrypted = oralExamPointsEncrypted
+        self.isElective = isElective
     }
 }
 

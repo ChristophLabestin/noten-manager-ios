@@ -15,14 +15,22 @@ struct AddHomeworkView: View {
     @State private var isSaving: Bool = false
     @State private var error: String?
     @State private var shareWithGroup: Bool = false
+    @State private var selectedGroupId: String?
 
     private var subjects: [Subject] {
         store.subjects.filter { $0.name != "Fachreferat" }
     }
 
+    private var subjectOptions: [String] {
+        ["Allgemein"] + subjects.map { $0.name }
+    }
+
     private var canSave: Bool {
         guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         guard !subjectName.isEmpty else { return false }
+        if subjectName == "Allgemein" {
+            return selectedGroupId != nil
+        }
         if hasDueDate {
             return true
         }
@@ -38,8 +46,8 @@ struct AddHomeworkView: View {
             Form {
                 Section("Hausaufgabe") {
                     Picker("Fach", selection: $subjectName) {
-                        ForEach(subjects, id: \.name) { s in
-                            Text(s.name).tag(s.name)
+                        ForEach(subjectOptions, id: \.self) { name in
+                            Text(name).tag(name)
                         }
                     }
                     if subjects.isEmpty {
@@ -47,6 +55,24 @@ struct AddHomeworkView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
+
+                    if subjectName == "Allgemein" {
+                        if store.groupIds.isEmpty {
+                            Text("Du bist in keiner Gruppe. Tritt einer Gruppe bei, um allgemeine Hausaufgaben anzulegen.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Picker("Gruppe", selection: Binding(
+                                get: { selectedGroupId ?? store.groupIds.first ?? "" },
+                                set: { selectedGroupId = $0 }
+                            )) {
+                                ForEach(store.groupIds, id: \.self) { gid in
+                                    Text(store.groupNames[gid] ?? gid).tag(gid)
+                                }
+                            }
+                        }
+                    }
+
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Aufgabe")
                         TextEditor(text: $title)
@@ -74,7 +100,7 @@ struct AddHomeworkView: View {
                         )
                     }
 
-                    if !store.groupIds.isEmpty {
+                    if !store.groupIds.isEmpty && subjectName != "Allgemein" {
                         Toggle("Mit Gruppen teilen", isOn: $shareWithGroup)
                     }
                 }
@@ -102,11 +128,14 @@ struct AddHomeworkView: View {
                     if let pre = preselectedSubjectName,
                        subjects.contains(where: { $0.name == pre }) {
                         subjectName = pre
+                    } else if let first = subjects.first?.name {
+                        subjectName = first
                     } else {
-                        subjectName = subjects.first?.name ?? ""
+                        subjectName = subjectOptions.first ?? ""
                     }
                 }
                 shareWithGroup = !store.groupIds.isEmpty
+                selectedGroupId = store.groupIds.first
             }
         }
     }
@@ -124,7 +153,17 @@ struct AddHomeworkView: View {
         do {
             let due: Date? = hasDueDate ? dueDate : nil
             let reminder: Date? = hasReminder ? reminderDate : nil
-            if shareWithGroup {
+            if subjectName == "Allgemein" {
+                guard let gid = selectedGroupId ?? store.groupIds.first else {
+                    error = "Bitte wähle eine Gruppe."
+                    isSaving = false
+                    return
+                }
+                let docId = try await store.addGeneralHomeworkToGroup(groupId: gid, title: trimmedTitle, dueDate: due, reminderAt: reminder)
+                if let reminder {
+                    try await store.setUserReminderForSharedHomework(homeworkId: docId, reminderAt: reminder, groupId: gid)
+                }
+            } else if shareWithGroup {
                 let sharedIds = try await store.addHomeworkToGroups(subjectName: subjectName, title: trimmedTitle, dueDate: due, reminderAt: reminder)
                 if sharedIds.isEmpty {
                     try await store.addHomeworkToFirestore(subjectName: subjectName, title: trimmedTitle, dueDate: due, reminderAt: reminder)

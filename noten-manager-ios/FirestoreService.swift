@@ -8,12 +8,13 @@ final class FirestoreService {
 
     private let db = Firestore.firestore()
 
-    func setUserProfile(profile: UserProfile) async throws {
+    func setUserProfile(profile: UserProfile, onboardingCompleted: Bool = true) async throws {
         try await db.collection("users").document(profile.id).setData([
             "id": profile.id,
             "name": profile.name,
             "email": profile.email,
-            "encryptionSalt": profile.encryptionSalt
+            "encryptionSalt": profile.encryptionSalt,
+            "onboardingCompleted": onboardingCompleted
         ], merge: true)
     }
 

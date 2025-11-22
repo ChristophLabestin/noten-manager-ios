@@ -52,7 +52,11 @@ enum HomeworkNotificationManager {
         }
     }
 
-    static func syncNotifications(for homeworks: [Homework]) {
+    static func syncNotifications(
+        for homeworks: [Homework],
+        reminderHour: Int = 19,
+        reminderMinute: Int = 0
+    ) {
         requestAuthorizationIfNeeded()
 
         let center = UNUserNotificationCenter.current()
@@ -95,7 +99,7 @@ enum HomeworkNotificationManager {
                     // Original logic for non-shared homeworks
 
                     if let dueDate = hw.dueDate,
-                       let reminder = reminderDate(before: dueDate),
+                       let reminder = reminderDate(before: dueDate, hour: reminderHour, minute: reminderMinute),
                        reminder > now {
                         let content = UNMutableNotificationContent()
                         content.title = "Hausaufgabe morgen fällig"
@@ -179,12 +183,22 @@ enum HomeworkNotificationManager {
 
     private static func markHomeworkCompleted(_ id: String) {
         guard let uid = Auth.auth().currentUser?.uid else { return }
-        let docRef = Firestore.firestore()
-            .collection("users")
-            .document(uid)
-            .collection("homeworks")
-            .document(id)
-        docRef.updateData(["isCompleted": true]) { _ in
+        Task {
+            let db = Firestore.firestore()
+            do {
+                let schoolYearId = try await SchoolYearService.ensureActiveSchoolYear(uid: uid, db: db)
+                let docRef = db
+                    .collection("users")
+                    .document(uid)
+                    .collection("schoolYears")
+                    .document(schoolYearId)
+                    .collection("homeworks")
+                    .document(id)
+                try await docRef.updateData(["isCompleted": true])
+            } catch {
+                // optional: Fehler ignorieren, Notification trotzdem entfernen
+            }
+
             let center = UNUserNotificationCenter.current()
             let identifiers = [
                 "homework_due_\(id)",
@@ -212,15 +226,15 @@ enum HomeworkNotificationManager {
         UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
     }
 
-    private static func reminderDate(before dueDate: Date) -> Date? {
+    private static func reminderDate(before dueDate: Date, hour: Int, minute: Int) -> Date? {
         var calendar = Calendar.current
         calendar.timeZone = .current
         guard let dayBefore = calendar.date(byAdding: .day, value: -1, to: dueDate) else {
             return nil
         }
         var comps = calendar.dateComponents([.year, .month, .day], from: dayBefore)
-        comps.hour = 20
-        comps.minute = 0
+        comps.hour = max(0, min(23, hour))
+        comps.minute = max(0, min(59, minute))
         return calendar.date(from: comps)
     }
 }

@@ -14,6 +14,9 @@ struct MainView: View {
     let onLogout: () -> Void
     @StateObject private var gradesStore = GradesStore()
     @State private var currentTab: BottomNavView.Tab = .home
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var navPath = NavigationPath()
+    @State private var showOnboardingFunnel: Bool = false
 
     // Von SubjectDetail per Preference gemeldetes Fach für „Note hinzufügen“
     @State private var quickAddSubjectName: String? = nil
@@ -23,7 +26,7 @@ struct MainView: View {
         ZStack {
             themedBackground
 
-            NavigationStack {
+            NavigationStack(path: $navPath) {
                 Group {
                     switch currentTab {
                     case .home:
@@ -47,6 +50,10 @@ struct MainView: View {
                     EmptyView()
                 }
             }
+            .navigationDestination(for: Subject.self) { subject in
+                SubjectDetailView(subject: subject)
+                    .environmentObject(gradesStore)
+            }
             // Platz für die BottomNav im Safe-Area-Bereich reservieren
             .safeAreaInset(edge: .bottom) {
                 Color.clear.frame(height: 100)
@@ -65,21 +72,39 @@ struct MainView: View {
                 )
                 .environmentObject(gradesStore)
             }
-
-            if gradesStore.isLoading {
-                loadingOverlay
-            }
         }
         // Änderungen am gemeldeten Fachnamen von SubjectDetail entgegennehmen
         .onPreferenceChange(QuickAddSubjectPreferenceKey.self) { value in
             quickAddSubjectName = value
         }
+        // Wenn der Nutzer „System“ gewählt hat, den Dark-Mode-Status mit dem aktuellen
+        // ColorScheme des Geräts synchronisieren, sobald es sich ändert.
+        .onAppear {
+            gradesStore.syncDarkModeWithSystem(colorScheme: colorScheme)
+        }
+        .onChange(of: colorScheme) { newScheme in
+            gradesStore.syncDarkModeWithSystem(colorScheme: newScheme)
+        }
         // Dark-Mode-Verhalten wie im React-Client:
         // nutze die gespeicherte darkMode-Präferenz des Nutzers
         .preferredColorScheme(gradesStore.preferredColorScheme)
+        .onChange(of: gradesStore.onboardingRequired) { required in
+            showOnboardingFunnel = required
+        }
+        .fullScreenCover(isPresented: $showOnboardingFunnel) {
+            OnboardingFunnelView {
+                showOnboardingFunnel = false
+            }
+            .environmentObject(gradesStore)
+        }
         .task {
             // Live-Updates starten
             await gradesStore.startListening()
+        }
+        .overlay(alignment: .center) {
+            if gradesStore.isLoading {
+                loadingOverlay
+            }
         }
     }
 
@@ -128,6 +153,7 @@ struct MainView: View {
                     .shadow(color: Color.black.opacity(0.45), radius: 30, x: 0, y: 18)
             )
         }
+        .zIndex(50)
     }
 
     private var themedBackground: some View {

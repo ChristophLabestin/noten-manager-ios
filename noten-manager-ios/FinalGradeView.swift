@@ -33,7 +33,7 @@ struct FinalGradeView: View {
     @State private var showExamSheet: Bool = false
 
     private var subjectsWithoutFachreferat: [Subject] {
-        store.subjects.filter { $0.name != "Fachreferat" }
+        store.subjects.filter { $0.name != "Fachreferat" && !$0.isElective }
     }
 
     private var hasFachreferat: Bool {
@@ -59,11 +59,19 @@ struct FinalGradeView: View {
 
     private var hasOverdueHomeworks: Bool {
         let now = Date()
-        return store.homeworks.contains { hw in
+        return store.allHomeworks.contains { hw in
             guard !hw.isCompleted else { return false }
             if let due = hw.dueDate { return due < now }
             if let reminder = hw.reminderAt { return reminder < now }
             return false
+        }
+    }
+
+    private var hasHomeworkDueTomorrow: Bool {
+        let cal = Calendar.current
+        return store.allHomeworks.contains { hw in
+            guard !hw.isCompleted, let due = hw.dueDate else { return false }
+            return cal.isDateInTomorrow(due)
         }
     }
 
@@ -367,7 +375,7 @@ struct FinalGradeView: View {
                         ZStack(alignment: .topTrailing) {
                             Image(systemName: "checklist")
                                 .imageScale(.large)
-                            if hasOverdueHomeworks {
+                            if hasOverdueHomeworks || hasHomeworkDueTomorrow {
                                 Circle()
                                     .fill(Color.red)
                                     .frame(width: 8, height: 8)
@@ -444,10 +452,14 @@ struct FinalGradeView: View {
             HStack {
                 Text(subject.name).font(.headline)
                 Spacer()
-                Tag(
-                    text: subject.type == 1 ? "Hauptfach" : "Nebenfach",
-                    style: subject.type == 1 ? .main : .minor
-                )
+                if subject.isElective {
+                    Tag(text: "Wahlfach", style: .elective)
+                } else {
+                    Tag(
+                        text: subject.type == 1 ? "Hauptfach" : "Nebenfach",
+                        style: subject.type == 1 ? .main : .minor
+                    )
+                }
             }
 
             HStack {
