@@ -23,6 +23,8 @@ struct HomeView: View {
     @State private var displayName: String = ""
     @State private var showHomeworkSheet: Bool = false
     @State private var showExamSheet: Bool = false
+    @State private var selectedSubject: Subject? = nil
+    @State private var subjectLinkActive: Bool = false
 
     private var subjectsWithoutFachreferat: [Subject] {
         store.subjects.filter { $0.name != "Fachreferat" }
@@ -56,14 +58,23 @@ struct HomeView: View {
                     matches = (gw.halfYear == 2)
                 }
                 if matches {
-                    filtered.append(Grade(grade: gw.grade, weight: gw.weight, date: gw.date, note: gw.note, halfYear: gw.halfYear))
+                    filtered.append(
+                        Grade(
+                            grade: gw.grade,
+                            weight: gw.weight,
+                            date: gw.date,
+                            note: gw.note,
+                            halfYear: gw.halfYear,
+                            linkedExamId: gw.linkedExamId
+                        )
+                    )
                 }
             }
             result[subject.name] = filtered
         }
         if let fr = store.fachreferat {
             result["Fachreferat"] = [
-                Grade(grade: fr.grade, weight: 3, date: fr.date, note: fr.note, halfYear: nil)
+                Grade(grade: fr.grade, weight: 3, date: fr.date, note: fr.note, halfYear: nil, linkedExamId: nil)
             ]
         }
         if let practical = store.practicalPerformance {
@@ -73,7 +84,8 @@ struct HomeView: View {
                     weight: 0,
                     date: entry.date,
                     note: entry.note ?? entry.company,
-                    halfYear: entry.halfYear
+                    halfYear: entry.halfYear,
+                    linkedExamId: nil
                 )
             }
             if !entries.isEmpty {
@@ -173,6 +185,21 @@ struct HomeView: View {
         }
     }
 
+    private func moveSpecialSubjectsToEnd(_ subjects: [Subject]) -> [Subject] {
+        var arr = subjects
+        var tail: [Subject] = []
+
+        if let idx = arr.firstIndex(where: { $0.name == "Fachreferat" }) {
+            tail.append(arr.remove(at: idx))
+        }
+        if store.schoolType == .fos, let idx = arr.firstIndex(where: { $0.name == "Praktikum" }) {
+            tail.append(arr.remove(at: idx))
+        }
+
+        arr.append(contentsOf: tail)
+        return arr
+    }
+
     private func customOrderMap() -> [String: Int]? {
         guard !store.subjectSortOrder.isEmpty else { return nil }
         var map: [String: Int] = [:]
@@ -186,18 +213,18 @@ struct HomeView: View {
         let base = baseSubjectsList()
         switch store.subjectSortMode {
         case .name:
-            return base.sorted(by: comparatorNameAsc())
+            return moveSpecialSubjectsToEnd(base.sorted(by: comparatorNameAsc()))
         case .name_desc:
-            return base.sorted(by: comparatorNameDesc())
+            return moveSpecialSubjectsToEnd(base.sorted(by: comparatorNameDesc()))
         case .average:
-            return base.sorted(by: comparatorAverageBestFirst(subjectGrades: subjectGrades))
+            return moveSpecialSubjectsToEnd(base.sorted(by: comparatorAverageBestFirst(subjectGrades: subjectGrades)))
         case .average_worst:
-            return base.sorted(by: comparatorAverageWorstFirst(subjectGrades: subjectGrades))
+            return moveSpecialSubjectsToEnd(base.sorted(by: comparatorAverageWorstFirst(subjectGrades: subjectGrades)))
         case .custom:
             if let map = customOrderMap() {
                 return base.sorted(by: comparatorCustom(orderMap: map))
             } else {
-                return base.sorted(by: comparatorNameAsc())
+                return moveSpecialSubjectsToEnd(base.sorted(by: comparatorNameAsc()))
             }
         }
     }
@@ -239,26 +266,52 @@ struct HomeView: View {
 
     // MARK: - Small subviews for body
 
+    private func openSubject(_ subject: Subject) {
+        selectedSubject = subject
+        subjectLinkActive = true
+    }
+
+    private var hiddenSubjectLink: some View {
+        NavigationLink(
+            destination: Group {
+                if let subject = selectedSubject {
+                    if subject.name == "Fachreferat" {
+                        FachreferatDetailView(subject: subject)
+                            .environmentObject(store)
+                    } else {
+                        SubjectDetailView(subject: subject)
+                            .environmentObject(store)
+                    }
+                } else {
+                    EmptyView()
+                }
+            },
+            isActive: $subjectLinkActive
+        ) {
+            EmptyView()
+        }
+        .hidden()
+    }
+
     @ViewBuilder
     private func subjectRowAny(subject: Subject,
                                subjectGrades: [String: [Grade]],
                                fachreferatSubjectName: String?) -> some View {
         let grades = subjectGrades[subject.name] ?? []
-        if subject.name == "Fachreferat" || subject.name == "Praktikum" {
-            SubjectRowView(
-                subject: subject,
-                grades: grades,
-                fachreferatSubjectName: fachreferatSubjectName
-            )
-            .contentShape(Rectangle())
+        let row = SubjectRowView(
+            subject: subject,
+            grades: grades,
+            fachreferatSubjectName: fachreferatSubjectName
+        )
+        .contentShape(Rectangle())
+
+        if subject.name == "Praktikum" {
+            row
         } else {
-            NavigationLink(value: subject) {
-                SubjectRowView(
-                    subject: subject,
-                    grades: grades,
-                    fachreferatSubjectName: fachreferatSubjectName
-                )
-                .contentShape(Rectangle())
+            Button {
+                openSubject(subject)
+            } label: {
+                row
             }
             .buttonStyle(.plain)
         }
@@ -453,8 +506,12 @@ struct HomeView: View {
                 }
             }
         ) {
-            HStack(alignment: .center, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 HalfYearFilterRow(halfYear: $halfYear)
+                Text("Ein Fach antippen, um Details und Noten zu öffnen.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -528,6 +585,7 @@ struct HomeView: View {
         .listRowSeparator(.hidden)
         .listSectionSpacing(0)
         .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine"))
+        .background(hiddenSubjectLink)
 
         // Unsichtbare NavigationLinks (NavigationStack-Ziele)
         .background(
@@ -570,6 +628,11 @@ struct HomeView: View {
         .onAppear {
             computeGreeting()
             Task { await loadUserDisplayName() }
+        }
+        .onChange(of: subjectLinkActive) { active in
+            if !active {
+                selectedSubject = nil
+            }
         }
     }
 
@@ -679,6 +742,14 @@ struct SegmentButton: View {
 }
 
 struct SubjectRowView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject private var store: GradesStore
+
+    private struct SubjectAccent {
+        let primary: Color
+        let secondary: Color
+    }
+
     let subject: Subject
     let grades: [Grade]
     let fachreferatSubjectName: String?
@@ -720,12 +791,91 @@ struct SubjectRowView: View {
         return .red
     }
 
+    private func descriptor(for average: Double?, gradesCount: Int, isFachreferat: Bool, isPraktikum: Bool) -> String {
+        if isFachreferat {
+            return gradesCount == 0 ? "Fachreferat noch nicht hinterlegt" : "Einmalige Bewertung gespeichert"
+        }
+        if gradesCount == 0 {
+            return isPraktikum ? "Noch keine Noten erfasst" : "Noch keine Noten erfasst"
+        }
+        guard let avg = average else { return "Noch keine Noten erfasst" }
+        if avg >= 10 { return "Sehr starker Schnitt" }
+        if avg >= 7 { return "Stabiler Schnitt" }
+        if avg >= 4 { return "Ausbaufähig – dranbleiben" }
+        return "Achtung: Schnitt im roten Bereich"
+    }
+
+    private func progress(for average: Double) -> Double {
+        let clamped = max(0, min(15, average))
+        return clamped / 15
+    }
+
+    private func accent(for subject: Subject) -> SubjectAccent {
+        let feminine = store.theme == "feminine"
+
+        let mainPrimary = feminine ? Color(hex: "#ec4899") : Color(hex: "#2563eb")
+        let mainSecondary = feminine ? Color(hex: "#c084fc") : Color(hex: "#38bdf8")
+        let minorPrimary = feminine ? Color(hex: "#a855f7") : Color(hex: "#0ea5e9")
+        let minorSecondary = feminine ? Color(hex: "#f472b6") : Color(hex: "#22c55e")
+        let electivePrimary = feminine ? Color(hex: "#f97316") : Color(hex: "#6b7280")
+        let electiveSecondary = feminine ? Color(hex: "#fb7185") : Color(hex: "#94a3b8")
+
+        if subject.name == "Fachreferat" {
+            return SubjectAccent(
+                primary: feminine ? Color(hex: "#d946ef") : Color(hex: "#8b5cf6"),
+                secondary: feminine ? Color(hex: "#f472b6") : Color(hex: "#60a5fa")
+            )
+        }
+
+        if subject.name == "Praktikum" {
+            return SubjectAccent(
+                primary: Color(hex: "#f59e0b"),
+                secondary: Color(hex: "#fcd34d")
+            )
+        }
+
+        if subject.isElective {
+            return SubjectAccent(
+                primary: electivePrimary,
+                secondary: electiveSecondary
+            )
+        }
+
+        if subject.type == 1 {
+            return SubjectAccent(
+                primary: mainPrimary,
+                secondary: mainSecondary
+            )
+        }
+
+        return SubjectAccent(
+            primary: minorPrimary,
+            secondary: minorSecondary
+        )
+    }
+
+    private func backgroundTile(accent: SubjectAccent) -> some View {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .fill(
+                LinearGradient(
+                    colors: [
+                        accent.primary.opacity(colorScheme == .dark ? 0.20 : 0.12),
+                        Color(.secondarySystemBackground)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+    }
+
     var body: some View {
         let average = avg(subject)
         let gradesCount = grades.count
 
         let isFachreferat = subject.name == "Fachreferat"
         let isPraktikum = subject.name == "Praktikum"
+        let accent = accent(for: subject)
+
         let displayName: String = {
             if isFachreferat, let frName = fachreferatSubjectName, !frName.isEmpty {
                 return "Fachreferat in \(frName)"
@@ -736,49 +886,83 @@ struct SubjectRowView: View {
             return subject.name
         }()
 
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(displayName)
-                    .font(.headline)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+        let tag: Tag = {
+            if isFachreferat {
+                return Tag(text: "Halbjahresleistung", style: .main)
+            } else if isPraktikum {
+                return Tag(text: "Praktikum", style: .minor)
+            } else if subject.isElective {
+                return Tag(text: "Wahlfach", style: .elective)
+            }
+            return Tag(text: subject.type == 1 ? "Hauptfach" : "Nebenfach", style: subject.type == 1 ? .main : .minor)
+        }()
+
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
-                    if isFachreferat {
-                        Tag(text: "Halbjahresleistung", style: .main)
-                    } else if isPraktikum {
-                        Tag(text: "Praktikum", style: .minor)
-                        Text("\(gradesCount) \(gradesCount == 1 ? "Note" : "Noten")")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else if subject.isElective {
-                        Tag(text: "Wahlfach", style: .elective)
-                        Text("\(gradesCount) \(gradesCount == 1 ? "Note" : "Noten")")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Tag(text: subject.type == 1 ? "Hauptfach" : "Nebenfach", style: subject.type == 1 ? .main : .minor)
-                        Text("\(gradesCount) \(gradesCount == 1 ? "Note" : "Noten")")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    Text(displayName)
+                        .font(.headline.weight(.semibold))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    tag
+                }
+
+                Text(descriptor(for: average, gradesCount: gradesCount, isFachreferat: isFachreferat, isPraktikum: isPraktikum))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+
+                if let avg = average {
+                    GeometryReader { geo in
+                        let ratio = progress(for: avg)
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.08))
+                            Capsule()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [accent.primary, accent.secondary],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .frame(width: geo.size.width * ratio)
+                        }
                     }
+                    .frame(height: 6)
+                    .padding(.trailing, 8)
+                    .padding(.top, 2)
                 }
             }
-            Spacer()
-            Text(formatAverage(average))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(gradeClassColor(average).opacity(0.15))
-                .foregroundStyle(gradeClassColor(average))
-                .clipShape(Capsule())
+
+            Spacer(minLength: 8)
+
+            VStack(alignment: .trailing, spacing: 8) {
+                Text(formatAverage(average))
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(gradeClassColor(average).opacity(colorScheme == .dark ? 0.24 : 0.14))
+                    .foregroundStyle(gradeClassColor(average))
+                    .clipShape(Capsule())
+            }
         }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
+        .padding(16)
+        .background(backgroundTile(accent: accent))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color(.separator).opacity(0.15), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(
+                    accent.primary.opacity(colorScheme == .dark ? 0.26 : 0.16),
+                    lineWidth: 1
+                )
+        )
+        .shadow(
+            color: accent.primary.opacity(colorScheme == .dark ? 0.22 : 0.12),
+            radius: 8,
+            x: 0,
+            y: 6
         )
     }
 }

@@ -20,6 +20,11 @@ struct EditHomeworkView: View {
 
     @State private var isShared: Bool = false
     @State private var sharedId: String? = nil
+    @FocusState private var focusedField: Field?
+
+    private enum Field: Hashable {
+        case title
+    }
 
     init(homework: Homework) {
         self.homework = homework
@@ -36,7 +41,18 @@ struct EditHomeworkView: View {
     }
 
     private var subjects: [Subject] {
-        store.subjects.filter { $0.name != "Fachreferat" }
+        store.sortedSubjectsForDisplay(store.subjects.filter { $0.name != "Fachreferat" })
+    }
+
+    private var subjectOptions: [String] {
+        var list = subjects.map { $0.name }
+        if !list.contains("Allgemein") {
+            list.insert("Allgemein", at: 0)
+        }
+        if !list.contains(subjectName) && !subjectName.isEmpty {
+            list.append(subjectName)
+        }
+        return list
     }
 
     private var canSave: Bool {
@@ -45,61 +61,110 @@ struct EditHomeworkView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Hausaufgabe bearbeiten") {
-                    Picker("Fach", selection: $subjectName) {
-                        ForEach(subjects, id: \.name) { s in
-                            Text(s.name).tag(s.name)
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 16) {
+                    SettingsCard(
+                        title: "Hausaufgabe bearbeiten",
+                        subtitle: "Fach, Aufgabe und Fälligkeit",
+                        systemImage: "checklist",
+                        accent: .cyan
+                    ) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            SettingsSectionBox {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("Fach")
+                                        .font(.headline)
+                                    Picker("Fach", selection: $subjectName) {
+                                        ForEach(subjectOptions, id: \.self) { name in
+                                            Text(name).tag(name)
+                                        }
+                                    }
+                                    .pickerStyle(.menu)
+                                    .tint(.primary)
+                                    .padding(10)
+                                    .background(Color.formInputBackground)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                                    if subjects.isEmpty {
+                                        Text("Lege zuerst ein Fach an, um Hausaufgaben zuzuordnen.")
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+
+                            SettingsSectionBox {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text("Aufgabe")
+                                            .font(.headline)
+                                        TextEditor(text: $title)
+                                            .frame(minHeight: 90)
+                                            .textInputAutocapitalization(.sentences)
+                                            .scrollContentBackground(.hidden)
+                                            .focused($focusedField, equals: .title)
+                                            .padding(10)
+                                            .background(Color.formInputBackground)
+                                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    }
+
+                                    Toggle("Fälligkeitsdatum verwenden", isOn: $hasDueDate)
+                                        .tint(.cyan)
+
+                                    if hasDueDate {
+                                        DatePicker(
+                                            "Fällig am",
+                                            selection: $dueDate,
+                                            displayedComponents: .date
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
-                    if subjects.isEmpty {
-                        Text("Lege zuerst ein Fach an, um Hausaufgaben zuzuordnen.")
+
+                    SettingsCard(
+                        title: "Erinnerung & Status",
+                        subtitle: "Benachrichtigungen für die Aufgabe",
+                        systemImage: "bell.badge.fill",
+                        accent: .orange
+                    ) {
+                        SettingsSectionBox {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Toggle("Erinnerung planen", isOn: $hasReminder)
+                                    .tint(.orange)
+
+                                if hasReminder {
+                                    DatePicker(
+                                        "Erinnerung",
+                                        selection: $reminderDate,
+                                        displayedComponents: [.date, .hourAndMinute]
+                                    )
+                                }
+
+                                if store.homeworkGroupId != nil {
+                                    Text("Wenn diese Aufgabe aus der Gruppe stammt, wird nur deine persönliche Erinnerung gespeichert.")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    Toggle("Als erledigt markieren", isOn: $isCompleted)
+                                        .tint(.green)
+                                }
+                            }
+                        }
+                    }
+
+                    if let error {
+                        Text(error)
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Aufgabe")
-                        TextEditor(text: $title)
-                            .frame(minHeight: 80)
-                            .textInputAutocapitalization(.sentences)
-                    }
-
-                    Toggle("Fälligkeitsdatum verwenden", isOn: $hasDueDate)
-
-                    if hasDueDate {
-                        DatePicker(
-                            "Fällig am",
-                            selection: $dueDate,
-                            displayedComponents: .date
-                        )
-                    }
-
-                    Toggle("Erinnerung planen", isOn: $hasReminder)
-
-                    if hasReminder {
-                        DatePicker(
-                            "Erinnerung",
-                            selection: $reminderDate,
-                            displayedComponents: [.date, .hourAndMinute]
-                        )
-                    }
-
-                    if store.homeworkGroupId != nil {
-                        Text("Wenn diese Aufgabe aus der Gruppe stammt, wird nur deine persönliche Erinnerung gespeichert.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Toggle("Als erledigt markieren", isOn: $isCompleted)
-                            .tint(.green)
+                            .foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-                if let error {
-                    Text(error)
-                        .foregroundStyle(.red)
-                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
-            .navigationTitle("Hausaufgabe bearbeiten")
+            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine"))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Abbrechen") {
@@ -114,7 +179,17 @@ struct EditHomeworkView: View {
                     }
                     .disabled(!canSave || isSaving || subjects.isEmpty)
                 }
+                ToolbarItemGroup(placement: .keyboard) {
+                    KeyboardNavigationAccessory(
+                        focus: $focusedField,
+                        fields: [.title],
+                        label: nil,
+                        onDone: { hideKeyboard() }
+                    )
+                }
             }
+            .scrollDismissesKeyboard(.interactively)
+            .hideKeyboardOnTap()
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 8) {
                     Button(role: .destructive) {
@@ -146,7 +221,7 @@ struct EditHomeworkView: View {
                 Text("Diese Hausaufgabe wird dauerhaft gelöscht.")
             }
         }
-        .keyboardDismissToolbar()
+        .modifier(KeyboardToolbarInset(height: 64))
     }
 
     private func save() async {

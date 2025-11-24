@@ -1365,14 +1365,22 @@ final class GradesStore: ObservableObject {
                         let encGrades: [(String, EncryptedGrade)] = docs.compactMap { gdoc in
                             let gd = gdoc.data()
                             guard let gradeStr = gd["grade"] as? String else { return nil }
-                            let weight = (gd["weight"] as? NSNumber)?.doubleValue ?? 1.0
-                            let ts = gd["date"] as? Timestamp
-                            let date = ts?.dateValue() ?? Date()
-                            let note = gd["note"] as? String
-                            let halfYear = gd["halfYear"] as? Int
-                            let eg = EncryptedGrade(grade: gradeStr, weight: weight, date: date, note: note, halfYear: halfYear)
-                            return (gdoc.documentID, eg)
-                        }
+                        let weight = (gd["weight"] as? NSNumber)?.doubleValue ?? 1.0
+                        let ts = gd["date"] as? Timestamp
+                        let date = ts?.dateValue() ?? Date()
+                        let note = gd["note"] as? String
+                        let halfYear = gd["halfYear"] as? Int
+                        let linkedExamId = gd["linkedExamId"] as? String
+                        let eg = EncryptedGrade(
+                            grade: gradeStr,
+                            weight: weight,
+                            date: date,
+                            note: note,
+                            halfYear: halfYear,
+                            linkedExamId: linkedExamId
+                        )
+                        return (gdoc.documentID, eg)
+                    }
                         self.encryptedGradesCache[sid] = encGrades
                         self.decryptGradesForSubjectIfPossible(subjectId: sid)
                         self.finishInitialLoadingIfNeeded()
@@ -1392,7 +1400,17 @@ final class GradesStore: ObservableObject {
         decrypted.reserveCapacity(encList.count)
         for (gid, enc) in encList {
             if let num = try? CryptoService.decryptString(enc.grade, key: key), let val = Double(num), val.isFinite {
-                decrypted.append(GradeWithId(id: gid, grade: val, weight: enc.weight, date: enc.date, note: enc.note, halfYear: enc.halfYear))
+                decrypted.append(
+                    GradeWithId(
+                        id: gid,
+                        grade: val,
+                        weight: enc.weight,
+                        date: enc.date,
+                        note: enc.note,
+                        halfYear: enc.halfYear,
+                        linkedExamId: enc.linkedExamId
+                    )
+                )
             }
         }
         gradesBySubject[subjectId] = decrypted
@@ -2379,6 +2397,7 @@ final class GradesStore: ObservableObject {
                     let date = ts?.dateValue() ?? Date()
                     let note = gd["note"] as? String
                     let halfYear = gd["halfYear"] as? Int
+                    let linkedExamId = gd["linkedExamId"] as? String
                     grades.append(
                         GradeWithId(
                             id: gdoc.documentID,
@@ -2386,7 +2405,8 @@ final class GradesStore: ObservableObject {
                             weight: weight,
                             date: date,
                             note: note,
-                            halfYear: halfYear
+                            halfYear: halfYear,
+                            linkedExamId: linkedExamId
                         )
                     )
                 }
@@ -2648,24 +2668,47 @@ final class GradesStore: ObservableObject {
         return ref.documentID
     }
 
-    func addGradeToFirestore(subjectId: String, grade: Double, weight: Double, date: Date, note: String?, halfYear: Int?, using key: SymmetricKey) async throws -> String {
+    func addGradeToFirestore(
+        subjectId: String,
+        grade: Double,
+        weight: Double,
+        date: Date,
+        note: String?,
+        halfYear: Int?,
+        linkedExamId: String?,
+        using key: SymmetricKey
+    ) async throws -> String {
         guard let uid = Auth.auth().currentUser?.uid else { throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"]) }
 
         let yearRef = try await requireYearRef(uid: uid)
         let encrypted = try CryptoService.encryptString(String(grade), key: key)
         let gradesRef = yearRef.collection("subjects").document(subjectId).collection("grades")
         let newRef = gradesRef.document()
-        try await newRef.setData([
+        var payload: [String: Any] = [
             "grade": encrypted,
             "weight": weight,
             "date": date,
             "note": note as Any,
             "halfYear": halfYear as Any
-        ])
+        ]
+        if let linkedExamId {
+            payload["linkedExamId"] = linkedExamId
+        }
+        try await newRef.setData(payload)
 
         // Optimistisch lokal (Listener setzt danach korrekt)
         var list = gradesBySubject[subjectId] ?? []
-        list.append(GradeWithId(id: newRef.documentID, grade: grade, weight: weight, date: date, note: note, halfYear: halfYear))
+        list.append(
+            GradeWithId(
+                id: newRef.documentID,
+                grade: grade,
+                weight: weight,
+                date: date,
+                note: note,
+                halfYear: halfYear,
+                linkedExamId: linkedExamId
+            )
+        )
         gradesBySubject[subjectId] = list
 
         return newRef.documentID
@@ -3124,7 +3167,16 @@ final class GradesStore: ObservableObject {
         // Optimistisch lokal (Listener setzt danach korrekt)
         var list = gradesBySubject[subjectId] ?? []
         if let idx = list.firstIndex(where: { $0.id == gradeId }) {
-            list[idx] = GradeWithId(id: gradeId, grade: grade, weight: weight, date: date, note: note, halfYear: halfYear)
+            let linkedExamId = list[idx].linkedExamId
+            list[idx] = GradeWithId(
+                id: gradeId,
+                grade: grade,
+                weight: weight,
+                date: date,
+                note: note,
+                halfYear: halfYear,
+                linkedExamId: linkedExamId
+            )
             gradesBySubject[subjectId] = list
         }
     }
@@ -3142,7 +3194,15 @@ final class GradesStore: ObservableObject {
         var list = gradesBySubject[subjectId] ?? []
         if let idx = list.firstIndex(where: { $0.id == gradeId }) {
             let g = list[idx]
-            list[idx] = GradeWithId(id: g.id, grade: g.grade, weight: g.weight, date: g.date, note: note, halfYear: g.halfYear)
+            list[idx] = GradeWithId(
+                id: g.id,
+                grade: g.grade,
+                weight: g.weight,
+                date: g.date,
+                note: note,
+                halfYear: g.halfYear,
+                linkedExamId: g.linkedExamId
+            )
             gradesBySubject[subjectId] = list
         }
     }
@@ -3152,12 +3212,27 @@ final class GradesStore: ObservableObject {
 
         let yearRef = try await requireYearRef(uid: uid)
         let gradeDocRef = yearRef.collection("subjects").document(subjectId).collection("grades").document(gradeId)
+        let linkedExamId = gradesBySubject[subjectId]?.first(where: { $0.id == gradeId })?.linkedExamId
         try await gradeDocRef.delete()
 
         // Optimistisch lokal
         var list = gradesBySubject[subjectId] ?? []
         list.removeAll { $0.id == gradeId }
         gradesBySubject[subjectId] = list
+
+        if let linkedExamId {
+            await resetExamAfterLinkedGradeDeletion(examId: linkedExamId)
+        }
+    }
+
+    private func resetExamAfterLinkedGradeDeletion(examId: String) async {
+        if let sharedExam = sharedExams.first(where: { $0.id == examId }) {
+            if sharedExam.isCompleted {
+                await setUserCompletedForSharedExam(examId: examId, completed: false, groupId: sharedExam.groupId)
+            }
+        } else if let exam = exams.first(where: { $0.id == examId }), exam.isCompleted {
+            await setExamCompleted(id: examId, completed: false)
+        }
     }
     
     func deleteSharedHomeworkFromGroup(id: String) async {
@@ -3185,6 +3260,115 @@ final class GradesStore: ObservableObject {
         } catch {
             // optional loggen
         }
+    }
+
+    // Einheitliche Sortierung der Fächer – wird in allen Views genutzt.
+    func sortedSubjectsForDisplay(_ input: [Subject]? = nil, moveSpecialsToEnd: Bool = true) -> [Subject] {
+        let base = input ?? subjects
+        guard !base.isEmpty else { return base }
+
+        let comparatorNameAsc: (Subject, Subject) -> Bool = { a, b in
+            a.name.lowercased().localizedCompare(b.name.lowercased()) == .orderedAscending
+        }
+        let comparatorNameDesc: (Subject, Subject) -> Bool = { a, b in
+            a.name.lowercased().localizedCompare(b.name.lowercased()) == .orderedDescending
+        }
+        let comparatorAverageBestFirst: (Subject, Subject) -> Bool = { a, b in
+            let avgA = self.averageFor(subject: a)
+            let avgB = self.averageFor(subject: b)
+            switch (avgA, avgB) {
+            case (nil, nil):
+                return comparatorNameAsc(a, b)
+            case (nil, _):
+                return false
+            case (_, nil):
+                return true
+            case let (a1?, b1?):
+                return a1 > b1
+            }
+        }
+        let comparatorAverageWorstFirst: (Subject, Subject) -> Bool = { a, b in
+            let avgA = self.averageFor(subject: a)
+            let avgB = self.averageFor(subject: b)
+            switch (avgA, avgB) {
+            case (nil, nil):
+                return comparatorNameAsc(a, b)
+            case (nil, _):
+                return true
+            case (_, nil):
+                return false
+            case let (a1?, b1?):
+                return a1 < b1
+            }
+        }
+        let comparatorCustom: (Subject, Subject) -> Bool = { a, b in
+            let orderMap: [String: Int] = Dictionary(uniqueKeysWithValues: self.subjectSortOrder.enumerated().map { ($1, $0) })
+            let ia = orderMap[a.name]
+            let ib = orderMap[b.name]
+            switch (ia, ib) {
+            case let (ia?, ib?):
+                return ia < ib
+            case (nil, nil):
+                return comparatorNameAsc(a, b)
+            case (nil, _):
+                return false
+            case (_, nil):
+                return true
+            }
+        }
+
+        func moveSpecials(_ list: [Subject]) -> [Subject] {
+            guard moveSpecialsToEnd else { return list }
+            var arr = list
+            var tail: [Subject] = []
+
+            if let idx = arr.firstIndex(where: { $0.name == "Fachreferat" }) {
+                tail.append(arr.remove(at: idx))
+            }
+            if schoolType == .fos, let idx = arr.firstIndex(where: { $0.name == "Praktikum" }) {
+                tail.append(arr.remove(at: idx))
+            }
+            arr.append(contentsOf: tail)
+            return arr
+        }
+
+        switch subjectSortMode {
+        case .name:
+            return moveSpecials(base.sorted(by: comparatorNameAsc))
+        case .name_desc:
+            return moveSpecials(base.sorted(by: comparatorNameDesc))
+        case .average:
+            return moveSpecials(base.sorted(by: comparatorAverageBestFirst))
+        case .average_worst:
+            return moveSpecials(base.sorted(by: comparatorAverageWorstFirst))
+        case .custom:
+            if subjectSortOrder.isEmpty {
+                return moveSpecials(base.sorted(by: comparatorNameAsc))
+            }
+            return base.sorted(by: comparatorCustom)
+        }
+    }
+
+    // Durchschnitt zur Sortierung – nutzt vorhandene gewichtete Logik aus Overall-Berechnung.
+    private func averageFor(subject: Subject) -> Double? {
+        let grades = gradesBySubject[subject.name] ?? []
+        guard !grades.isEmpty else { return nil }
+        var total = 0.0
+        var totalWeight = 0.0
+        for g in grades {
+            let weight = calculateGradeWeightForOverall(subject: subject, grade: Grade(
+                grade: g.grade,
+                weight: g.weight,
+                date: g.date,
+                note: g.note,
+                halfYear: g.halfYear,
+                linkedExamId: g.linkedExamId
+            ))
+            total += g.grade * weight
+            totalWeight += weight
+        }
+        guard totalWeight > 0 else { return nil }
+        return total / totalWeight
     }
 
     func calculateGradeWeightForOverall(subject: Subject, grade: Grade) -> Double {

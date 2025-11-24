@@ -19,7 +19,7 @@ struct AddExamView: View {
     @FocusState private var focusedField: Field?
 
     private var subjects: [Subject] {
-        store.subjects.filter { $0.name != "Fachreferat" }
+        store.sortedSubjectsForDisplay(store.subjects.filter { $0.name != "Fachreferat" })
     }
 
     private var canSave: Bool {
@@ -168,8 +168,6 @@ struct AddExamView: View {
                 .padding(.vertical, 12)
             }
             .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine"))
-            .navigationTitle("Klausur hinzufügen")
-            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Abbrechen") { dismiss() }

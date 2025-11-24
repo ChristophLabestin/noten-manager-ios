@@ -19,7 +19,7 @@ struct UnifiedMappingView: View {
     }
 
     private var localSubjectNames: [String] {
-        store.subjects.filter { $0.name != "Fachreferat" }.map { $0.name }.sorted()
+        store.sortedSubjectsForDisplay(store.subjects.filter { $0.name != "Fachreferat" }).map { $0.name }
     }
 
     private func availableLocalNames(for groupSubjectId: String) -> [String] {

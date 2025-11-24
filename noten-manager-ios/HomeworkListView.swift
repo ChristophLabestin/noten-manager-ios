@@ -8,24 +8,29 @@ struct HomeworkListView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var store: GradesStore
 
-    @State private var visibleInactiveCount: Int = 5
+    @State private var visibleCompletedCount: Int = 5
     @State private var editingHomework: Homework? = nil
     @State private var reminderHomework: Homework? = nil
 
-    private var activeHomeworks: [Homework] {
-        store.allHomeworks.filter { $0.isActive }.sorted {
-            let a = $0.dueDate ?? $0.createdAt
-            let b = $1.dueDate ?? $1.createdAt
-            return a < b
-        }
+    private var openHomeworks: [Homework] {
+        store.allHomeworks
+            .filter { !$0.isCompleted && !isAutoCompletedPastDue($0) }
+            .sorted { lhs, rhs in
+                let l = sortKey(for: lhs)
+                let r = sortKey(for: rhs)
+                if l.priority != r.priority { return l.priority < r.priority }
+                return l.date < r.date
+            }
     }
 
-    private var inactiveHomeworks: [Homework] {
-        store.allHomeworks.filter { !$0.isActive }.sorted {
-            let a = $0.dueDate ?? $0.createdAt
-            let b = $1.dueDate ?? $1.createdAt
-            return a > b
-        }
+    private var completedHomeworks: [Homework] {
+        store.allHomeworks
+            .filter { $0.isCompleted || isAutoCompletedPastDue($0) }
+            .sorted {
+                let a = $0.dueDate ?? $0.createdAt
+                let b = $1.dueDate ?? $1.createdAt
+                return a > b
+            }
     }
 
     private var hasOverdueHomeworks: Bool {
@@ -48,26 +53,26 @@ struct HomeworkListView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("Aktive Hausaufgaben") {
-                    if activeHomeworks.isEmpty {
-                        Text("Du hast aktuell keine aktiven Hausaufgaben.")
+                Section("Offene Hausaufgaben") {
+                    if openHomeworks.isEmpty {
+                        Text("Du hast aktuell keine offenen Hausaufgaben.")
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(activeHomeworks) { hw in
+                        ForEach(openHomeworks) { hw in
                             homeworkRow(hw)
                         }
                     }
                 }
 
-                if !inactiveHomeworks.isEmpty {
-                    Section("Erledigt / überfällig") {
-                        ForEach(Array(inactiveHomeworks.prefix(visibleInactiveCount))) { hw in
-                            homeworkRow(hw, isInactiveSection: true)
+                if !completedHomeworks.isEmpty {
+                    Section("Erledigt") {
+                        ForEach(Array(completedHomeworks.prefix(visibleCompletedCount))) { hw in
+                            homeworkRow(hw)
                         }
 
-                        if inactiveHomeworks.count > visibleInactiveCount {
+                        if completedHomeworks.count > visibleCompletedCount {
                             Button {
-                                visibleInactiveCount += 5
+                                visibleCompletedCount += 5
                             } label: {
                                 Text("Weitere 5 anzeigen")
                             }
@@ -87,7 +92,7 @@ struct HomeworkListView: View {
                 }
             }
             .onAppear {
-                visibleInactiveCount = 5
+                visibleCompletedCount = 5
             }
             .sheet(item: $editingHomework) { hw in
                 EditHomeworkView(homework: hw)
@@ -101,28 +106,20 @@ struct HomeworkListView: View {
     }
 
     @ViewBuilder
-    private func homeworkRow(_ hw: Homework, isInactiveSection: Bool = false) -> some View {
+    private func homeworkRow(_ hw: Homework) -> some View {
         let currentUserId = Auth.auth().currentUser?.uid
         let isSharedOwner = hw.isShared && hw.creatorId == currentUserId
-        let now = Date()
-        let isOverdue = !hw.isCompleted && ((hw.dueDate ?? hw.createdAt) < now || (hw.reminderAt ?? hw.dueDate ?? hw.createdAt) < now)
-        let isDueTomorrow: Bool = {
-            guard !hw.isCompleted, let due = hw.dueDate else { return false }
-            return Calendar.current.isDateInTomorrow(due)
-        }()
-        let attentionTag: (text: String, color: Color)? = {
-            if isOverdue { return ("Überfällig", .red) }
-            if isDueTomorrow { return ("Morgen fällig", .orange) }
-            return nil
-        }()
+        let autoCompleted = isAutoCompletedPastDue(hw)
+        let treatedCompleted = hw.isCompleted || autoCompleted
+        let badge: (text: String, color: Color, icon: String?)? = badgeState(for: hw, treatedCompleted: treatedCompleted)
         HStack {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     Text(hw.title)
                         .font(.body)
                         .lineLimit(2)
-                    if let tag = attentionTag {
-                        attentionBadge(tag.text, color: tag.color)
+                    if let tag = badge {
+                        attentionBadge(tag.text, color: tag.color, icon: tag.icon)
                     }
                 }
                 if !hw.subjectName.isEmpty {
@@ -159,21 +156,23 @@ struct HomeworkListView: View {
             }
             Spacer()
             HStack(spacing: 12) {
-                // Glocke
-                Button {
-                    reminderHomework = hw
-                } label: {
-                    Image(systemName: reminderIconName(hw))
-                        .font(.system(size: 16, weight: .regular))
-                        .foregroundStyle(reminderIconColor(hw))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Erinnerung bearbeiten")
-                .contextMenu {
-                    Button("Erinnerung bearbeiten…") { reminderHomework = hw }
-                    if hw.reminderAt != nil {
-                        Button("Erinnerung entfernen", role: .destructive) {
-                            Task { await toggleReminder(hw) }
+                // Glocke nur anzeigen, wenn nicht als erledigt behandelt
+                if !treatedCompleted {
+                    Button {
+                        reminderHomework = hw
+                    } label: {
+                        Image(systemName: reminderIconName(hw))
+                            .font(.system(size: 16, weight: .regular))
+                            .foregroundStyle(reminderIconColor(hw))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Erinnerung bearbeiten")
+                    .contextMenu {
+                        Button("Erinnerung bearbeiten…") { reminderHomework = hw }
+                        if hw.reminderAt != nil {
+                            Button("Erinnerung entfernen", role: .destructive) {
+                                Task { await toggleReminder(hw) }
+                            }
                         }
                     }
                 }
@@ -182,7 +181,7 @@ struct HomeworkListView: View {
                 Button {
                     editingHomework = hw
                 } label: {
-                    Image(systemName: "pencil")
+                    Image(systemName: "slider.horizontal.3")
                         .font(.system(size: 16, weight: .regular))
                 }
                 .buttonStyle(.plain)
@@ -191,7 +190,7 @@ struct HomeworkListView: View {
                 // Status / Aktionen
                 if hw.isShared {
                     if isSharedOwner {
-                        if hw.isCompleted {
+                        if treatedCompleted && hw.isCompleted {
                             Button {
                                 Task { await markNotCompleted(hw) }
                             } label: {
@@ -201,7 +200,7 @@ struct HomeworkListView: View {
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel("Als nicht erledigt markieren")
-                        } else if !isInactiveSection {
+                        } else if !treatedCompleted {
                             Button {
                                 Task { await markCompleted(hw) }
                             } label: {
@@ -213,7 +212,7 @@ struct HomeworkListView: View {
                             .accessibilityLabel("Als erledigt markieren")
                         }
                     } else {
-                        if !isInactiveSection && !hw.isCompleted {
+                        if !treatedCompleted {
                             Button {
                                 Task { await markCompleted(hw) }
                             } label: {
@@ -222,7 +221,7 @@ struct HomeworkListView: View {
                                     .foregroundStyle(.primary)
                             }
                         }
-                        if hw.isCompleted {
+                        if treatedCompleted && hw.isCompleted {
                             Button {
                                 Task { await markNotCompleted(hw) }
                             } label: {
@@ -233,7 +232,7 @@ struct HomeworkListView: View {
                         }
                     }
                 } else {
-                    if hw.isCompleted {
+                    if treatedCompleted && hw.isCompleted {
                         Button {
                             Task { await markNotCompleted(hw) }
                         } label: {
@@ -241,7 +240,7 @@ struct HomeworkListView: View {
                                 .font(.system(size: 18, weight: .semibold))
                                 .foregroundStyle(.orange)
                         }
-                    } else if !isInactiveSection {
+                    } else if !treatedCompleted {
                         Button {
                             Task { await markCompleted(hw) }
                         } label: {
@@ -249,17 +248,15 @@ struct HomeworkListView: View {
                                 .font(.system(size: 18, weight: .semibold))
                                 .foregroundStyle(.primary)
                         }
-                    } else {
-                        Image(systemName: "checkmark.circle")
-                            .font(.system(size: 16))
-                            .foregroundStyle(.secondary)
                     }
                 }
             }
         }
         .padding(.vertical, 6)
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            if !isInactiveSection && !hw.isCompleted {
+            let autoCompleted = isAutoCompletedPastDue(hw)
+            let treatedCompleted = hw.isCompleted || autoCompleted
+            if !treatedCompleted {
                 Button {
                     Task { await markCompleted(hw) }
                 } label: {
@@ -267,7 +264,7 @@ struct HomeworkListView: View {
                 }
                 .tint(.green)
             }
-            if hw.isCompleted {
+            if treatedCompleted && hw.isCompleted {
                 Button {
                     Task { await markNotCompleted(hw) }
                 } label: {
@@ -345,14 +342,64 @@ struct HomeworkListView: View {
         return "Erinnerung bearbeiten"
     }
 
-    private func attentionBadge(_ text: String, color: Color) -> some View {
-        Text(text)
-            .font(.caption2.weight(.semibold))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(color.opacity(0.12))
-            .foregroundStyle(color)
-            .clipShape(Capsule())
+    private func attentionBadge(_ text: String, color: Color, icon: String? = nil) -> some View {
+        HStack(spacing: 4) {
+            if let icon {
+                Image(systemName: icon)
+                    .font(.caption2.weight(.bold))
+            }
+            Text(text)
+                .font(.caption2.weight(.semibold))
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(color.opacity(0.12))
+        .foregroundStyle(color)
+        .clipShape(Capsule())
+    }
+
+    private func sortKey(for hw: Homework) -> (priority: Int, date: Date) {
+        let cal = Calendar.current
+        let now = Date()
+        if let due = hw.dueDate {
+            let startToday = cal.startOfDay(for: now)
+            let autoCompleted = due < startToday
+            if hw.isCompleted || autoCompleted {
+                return (3, due)
+            }
+            if due < startToday || cal.isDateInToday(due) {
+                return (0, due)
+            }
+            if cal.isDateInTomorrow(due) {
+                return (1, due)
+            }
+            return (2, due)
+        }
+        let date = hw.createdAt
+        let priority = hw.isCompleted ? 3 : 2
+        return (priority, date)
+    }
+
+    private func badgeState(for hw: Homework, treatedCompleted: Bool) -> (text: String, color: Color, icon: String?)? {
+        let cal = Calendar.current
+        let now = Date()
+        if treatedCompleted {
+            return ("Erledigt", .green, "checkmark")
+        }
+        guard let due = hw.dueDate else { return nil }
+        let startToday = cal.startOfDay(for: now)
+        if cal.isDateInToday(due) {
+            return ("Fällig", .red, nil)
+        }
+        if cal.isDateInTomorrow(due) {
+            return ("Morgen fällig", .orange, nil)
+        }
+        return ("Geplant", .green, nil)
+    }
+    private func isAutoCompletedPastDue(_ hw: Homework) -> Bool {
+        guard let due = hw.dueDate else { return false }
+        let startToday = Calendar.current.startOfDay(for: Date())
+        return due < startToday
     }
 }
 

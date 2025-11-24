@@ -23,7 +23,7 @@ struct AddHomeworkView: View {
     }
 
     private var subjects: [Subject] {
-        store.subjects.filter { $0.name != "Fachreferat" }
+        store.sortedSubjectsForDisplay(store.subjects.filter { $0.name != "Fachreferat" })
     }
 
     private var subjectOptions: [String] {
@@ -176,8 +176,6 @@ struct AddHomeworkView: View {
                 .padding(.vertical, 12)
             }
             .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine"))
-            .navigationTitle("Hausaufgabe hinzufügen")
-            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Abbrechen") { dismiss() }

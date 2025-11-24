@@ -41,7 +41,7 @@ struct EditExamView: View {
     }
 
     private var subjects: [Subject] {
-        store.subjects.filter { $0.name != "Fachreferat" }
+        store.sortedSubjectsForDisplay(store.subjects.filter { $0.name != "Fachreferat" })
     }
 
     private var canSave: Bool {
@@ -58,75 +58,138 @@ struct EditExamView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Klausur bearbeiten") {
-                    Picker("Fach", selection: $subjectName) {
-                        ForEach(subjects, id: \.name) { s in
-                            Text(s.name).tag(s.name)
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 16) {
+                    SettingsCard(
+                        title: "Klausur bearbeiten",
+                        subtitle: "Fach, Titel und Gewichtung",
+                        systemImage: "calendar.badge.clock",
+                        accent: .indigo
+                    ) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            SettingsSectionBox {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("Fach")
+                                        .font(.headline)
+                                    Picker("Fach", selection: $subjectName) {
+                                        ForEach(subjects, id: \.name) { s in
+                                            Text(s.name).tag(s.name)
+                                        }
+                                    }
+                                    .pickerStyle(.menu)
+                                    .tint(.primary)
+                                    .padding(10)
+                                    .background(Color.formInputBackground)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                                    if subjects.isEmpty {
+                                        Text("Lege zuerst ein Fach an, um Klausuren zuzuordnen.")
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+
+                            SettingsSectionBox {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text("Titel / Bezeichnung")
+                                            .font(.headline)
+                                        TextField("z. B. Kurzarbeit Mathematik", text: $title)
+                                            .textInputAutocapitalization(.sentences)
+                                            .submitLabel(.next)
+                                            .focused($focusedField, equals: .title)
+                                            .onSubmit { focusedField = .notes }
+                                            .padding(12)
+                                            .background(Color.formInputBackground)
+                                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    }
+
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text("Notizen (optional)")
+                                            .font(.subheadline)
+                                        TextEditor(text: $notes)
+                                            .frame(minHeight: 90)
+                                            .textInputAutocapitalization(.sentences)
+                                            .scrollContentBackground(.hidden)
+                                            .focused($focusedField, equals: .notes)
+                                            .padding(10)
+                                            .background(Color.formInputBackground)
+                                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    }
+
+                                    let subjectType = subjects.first(where: { $0.name == subjectName })?.type ?? 0
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("Art")
+                                            .font(.headline)
+                                        Picker("", selection: $examWeight) {
+                                            if subjectType == 0 {
+                                                Text("Kurzarbeit").tag(1)
+                                                Text("Mündlich / EX").tag(0)
+                                            } else {
+                                                Text("Schulaufgabe").tag(2)
+                                                Text("Kurzarbeit").tag(1)
+                                                Text("Mündlich / EX").tag(0)
+                                            }
+                                        }
+                                        .pickerStyle(.segmented)
+                                    }
+
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text("Termin")
+                                            .font(.headline)
+                                        DatePicker(
+                                            "Datum & Uhrzeit",
+                                            selection: $date,
+                                            displayedComponents: [.date, .hourAndMinute]
+                                        )
+                                    }
+
+                                    Toggle("Note verknüpfen erforderlich", isOn: $requiresGrade)
+                                        .tint(.indigo)
+                                }
+                            }
                         }
                     }
-                    if subjects.isEmpty {
-                        Text("Lege zuerst ein Fach an, um Klausuren zuzuordnen.")
+
+                    SettingsCard(
+                        title: "Erinnerung & Status",
+                        subtitle: "Optionale Benachrichtigung",
+                        systemImage: "bell.badge.fill",
+                        accent: .orange
+                    ) {
+                        SettingsSectionBox {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Toggle("Zusätzliche Erinnerung planen", isOn: $hasReminder)
+                                    .tint(.orange)
+
+                                if hasReminder {
+                                    DatePicker(
+                                        "Erinnerung",
+                                        selection: $reminderDate,
+                                        displayedComponents: [.date, .hourAndMinute]
+                                    )
+                                }
+
+                                if !exam.isShared {
+                                    Toggle("Als erledigt markieren", isOn: $isCompleted)
+                                        .tint(.green)
+                                }
+                            }
+                        }
+                    }
+
+                    if let error {
+                        Text(error)
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-
-                TextField("Titel / Bezeichnung", text: $title)
-                    .textInputAutocapitalization(.sentences)
-                    .submitLabel(.next)
-                    .focused($focusedField, equals: .title)
-                    .onSubmit { focusedField = .notes }
-                    .textFieldStyle(.roundedBorder)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Notizen (optional)")
-                    TextEditor(text: $notes)
-                        .frame(minHeight: 80)
-                        .textInputAutocapitalization(.sentences)
-                        .focused($focusedField, equals: .notes)
-                }
-
-                let subjectType = subjects.first(where: { $0.name == subjectName })?.type ?? 0
-                Picker("Art", selection: $examWeight) {
-                    if subjectType == 0 {
-                        Text("Kurzarbeit").tag(1)
-                        Text("Mündlich / EX").tag(0)
-                    } else {
-                        Text("Schulaufgabe").tag(2)
-                        Text("Kurzarbeit").tag(1)
-                        Text("Mündlich / EX").tag(0)
+                            .foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-
-                    DatePicker(
-                        "Datum & Uhrzeit",
-                        selection: $date,
-                        displayedComponents: [.date, .hourAndMinute]
-                    )
-
-                    Toggle("Zusätzliche Erinnerung planen", isOn: $hasReminder)
-
-                    if hasReminder {
-                        DatePicker(
-                            "Erinnerung",
-                            selection: $reminderDate,
-                            displayedComponents: [.date, .hourAndMinute]
-                        )
-                    }
-
-                    Toggle("Note verknüpfen erforderlich", isOn: $requiresGrade)
-
-                    if !exam.isShared {
-                        Toggle("Als erledigt markieren", isOn: $isCompleted)
-                            .tint(.green)
-                    }
-                }
-                if let error {
-                    Text(error)
-                        .foregroundStyle(.red)
-                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
-            .navigationTitle("Klausur bearbeiten")
+            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine"))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Abbrechen") {
@@ -140,6 +203,14 @@ struct EditExamView: View {
                         if isSaving { ProgressView() } else { Text("Speichern") }
                     }
                     .disabled(!canSave || isSaving || subjects.isEmpty)
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    KeyboardNavigationAccessory(
+                        focus: $focusedField,
+                        fields: [.title, .notes],
+                        label: nil,
+                        onDone: { hideKeyboard() }
+                    )
                 }
             }
             .scrollDismissesKeyboard(.interactively)
@@ -175,10 +246,7 @@ struct EditExamView: View {
                 Text("Dieser Klausurtermin wird dauerhaft gelöscht.")
             }
         }
-        .keyboardNavigationToolbar(
-            focus: $focusedField,
-            fields: [.title, .notes]
-        )
+        .modifier(KeyboardToolbarInset(height: 64))
     }
 
     private func save() async {

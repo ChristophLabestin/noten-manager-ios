@@ -8,7 +8,7 @@ struct ExamListView: View {
     let subjectFilter: String?
     let alternateSubjectNames: [String]
 
-    @State private var visibleInactiveCount: Int = 5
+    @State private var visibleCompletedCount: Int = 5
     @State private var editingExam: Exam? = nil
     @State private var examForNewGrade: Exam? = nil
     @State private var reminderExam: Exam? = nil
@@ -19,16 +19,24 @@ struct ExamListView: View {
         self.alternateSubjectNames = alternateSubjectNames
     }
 
-    private var activeExams: [Exam] {
-        filteredExams.filter { $0.isActive }.sorted {
-            $0.date < $1.date
-        }
+    private var upcomingExams: [Exam] {
+        let now = Date()
+        return filteredExams
+            .filter { !$0.isCompleted && $0.date > now }
+            .sorted { $0.date < $1.date }
     }
 
-    private var inactiveExams: [Exam] {
-        filteredExams.filter { !$0.isActive }.sorted {
-            $0.date > $1.date
-        }
+    private var waitingForGradeExams: [Exam] {
+        let now = Date()
+        return filteredExams
+            .filter { !$0.isCompleted && $0.date <= now }
+            .sorted { $0.date > $1.date }
+    }
+
+    private var completedExams: [Exam] {
+        filteredExams
+            .filter { $0.isCompleted }
+            .sorted { $0.date > $1.date }
     }
 
     private var filteredExams: [Exam] {
@@ -47,26 +55,34 @@ struct ExamListView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("Bevorstehende Klausuren") {
-                    if activeExams.isEmpty {
+                Section("Anstehend") {
+                    if upcomingExams.isEmpty {
                         Text("Du hast aktuell keine anstehenden Klausuren.")
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(activeExams) { exam in
+                        ForEach(upcomingExams) { exam in
                             examRow(exam)
                         }
                     }
                 }
 
-                if !inactiveExams.isEmpty {
-                    Section("Vergangene / erledigte Klausuren") {
-                        ForEach(Array(inactiveExams.prefix(visibleInactiveCount))) { exam in
-                            examRow(exam, isInactiveSection: true)
+                if !waitingForGradeExams.isEmpty {
+                    Section("Wartet auf Note") {
+                        ForEach(waitingForGradeExams) { exam in
+                            examRow(exam)
+                        }
+                    }
+                }
+
+                if !completedExams.isEmpty {
+                    Section("Erledigt") {
+                        ForEach(Array(completedExams.prefix(visibleCompletedCount))) { exam in
+                            examRow(exam)
                         }
 
-                        if inactiveExams.count > visibleInactiveCount {
+                        if completedExams.count > visibleCompletedCount {
                             Button {
-                                visibleInactiveCount += 5
+                                visibleCompletedCount += 5
                             } label: {
                                 Text("Weitere 5 anzeigen")
                             }
@@ -82,7 +98,7 @@ struct ExamListView: View {
                 }
             }
             .onAppear {
-                visibleInactiveCount = 5
+                visibleCompletedCount = 5
             }
             .sheet(item: $editingExam) { exam in
                 EditExamView(exam: exam)
@@ -111,11 +127,12 @@ struct ExamListView: View {
     }
 
     @ViewBuilder
-    private func examRow(_ exam: Exam, isInactiveSection: Bool = false) -> some View {
-        let isSharedOwner = exam.isShared && exam.creatorId == currentUserId
-        let isOverdueAttention = !exam.isCompleted && exam.date < Date()
-        let attentionTag = isOverdueAttention ? "Fällig" : nil
+    private func examRow(_ exam: Exam) -> some View {
+        let now = Date()
+        let isOverdueAttention = !exam.isCompleted && exam.date < now
+        let attentionTag = isOverdueAttention ? "Wartet auf Note" : nil
         let attentionColor: Color = .red
+        let showReminder = !exam.isCompleted && exam.date > now
 
         HStack {
             VStack(alignment: .leading, spacing: 4) {
@@ -145,7 +162,7 @@ struct ExamListView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
-                if !exam.isShared && Date() >= exam.date && !exam.isCompleted {
+                if !exam.isShared && now >= exam.date && !exam.isCompleted {
                     Text("noch keine Note verknüpft")
                         .font(.caption2)
                         .foregroundStyle(.red)
@@ -164,20 +181,22 @@ struct ExamListView: View {
             }
             Spacer()
             HStack(spacing: 12) {
-                Button {
-                    reminderExam = exam
-                } label: {
-                    Image(systemName: reminderIconName(exam))
-                        .font(.system(size: 16, weight: .regular))
-                        .foregroundStyle(reminderIconColor(exam))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Erinnerung bearbeiten")
-                .contextMenu {
-                    Button("Erinnerung bearbeiten…") { reminderExam = exam }
-                    if exam.reminderAt != nil {
-                        Button("Erinnerung entfernen", role: .destructive) {
-                            Task { await toggleReminder(exam) }
+                if showReminder {
+                    Button {
+                        reminderExam = exam
+                    } label: {
+                        Image(systemName: reminderIconName(exam))
+                            .font(.system(size: 16, weight: .regular))
+                            .foregroundStyle(reminderIconColor(exam))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Erinnerung bearbeiten")
+                    .contextMenu {
+                        Button("Erinnerung bearbeiten…") { reminderExam = exam }
+                        if exam.reminderAt != nil {
+                            Button("Erinnerung entfernen", role: .destructive) {
+                                Task { await toggleReminder(exam) }
+                            }
                         }
                     }
                 }
@@ -196,7 +215,7 @@ struct ExamListView: View {
                 Button {
                     editingExam = exam
                 } label: {
-                    Image(systemName: "pencil")
+                    Image(systemName: "slider.horizontal.3")
                         .font(.system(size: 16, weight: .regular))
                 }
                 .buttonStyle(.plain)
@@ -274,7 +293,7 @@ struct ExamListView: View {
     }
 }
 
-private struct ExamDetailSheet: View {
+struct ExamDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var store: GradesStore
     let exam: Exam

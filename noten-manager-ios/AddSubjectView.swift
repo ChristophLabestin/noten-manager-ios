@@ -76,8 +76,6 @@ struct AddSubjectView: View {
                 .padding(.vertical, 12)
             }
             .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine"))
-            .navigationTitle("Fach anlegen")
-            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Abbrechen") { dismiss() }

@@ -36,7 +36,6 @@ struct ExamReminderView: View {
                         .foregroundStyle(.red)
                 }
             }
-            .navigationTitle("Erinnerung festlegen")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Abbrechen") {

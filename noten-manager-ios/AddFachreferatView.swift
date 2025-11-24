@@ -16,6 +16,10 @@ struct AddFachreferatView: View {
     @State private var error: String?
     @FocusState private var focusedField: Field?
 
+    private var subjects: [Subject] {
+        store.sortedSubjectsForDisplay(store.subjects.filter { $0.name != "Fachreferat" })
+    }
+
     private var canSave: Bool {
         guard let _ = store.encryptionKey else { return false }
         guard !subjectName.isEmpty else { return false }
@@ -47,7 +51,7 @@ struct AddFachreferatView: View {
                                     Text("Fach")
                                         .font(.headline)
                                     Picker("Fach", selection: $subjectName) {
-                                        ForEach(store.subjects.filter { $0.name != "Fachreferat" }, id: \.name) { s in
+                                        ForEach(subjects, id: \.name) { s in
                                             Text(s.name).tag(s.name)
                                         }
                                     }
@@ -103,8 +107,6 @@ struct AddFachreferatView: View {
                 .padding(.vertical, 12)
             }
             .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine"))
-            .navigationTitle(store.fachreferat == nil ? "Fachreferat" : "Fachreferat bearbeiten")
-            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Abbrechen") { dismiss() }
@@ -127,18 +129,18 @@ struct AddFachreferatView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
-            .hideKeyboardOnTap()
-            .onAppear {
-                if subjectName.isEmpty {
-                    if let pre = preselectedSubjectName,
-                       store.subjects.contains(where: { $0.name == pre && $0.name != "Fachreferat" }) {
-                        subjectName = pre
-                    } else {
-                        subjectName = store.fachreferat?.subjectName
-                            ?? store.subjects.first(where: { $0.name != "Fachreferat" })?.name
+                .hideKeyboardOnTap()
+                .onAppear {
+                    if subjectName.isEmpty {
+                        if let pre = preselectedSubjectName,
+                           subjects.contains(where: { $0.name == pre && $0.name != "Fachreferat" }) {
+                            subjectName = pre
+                        } else {
+                            subjectName = store.fachreferat?.subjectName
+                            ?? subjects.first(where: { $0.name != "Fachreferat" })?.name
                             ?? ""
+                        }
                     }
-                }
                 if let fr = store.fachreferat {
                     gradeText = String(fr.grade)
                     date = fr.date

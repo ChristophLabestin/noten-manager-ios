@@ -26,7 +26,9 @@ struct AddGradeView: View {
     @State private var linkToExam: Bool = false
     @State private var selectedLinkedExamId: String? = nil
 
-    private var subjects: [Subject] { store.subjects.filter { $0.name != "Fachreferat" } }
+    private var subjects: [Subject] {
+        store.sortedSubjectsForDisplay(store.subjects.filter { $0.name != "Fachreferat" })
+    }
     private var canSave: Bool {
         guard let _ = store.encryptionKey else { return false }
         guard !subjectName.isEmpty else { return false }
@@ -59,6 +61,28 @@ struct AddGradeView: View {
 
     private enum Field: Hashable {
         case grade, note
+    }
+
+    private func weightOptions(for subjectType: Int) -> [(title: String, value: Int)] {
+        if subjectType == 0 {
+            return [
+                ("Kurzarbeit", 1),
+                ("Mündlich / EX", 0)
+            ]
+        }
+        return [
+            ("Schulaufgabe", 2),
+            ("Kurzarbeit", 1),
+            ("Mündlich / EX", 0)
+        ]
+    }
+
+    private func selectedWeightLabel(for subjectType: Int) -> String {
+        let options = weightOptions(for: subjectType)
+        if let match = options.first(where: { $0.value == gradeWeight }) {
+            return match.title
+        }
+        return options.first?.title ?? "Art auswählen"
     }
 
     var body: some View {
@@ -109,33 +133,62 @@ struct AddGradeView: View {
                                         .background(Color.formInputBackground)
                                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-                                    HStack(spacing: 12) {
-                                        let subjectType = subjects.first(where: { $0.name == subjectName })?.type ?? 0
-                                        VStack(alignment: .leading, spacing: 8) {
-                                            Text("Art")
-                                                .font(.subheadline)
-                                            Picker("", selection: $gradeWeight) {
-                                                if subjectType == 0 {
-                                                    Text("Kurzarbeit").tag(1)
-                                                    Text("Mündlich / EX").tag(0)
-                                                } else {
-                                                    Text("Schulaufgabe").tag(2)
-                                                    Text("Kurzarbeit").tag(1)
-                                                    Text("Mündlich / EX").tag(0)
+                                    let subjectType = subjects.first(where: { $0.name == subjectName })?.type ?? 0
+
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("Art")
+                                            .font(.subheadline)
+
+                                        Menu {
+                                            ForEach(weightOptions(for: subjectType), id: \.value) { option in
+                                                Button {
+                                                    gradeWeight = option.value
+                                                } label: {
+                                                    HStack {
+                                                        Text(option.title)
+                                                        if gradeWeight == option.value {
+                                                            Spacer()
+                                                            Image(systemName: "checkmark")
+                                                        }
+                                                    }
                                                 }
                                             }
-                                            .pickerStyle(.segmented)
-                                        }
-
-                                        VStack(alignment: .leading, spacing: 8) {
-                                            Text("Halbjahr")
-                                                .font(.subheadline)
-                                            Picker("", selection: $halfYearSelection) {
-                                                Text("1. Hj").tag(1)
-                                                Text("2. Hj").tag(2)
+                                        } label: {
+                                            HStack {
+                                                Text(selectedWeightLabel(for: subjectType))
+                                                    .font(.subheadline.weight(.semibold))
+                                                Spacer()
+                                                Image(systemName: "chevron.down")
+                                                    .font(.caption.weight(.semibold))
+                                                    .foregroundStyle(.secondary)
                                             }
-                                            .pickerStyle(.segmented)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 10)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .background(Color.formInputBackground)
+                                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                         }
+                                        .tint(.primary)
+
+                                        let weightInfo: String = {
+                                            if subjectType == 1 {
+                                                return "Schulaufgaben zählen doppelt, Kurzarbeiten und mündliche Leistungen einfach."
+                                            }
+                                            return "Kurzarbeiten zählen doppelt, mündliche Leistungen/EX einfach."
+                                        }()
+                                        Text(weightInfo)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("Halbjahr")
+                                            .font(.subheadline)
+                                        Picker("", selection: $halfYearSelection) {
+                                            Text("1. Hj").tag(1)
+                                            Text("2. Hj").tag(2)
+                                        }
+                                        .pickerStyle(.segmented)
                                     }
 
                                     DatePicker("Datum", selection: $date, displayedComponents: .date)
@@ -233,8 +286,6 @@ struct AddGradeView: View {
                 .padding(.vertical, 12)
             }
             .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine"))
-            .navigationTitle("Note hinzufügen")
-            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Abbrechen") { dismiss() }
@@ -339,7 +390,17 @@ struct AddGradeView: View {
                 }
                 return base
             }()
-            let gradeId = try await store.addGradeToFirestore(subjectId: subjectName, grade: grade, weight: weight, date: date, note: finalNote, halfYear: halfYear, using: key)
+            let linkedExamId = linkToExam ? selectedLinkedExamId : nil
+            let gradeId = try await store.addGradeToFirestore(
+                subjectId: subjectName,
+                grade: grade,
+                weight: weight,
+                date: date,
+                note: finalNote,
+                halfYear: halfYear,
+                linkedExamId: linkedExamId,
+                using: key
+            )
             if linkToExam, let examId = selectedLinkedExamId {
                 if store.sharedExams.contains(where: { $0.id == examId }) {
                     await store.setUserCompletedForSharedExam(examId: examId, completed: true)

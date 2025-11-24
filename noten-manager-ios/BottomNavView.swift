@@ -470,7 +470,7 @@ struct BottomNavView: View {
                                 iconContent: AnyView(
                                     Group {
                                         if hasFachreferat {
-                                            Image(systemName: "square.and.pencil")
+                                            Image(systemName: "slider.horizontal.3")
                                                 .font(.system(size: 17, weight: .semibold))
                                         } else {
                                             Image(systemName: "doc.text.fill")

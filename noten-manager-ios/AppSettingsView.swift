@@ -644,7 +644,7 @@ struct AppSettingsView: View {
                                 .foregroundStyle(.secondary)
                         } else {
                             VStack(spacing: 8) {
-                                ForEach(store.subjects, id: \.name) { subject in
+                                ForEach(store.sortedSubjectsForDisplay(), id: \.name) { subject in
                                     ExamSubjectRow(
                                         subject: subject,
                                         isDisabled: !(subject.examSubject ?? false) && currentExamSubjectsCount >= maxExamSubjects,
@@ -684,7 +684,7 @@ struct AppSettingsView: View {
     private var groupsCard: some View {
         SettingsCard(
             title: "Gruppen & Sync",
-            subtitle: "Gemeinsame Gruppen für Klausuren und Hausaufgaben",
+            subtitle: "Gemeinsame Gruppen für Klausurentermine und Hausaufgaben",
             systemImage: "person.3.sequence.fill",
             accent: .indigo
         ) {
@@ -1111,50 +1111,118 @@ private struct ResetConfirmSheet: View {
     let errorMessage: String?
     let confirmAction: () -> Void
 
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         NavigationStack {
-            VStack(spacing: 16) {
-                Text(title).font(.title3).bold()
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+            VStack(spacing: 18) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 12) {
+                        ZStack {
+                            Circle()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            Color.red.opacity(colorScheme == .dark ? 0.28 : 0.18),
+                                            Color.orange.opacity(colorScheme == .dark ? 0.20 : 0.12)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .frame(width: 56, height: 56)
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.title3.weight(.bold))
+                                .foregroundStyle(.red)
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(title)
+                                .font(.title3.weight(.semibold))
+                            Text(message)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
+                .padding(16)
+                .background(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.red.opacity(colorScheme == .dark ? 0.22 : 0.16),
+                                    Color.orange.opacity(colorScheme == .dark ? 0.18 : 0.12)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(Color.red.opacity(0.25), lineWidth: 1)
+                )
 
                 SlideToConfirmView(isConfirmed: $slideDone)
-                    .frame(height: 56)
+                    .frame(height: 68)
 
-                SecureField("Passwort eingeben", text: $password)
-                    .textContentType(.password)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .padding()
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Mit Passwort bestätigen")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 10) {
+                        Image(systemName: "lock.fill")
+                            .foregroundStyle(.secondary)
+                        SecureField("Passwort eingeben", text: $password)
+                            .textContentType(.password)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                    }
+                    .padding(12)
                     .background(Color.formInputBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-                if let err = errorMessage {
-                    Text(err).font(.caption).foregroundStyle(.red)
+                    if let err = errorMessage {
+                        Text(err)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .padding(.vertical, 6)
+                            .padding(.horizontal, 10)
+                            .background(Color.red.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
                 }
 
                 Button {
                     confirmAction()
                 } label: {
-                    if isProcessing {
-                        ProgressView()
-                    } else {
-                        Text("Bestätigen")
-                            .frame(maxWidth: .infinity)
+                    HStack {
+                        if isProcessing {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "checkmark.seal.fill")
+                            Text("Bestätigen")
+                        }
                     }
+                    .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(.red)
                 .disabled(!(slideDone && !password.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) || isProcessing)
 
-                Button("Abbrechen") {
+                Button {
                     isPresented = false
+                } label: {
+                    Label("Abbrechen", systemImage: "xmark")
+                        .font(.callout.weight(.semibold))
                 }
                 .buttonStyle(.plain)
-
-                Spacer()
+                .padding(.top, 4)
             }
-            .padding()
+            .padding(18)
+            .background(Color(.systemGroupedBackground))
         }
     }
 }
@@ -1162,41 +1230,151 @@ private struct ResetConfirmSheet: View {
 private struct SlideToConfirmView: View {
     @Binding var isConfirmed: Bool
     @State private var dragOffset: CGFloat = 0
+    @State private var hintPhase: Bool = false
+    @State private var isDragging: Bool = false
 
     var body: some View {
         GeometryReader { geo in
             let width = geo.size.width
-            let height: CGFloat = 52
-            let maxOffset = width - height
+            let height: CGFloat = 64
+            let knobSize = height - 12
+            let maxOffset = max(0, width - knobSize - 8)
+            let progress: CGFloat = maxOffset == 0
+                ? 1
+                : max(0, min(dragOffset / maxOffset, 1))
 
             ZStack(alignment: .leading) {
                 RoundedRectangle(cornerRadius: height / 2)
                     .fill(Color(.secondarySystemBackground))
-                Text(isConfirmed ? "Bereit" : "Zum Bestätigen schieben")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: height / 2)
+                            .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                    )
+
+                RoundedRectangle(cornerRadius: height / 2)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.red.opacity(isDragging ? 0.55 : 0.35),
+                                Color.orange.opacity(isDragging ? 0.50 : 0.30)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: max(knobSize + 6, (knobSize + 6) + maxOffset * progress))
+                    .opacity(0.35)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: height / 2)
+                            .stroke(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.0),
+                                        Color.white.opacity(isDragging ? 0.30 : 0.16),
+                                        Color.white.opacity(0.0)
+                                    ],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                ),
+                                lineWidth: isDragging ? 2 : 1
+                            )
+                            .opacity(isDragging ? 0.7 : 0.25)
+                    )
+
+                HStack {
+                    Spacer()
+                    VStack(spacing: 6) {
+                        Text(isConfirmed ? "Loslassen zum Löschen" : "Zum Bestätigen nach rechts schieben")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.primary.opacity(isConfirmed ? 0.9 : 0.7))
+                        Text("Sicherheits-Swipe verhindert versehentliches Löschen.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, knobSize * 0.35)
+
                 Circle()
-                    .fill(isConfirmed ? Color.green : Color.blue)
-                    .frame(width: height - 6, height: height - 6)
-                    .offset(x: max(0, min(dragOffset, maxOffset)))
-                    .gesture(DragGesture(minimumDistance: 0)
-                        .onChanged { value in
-                            if isConfirmed { return }
-                            dragOffset = max(0, min(value.translation.width, maxOffset))
-                        }
-                        .onEnded { _ in
-                            if dragOffset > maxOffset * 0.8 {
-                                isConfirmed = true
-                                dragOffset = maxOffset
-                            } else {
-                                isConfirmed = false
-                                dragOffset = 0
+                    .fill(
+                        LinearGradient(
+                            colors: isConfirmed
+                                ? [Color.green, Color.green.opacity(0.8)]
+                                : [Color.red, Color.orange],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: knobSize, height: knobSize)
+                    .shadow(color: (isConfirmed ? Color.green : Color.orange).opacity(0.25), radius: 8, x: 0, y: 4)
+                    .overlay(
+                        ZStack {
+                            if isDragging {
+                                TimelineView(.animation) { timeline in
+                                    let t = timeline.date.timeIntervalSinceReferenceDate
+                                    let pulse = 1 + 0.08 * sin(t * 6)
+                                    Circle()
+                                        .stroke(Color.white.opacity(0.35), lineWidth: 3)
+                                        .scaleEffect(pulse)
+                                        .opacity(0.6 - 0.3 * abs(sin(t * 3)))
+                                }
                             }
+
+                            HStack(spacing: 2) {
+                                Image(systemName: isConfirmed ? "checkmark" : "chevron.forward")
+                                    .font(.headline.weight(.bold))
+                                if !isConfirmed {
+                                    Image(systemName: "chevron.forward")
+                                        .font(.headline.weight(.bold))
+                                        .opacity(hintPhase ? 1 : 0.4)
+                                        .offset(x: hintPhase ? 2 : -2)
+                                }
+                            }
+                            .foregroundStyle(.white)
                         }
                     )
-                    .padding(.leading, 3)
+                    .scaleEffect(isDragging ? 1.05 : 1)
+                    .animation(.spring(response: 0.28, dampingFraction: 0.78), value: isDragging)
+                    .offset(x: max(4, min(dragOffset + 4, maxOffset + 4)))
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                guard !isConfirmed else { return }
+                                if !isDragging {
+                                    isDragging = true
+                                }
+                                dragOffset = max(0, min(value.translation.width, maxOffset))
+                            }
+                            .onEnded { _ in
+                                guard !isConfirmed else { return }
+                                if dragOffset > maxOffset * 0.82 {
+                                    withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
+                                        isConfirmed = true
+                                        dragOffset = maxOffset
+                                    }
+                                } else {
+                                    withAnimation(.easeOut(duration: 0.2)) {
+                                        isConfirmed = false
+                                        dragOffset = 0
+                                    }
+                                }
+                                isDragging = false
+                            }
+                    )
+                    .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: hintPhase)
             }
             .frame(height: height)
+            .onAppear {
+                hintPhase = true
+            }
+            .onChange(of: isConfirmed) { newValue in
+                if !newValue {
+                    dragOffset = 0
+                    isDragging = false
+                } else {
+                    dragOffset = maxOffset
+                }
+            }
         }
     }
 }

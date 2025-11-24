@@ -147,7 +147,6 @@ struct PracticalTrainingView: View {
                     }
                 }
             }
-            .navigationTitle("Praktikum")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Schließen") { dismiss() }

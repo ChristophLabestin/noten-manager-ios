@@ -51,8 +51,13 @@ struct MainView: View {
                 }
             }
             .navigationDestination(for: Subject.self) { subject in
-                SubjectDetailView(subject: subject)
-                    .environmentObject(gradesStore)
+                if subject.name == "Fachreferat" {
+                    FachreferatDetailView(subject: subject)
+                        .environmentObject(gradesStore)
+                } else {
+                    SubjectDetailView(subject: subject)
+                        .environmentObject(gradesStore)
+                }
             }
             // Platz für die BottomNav im Safe-Area-Bereich reservieren
             .safeAreaInset(edge: .bottom) {

@@ -552,7 +552,7 @@ struct OnboardingFunnelView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         VStack(alignment: .leading, spacing: 8) {
-                            ForEach(store.subjects, id: \.name) { subj in
+                            ForEach(store.sortedSubjectsForDisplay(), id: \.name) { subj in
                                 Text(subj.name)
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 8)

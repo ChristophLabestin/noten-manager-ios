@@ -126,11 +126,11 @@ struct SettingsSectionBox<Content: View>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.formCardBackground)
+                .fill(Color(.secondarySystemGroupedBackground))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color(.separator).opacity(0.15), lineWidth: 1)
+                .stroke(Color(.separator).opacity(0.10), lineWidth: 1)
         )
     }
 }

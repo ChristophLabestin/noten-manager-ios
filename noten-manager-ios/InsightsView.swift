@@ -7,7 +7,7 @@ struct InsightsView: View {
     @State private var showExamSheet: Bool = false
 
     private var subjectsWithoutFachreferat: [Subject] {
-        store.subjects.filter { $0.name != "Fachreferat" }
+        store.sortedSubjectsForDisplay(store.subjects.filter { $0.name != "Fachreferat" })
     }
 
     private func grades(for subject: Subject) -> [Grade] {
@@ -18,7 +18,8 @@ struct InsightsView: View {
                 weight: gw.weight,
                 date: gw.date,
                 note: gw.note,
-                halfYear: gw.halfYear
+                halfYear: gw.halfYear,
+                linkedExamId: gw.linkedExamId
             )
         }
     }
@@ -128,60 +129,6 @@ struct InsightsView: View {
         return .red
     }
 
-    private var isFeminine: Bool { store.theme == "feminine" }
-    private var isDark: Bool { store.darkMode }
-
-    private var chipForegroundColor: Color {
-        if isFeminine {
-            return Color(hex: isDark ? "#f472b6" : "#ec4899")
-        }
-        return .blue
-    }
-
-    private var chipBackgroundColor: Color {
-        if isFeminine {
-            return chipForegroundColor.opacity(isDark ? 0.30 : 0.15)
-        }
-        return Color.blue.opacity(0.1)
-    }
-
-    private var themedBackground: some View {
-        Group {
-            if isDark {
-                RadialGradient(
-                    gradient: Gradient(colors: [
-                        Color(hex: "#1f2937"),
-                        Color(red: 2 / 255, green: 6 / 255, blue: 23 / 255)
-                    ]),
-                    center: .top,
-                    startRadius: 0,
-                    endRadius: 800
-                )
-            } else if isFeminine {
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color(hex: "#fdf2ff"),
-                        Color(hex: "#fdf2f8"),
-                        Color(hex: "#fef2f2")
-                    ]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            } else {
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color(red: 238 / 255, green: 242 / 255, blue: 255 / 255),
-                        Color(red: 249 / 255, green: 250 / 255, blue: 251 / 255),
-                        Color(red: 247 / 255, green: 247 / 255, blue: 247 / 255)
-                    ]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            }
-        }
-        .ignoresSafeArea()
-    }
-
     private var hasOverdueHomeworks: Bool {
         let now = Date()
         return store.allHomeworks.contains { hw in
@@ -208,148 +155,131 @@ struct InsightsView: View {
     }
 
     var body: some View {
-        ZStack {
-            themedBackground
-
-            ScrollView {
-                VStack(spacing: 16) {
-                    SettingsCard(
-                        title: "Notenüberblick",
-                        subtitle: "Durchschnitt, Fächer & Noten",
-                        systemImage: "chart.bar.doc.horizontal.fill",
-                        accent: .indigo
-                    ) {
-                        SettingsSectionBox {
-                            HStack(spacing: 10) {
-                                StatChip(title: "Gesamt-Ø", value: formatAverage(overallAverageValue), accent: .indigo)
-                                StatChip(title: "Fächer", value: "\(subjectsWithoutFachreferat.count)", accent: .cyan)
-                                StatChip(title: "Noten", value: "\(totalGradesCount)", accent: .orange)
-                            }
+        ScrollView {
+            VStack(spacing: 16) {
+                SettingsCard(
+                    title: "Insights",
+                    subtitle: "Schnitt, Fächer & Fortschritt",
+                    systemImage: "chart.bar.doc.horizontal.fill",
+                    accent: .indigo
+                ) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 10) {
+                            StatChip(title: "Gesamt-Ø", value: formatAverage(overallAverageValue), accent: .indigo)
+                            StatChip(title: "Fächer", value: "\(subjectsWithoutFachreferat.count)", accent: .cyan)
+                            StatChip(title: "Noten", value: "\(totalGradesCount)", accent: .orange)
                         }
-                    }
-
-                    // Halbjahresvergleich
-                    let hj1 = halfYearAverage(1)
-                    let hj2 = halfYearAverage(2)
-                    if hj1 != nil || hj2 != nil {
-                        SettingsCard(
-                            title: "Halbjahresvergleich",
-                            subtitle: nil,
-                            systemImage: "rectangle.split.2x1",
-                            accent: .cyan
-                        ) {
-                            SettingsSectionBox {
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text("1. Halbjahr")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                        Text(formatAverage(hj1))
-                                            .font(.body)
-                                            .padding(.horizontal, 10)
-                                            .padding(.vertical, 4)
-                                            .background(gradeColor(hj1).opacity(0.15))
-                                            .foregroundStyle(gradeColor(hj1))
-                                            .clipShape(Capsule())
+                        if hasOverdueHomeworks || hasHomeworkDueTomorrow || hasOverdueExams {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 8) {
+                                    if hasOverdueHomeworks {
+                                        PillBadge(text: "Hausaufgaben fällig", systemImage: "exclamationmark.triangle.fill", foreground: .orange, background: Color.orange.opacity(0.14))
                                     }
-                                    Spacer()
-                                    VStack(alignment: .trailing, spacing: 4) {
-                                        Text("2. Halbjahr")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                        Text(formatAverage(hj2))
-                                            .font(.body)
-                                            .padding(.horizontal, 10)
-                                            .padding(.vertical, 4)
-                                            .background(gradeColor(hj2).opacity(0.15))
-                                            .foregroundStyle(gradeColor(hj2))
-                                            .clipShape(Capsule())
+                                    if hasHomeworkDueTomorrow {
+                                        PillBadge(text: "Hausaufgaben morgen", systemImage: "clock.badge.exclamationmark", foreground: .yellow, background: Color.yellow.opacity(0.16))
+                                    }
+                                    if hasOverdueExams {
+                                        PillBadge(text: "Prüfungen überfällig", systemImage: "calendar.badge.exclamationmark", foreground: .red, background: Color.red.opacity(0.12))
                                     }
                                 }
                             }
+                        } else {
+                            PillBadge(text: "Alles im Plan", systemImage: "checkmark.circle.fill", foreground: .green, background: Color.green.opacity(0.14))
                         }
-                    }
-
-                    // Top-Fächer
-                    if !topSubjects.isEmpty {
-                        SettingsCard(
-                            title: "Deine Top-Fächer",
-                            subtitle: "Aktuell beste Durchschnittsnoten",
-                            systemImage: "arrow.up.right.circle.fill",
-                            accent: .green
-                        ) {
-                            SettingsSectionBox {
-                                VStack(spacing: 8) {
-                                    ForEach(topSubjects, id: \.name) { subject in
-                                        NavigationLink {
-                                            SubjectDetailView(subject: subject)
-                                                .environmentObject(store)
-                                        } label: {
-                                            subjectInsightRow(subject: subject)
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Fächer mit Potenzial
-                    if !bottomSubjects.isEmpty {
-                        SettingsCard(
-                            title: "Fächer mit Potenzial",
-                            subtitle: "Hier lohnt sich extra Vorbereitung",
-                            systemImage: "arrow.down.forward.and.arrow.up.backward.circle.fill",
-                            accent: .orange
-                        ) {
-                            SettingsSectionBox {
-                                VStack(spacing: 8) {
-                                    ForEach(bottomSubjects, id: \.name) { subject in
-                                        NavigationLink {
-                                            SubjectDetailView(subject: subject)
-                                                .environmentObject(store)
-                                        } label: {
-                                            subjectInsightRow(subject: subject)
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Alle Fächer
-                    if !subjectsWithoutFachreferat.isEmpty {
-                        SettingsCard(
-                            title: "Übersicht aller Fächer",
-                            subtitle: nil,
-                            systemImage: "list.bullet.rectangle.portrait.fill",
-                            accent: .cyan
-                        ) {
-                            SettingsSectionBox {
-                                VStack(spacing: 8) {
-                                    ForEach(sortedByAverageDesc, id: \.name) { subject in
-                                        NavigationLink {
-                                            SubjectDetailView(subject: subject)
-                                                .environmentObject(store)
-                                        } label: {
-                                            subjectOverviewRow(subject: subject)
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        Text("Lege zuerst Fächer an, um Insights zu sehen.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 16)
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+
+                // Halbjahresvergleich
+                let hj1 = halfYearAverage(1)
+                let hj2 = halfYearAverage(2)
+                if hj1 != nil || hj2 != nil {
+                    SettingsCard(
+                        title: "Halbjahre im Vergleich",
+                        subtitle: "Schnitt je Halbjahr",
+                        systemImage: "rectangle.split.2x1",
+                        accent: .cyan
+                    ) {
+                        HStack {
+                            halfYearChip(title: "1. Halbjahr", value: hj1)
+                            Spacer()
+                            halfYearChip(title: "2. Halbjahr", value: hj2)
+                        }
+                    }
+                }
+
+                // Top-Fächer
+                if !topSubjects.isEmpty {
+                    SettingsCard(
+                        title: "Deine Top-Fächer",
+                        subtitle: "Beste Durchschnittsnoten",
+                        systemImage: "arrow.up.right.circle.fill",
+                        accent: .green
+                    ) {
+                        VStack(spacing: 8) {
+                            ForEach(topSubjects, id: \.name) { subject in
+                                NavigationLink {
+                                    SubjectDetailView(subject: subject)
+                                        .environmentObject(store)
+                                } label: {
+                                    subjectInsightRow(subject: subject, accent: .green)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+
+                // Fächer mit Potenzial
+                if !bottomSubjects.isEmpty {
+                    SettingsCard(
+                        title: "Fächer mit Potenzial",
+                        subtitle: "Hier lohnt sich extra Vorbereitung",
+                        systemImage: "arrow.down.forward.and.arrow.up.backward.circle.fill",
+                        accent: .orange
+                    ) {
+                        VStack(spacing: 8) {
+                            ForEach(bottomSubjects, id: \.name) { subject in
+                                NavigationLink {
+                                    SubjectDetailView(subject: subject)
+                                        .environmentObject(store)
+                                } label: {
+                                    subjectInsightRow(subject: subject, accent: .orange)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+
+                // Alle Fächer
+                if !subjectsWithoutFachreferat.isEmpty {
+                    SettingsCard(
+                        title: "Alle Fächer",
+                        subtitle: "Sortiert nach Durchschnitt",
+                        systemImage: "list.bullet.rectangle.portrait.fill",
+                        accent: .cyan
+                    ) {
+                        VStack(spacing: 8) {
+                            ForEach(sortedByAverageDesc, id: \.name) { subject in
+                                NavigationLink {
+                                    SubjectDetailView(subject: subject)
+                                        .environmentObject(store)
+                                } label: {
+                                    subjectOverviewRow(subject: subject)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                } else {
+                    Text("Lege zuerst Fächer an, um Insights zu sehen.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 16)
+                }
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -388,36 +318,27 @@ struct InsightsView: View {
             ExamListView()
                 .environmentObject(store)
         }
+        .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine"))
     }
 
     @ViewBuilder
-    private func subjectInsightRow(subject: Subject) -> some View {
+    private func subjectInsightRow(subject: Subject, accent: Color) -> some View {
         let avg = subjectAverage(subject)
         let gradesCount = store.gradesBySubject[subject.name]?.count ?? 0
 
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(subject.name)
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
                     .truncationMode(.tail)
-                HStack(spacing: 8) {
-                    if subject.isElective {
-                        Tag(text: "Wahlfach", style: .elective)
-                    } else {
-                        Tag(
-                            text: subject.type == 1 ? "Hauptfach" : "Nebenfach",
-                            style: subject.type == 1 ? .main : .minor
-                        )
-                    }
-                    Text("\(gradesCount) \(gradesCount == 1 ? "Note" : "Noten")")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
+                Text("\(gradesCount) \(gradesCount == 1 ? "Note" : "Noten")")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
             Spacer()
             Text(formatAverage(avg))
-                .font(.headline)
+                .font(.headline.weight(.semibold))
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
                 .background(gradeColor(avg).opacity(0.15))
@@ -431,19 +352,19 @@ struct InsightsView: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color(.separator).opacity(0.15), lineWidth: 1)
+                .stroke(accent.opacity(0.20), lineWidth: 1)
         )
     }
 
     @ViewBuilder
-private func subjectOverviewRow(subject: Subject) -> some View {
+    private func subjectOverviewRow(subject: Subject) -> some View {
         let avg = subjectAverage(subject)
         let gradesCount = store.gradesBySubject[subject.name]?.count ?? 0
 
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(subject.name)
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Text("\(gradesCount) \(gradesCount == 1 ? "Note" : "Noten")")
@@ -452,7 +373,7 @@ private func subjectOverviewRow(subject: Subject) -> some View {
             }
             Spacer()
             Text(formatAverage(avg))
-                .font(.subheadline)
+                .font(.subheadline.weight(.semibold))
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
                 .background(gradeColor(avg).opacity(0.12))
@@ -468,5 +389,21 @@ private func subjectOverviewRow(subject: Subject) -> some View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(Color(.separator).opacity(0.12), lineWidth: 1)
         )
+    }
+
+    private func halfYearChip(title: String, value: Double?) -> some View {
+        let color = gradeColor(value)
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(title.uppercased())
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(formatAverage(value))
+                .font(.headline.weight(.semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(color.opacity(0.14))
+                .foregroundStyle(color)
+                .clipShape(Capsule())
+        }
     }
 }

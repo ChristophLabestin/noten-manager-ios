@@ -57,6 +57,8 @@ struct SubjectDetailView: View {
     @State private var showAddExamSheet: Bool = false
     @State private var showAddActions: Bool = false
     @State private var showExamListSheet: Bool = false
+    @State private var examForNewGrade: Exam? = nil
+    @State private var detailExam: Exam? = nil
 
     init(subject: Subject) {
         self.subject = subject
@@ -133,13 +135,17 @@ struct SubjectDetailView: View {
     }
 
     private var subjectHomeworks: [Homework] {
-        store.allHomeworks.filter { matchesSubject(name: $0.subjectName) }
-            .sorted { lhs, rhs in
-                // Sort by dueDate first, fallback to createdAt so we have a stable order
-                let left = lhs.dueDate ?? lhs.createdAt
-                let right = rhs.dueDate ?? rhs.createdAt
-                return left < right
-            }
+        let openHomeworks = store.allHomeworks.filter { hw in
+            matchesSubject(name: hw.subjectName)
+                && !hw.isCompleted
+                && !isAutoCompletedPastDue(hw)
+        }
+        return openHomeworks.sorted { lhs, rhs in
+            let l = homeworkSortKey(lhs)
+            let r = homeworkSortKey(rhs)
+            if l.priority != r.priority { return l.priority < r.priority }
+            return l.date < r.date
+        }
     }
 
     private var upcomingExamsCount: Int {
@@ -289,8 +295,17 @@ struct SubjectDetailView: View {
             } else {
                 VStack(spacing: 10) {
                     ForEach(subjectExams, id: \.id) { exam in
-                        examRow(exam)
+                        examRow(exam, onAddGrade: { examForNewGrade = exam })
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                detailExam = exam
+                            }
+                            .contextMenu {
+                                Button("Note hinzufügen") {
+                                    examForNewGrade = exam
+                                }
+                            }
                     }
                 }
             }
@@ -474,7 +489,7 @@ struct SubjectDetailView: View {
                     Button {
                         startEditSubject()
                     } label: {
-                        ToolbarIcon(symbol: "square.and.pencil", showDot: false)
+                        ToolbarIcon(symbol: "slider.horizontal.3", showDot: false)
                     }
 
                     Button {
@@ -513,8 +528,23 @@ struct SubjectDetailView: View {
                     .environmentObject(store)
             }
         }
+        .sheet(item: $examForNewGrade) { exam in
+            let note = noteForExam(exam)
+            AddGradeView(
+                preselectedSubjectName: exam.subjectName,
+                preselectedWeight: exam.weight,
+                prefilledNote: note,
+                linkedExamId: exam.id,
+                markLinkedExamCompletedByDefault: true
+            )
+            .environmentObject(store)
+        }
         .sheet(isPresented: $showExamListSheet) {
             ExamListView(subjectFilter: currentSubjectName, alternateSubjectNames: subjectFilterNames)
+                .environmentObject(store)
+        }
+        .sheet(item: $detailExam) { exam in
+            ExamDetailSheet(exam: exam)
                 .environmentObject(store)
         }
         .keyboardDismissToolbar()
@@ -560,7 +590,7 @@ struct SubjectDetailView: View {
     }
 
     @ViewBuilder
-    private func examRow(_ exam: Exam) -> some View {
+    private func examRow(_ exam: Exam, onAddGrade: @escaping () -> Void) -> some View {
         let now = Date()
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
@@ -578,10 +608,22 @@ struct SubjectDetailView: View {
                 }
             }
             Spacer()
-            statusBadge(
-                exam.isCompleted ? "Erledigt" : (exam.date < now ? "Überfällig" : "Geplant"),
-                color: exam.isCompleted ? .green : (exam.date < now ? .red : .blue)
-            )
+            HStack(spacing: 8) {
+                Button {
+                    onAddGrade()
+                } label: {
+                    Image(systemName: "text.badge.plus")
+                        .foregroundStyle(.blue)
+                        .font(.system(size: 16, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Note hinzufügen")
+
+                statusBadge(
+                    exam.isCompleted ? "Erledigt" : (exam.date < now ? "Wartet auf Note" : "Geplant"),
+                    color: exam.isCompleted ? .green : (exam.date < now ? .red : .blue)
+                )
+            }
         }
         .padding(12)
         .background(
@@ -594,35 +636,43 @@ struct SubjectDetailView: View {
         )
     }
 
+    private func noteForExam(_ exam: Exam) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        let dateString = formatter.string(from: exam.date)
+        return "Geschrieben am \(dateString)"
+    }
+
     @ViewBuilder
     private func homeworkRow(_ homework: Homework) -> some View {
-        let now = Date()
+        let badge = homeworkBadge(for: homework)
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(homework.title)
                     .font(.headline)
                     .fixedSize(horizontal: false, vertical: true)
-                if let due = homework.dueDate {
-                    Text("Fällig: \(due.formatted(date: .abbreviated, time: .omitted))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("Kein Fälligkeitsdatum")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    if let due = homework.dueDate {
+                        Text("Fällig: \(due.formatted(date: .abbreviated, time: .omitted))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Kein Fälligkeitsdatum")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let badge {
+                        attentionBadge(badge.text, color: badge.color, icon: badge.icon)
+                    }
                 }
             }
             Spacer()
-            let isOverdue = (homework.dueDate ?? Date.distantFuture) < now && !homework.isCompleted
             HStack(spacing: 8) {
-                statusBadge(
-                    homework.isCompleted ? "Erledigt" : (isOverdue ? "Überfällig" : "Offen"),
-                    color: homework.isCompleted ? .green : (isOverdue ? .red : .blue)
-                )
                 Button {
                     Task { await toggleHomeworkCompletion(homework) }
                 } label: {
-                    Image(systemName: homework.isCompleted ? "arrow.uturn.backward.circle" : "checkmark.circle")
+                    Image(systemName: "checkmark.circle")
                         .font(.system(size: 18, weight: .semibold))
                 }
                 .buttonStyle(.plain)
@@ -647,6 +697,63 @@ private func statusBadge(_ text: String, color: Color) -> some View {
             .background(color.opacity(0.15))
             .foregroundStyle(color)
             .clipShape(Capsule())
+    }
+
+    private func attentionBadge(_ text: String, color: Color, icon: String? = nil) -> some View {
+        HStack(spacing: 4) {
+            if let icon {
+                Image(systemName: icon)
+                    .font(.caption2.weight(.bold))
+            }
+            Text(text)
+                .font(.caption2.weight(.semibold))
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(color.opacity(0.12))
+        .foregroundStyle(color)
+        .clipShape(Capsule())
+    }
+
+    private func homeworkBadge(for hw: Homework) -> (text: String, color: Color, icon: String?)? {
+        let cal = Calendar.current
+        let now = Date()
+        guard let due = hw.dueDate else { return nil }
+        if cal.isDateInToday(due) {
+            return ("Fällig", .red, nil)
+        }
+        if cal.isDateInTomorrow(due) {
+            return ("Morgen fällig", .orange, nil)
+        }
+        if due > now {
+            return ("Geplant", .green, nil)
+        }
+        return nil
+    }
+
+    private func isAutoCompletedPastDue(_ hw: Homework) -> Bool {
+        guard let due = hw.dueDate else { return false }
+        let startToday = Calendar.current.startOfDay(for: Date())
+        return due < startToday
+    }
+
+    private func homeworkSortKey(_ hw: Homework) -> (priority: Int, date: Date) {
+        let cal = Calendar.current
+        let now = Date()
+        if let due = hw.dueDate {
+            let startToday = cal.startOfDay(for: now)
+            if due < startToday {
+                return (3, due)
+            }
+            if cal.isDateInToday(due) {
+                return (0, due)
+            }
+            if cal.isDateInTomorrow(due) {
+                return (1, due)
+            }
+            return (2, due)
+        }
+        return (2, hw.createdAt)
     }
 
     // MARK: - FAB-Action Sheet

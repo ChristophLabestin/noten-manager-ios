@@ -77,6 +77,7 @@ struct EncryptedGrade: Codable {
     let date: Date
     let note: String?
     let halfYear: Int? // 1 | 2
+    let linkedExamId: String?
 }
 
 struct Grade: Codable {
@@ -85,6 +86,7 @@ struct Grade: Codable {
     let date: Date
     let note: String?
     let halfYear: Int?
+    let linkedExamId: String?
 }
 
 struct GradeWithId: Codable, Identifiable {
@@ -94,6 +96,7 @@ struct GradeWithId: Codable, Identifiable {
     let date: Date
     let note: String?
     let halfYear: Int?
+    let linkedExamId: String?
 }
 
 struct EncryptedFachreferat: Codable {

@@ -91,7 +91,7 @@ struct FinalGradeView: View {
     }
 
     private var currentSubjectHandles: [SubjectHandle] {
-        store.subjects.map { subject in
+        store.sortedSubjectsForDisplay().map { subject in
             let grades = store.gradesBySubject[subject.name] ?? []
             return SubjectHandle(
                 schoolYearId: currentSchoolYearId,
@@ -105,7 +105,7 @@ struct FinalGradeView: View {
 
     private var previousSubjectHandles: [SubjectHandle] {
         guard canUsePreviousYearSnapshot, let snapshot = previousYearSnapshot else { return [] }
-        return snapshot.subjects.map { subject in
+        return store.sortedSubjectsForDisplay(snapshot.subjects).map { subject in
             let grades = snapshot.gradesBySubject[subject.name] ?? []
             return SubjectHandle(
                 schoolYearId: snapshot.id,
@@ -287,6 +287,8 @@ struct FinalGradeView: View {
             loadingSection
             topSummarySection
                 .padding(.horizontal, 16)
+            statusCard
+                .padding(.horizontal, 16)
             abiturOverviewCard
                 .padding(.horizontal, 16)
             if schoolType == .fos {
@@ -338,99 +340,121 @@ struct FinalGradeView: View {
 
     @ViewBuilder
     private var topSummarySection: some View {
-        VStack(spacing: 12) {
-            SettingsCard(
-                title: "Abschlussnote",
-                subtitle: nil,
-                systemImage: "rosette",
-                accent: .indigo
-            ) {
-                SettingsSectionBox {
-                    HStack(alignment: .center, spacing: 12) {
-                        Text("Ergebnis")
-                            .font(.headline)
-                        Spacer()
-                        Text(finalGradeText)
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(finalGradeColor(finalGradeValueForColor).opacity(0.15))
-                            .foregroundStyle(finalGradeColor(finalGradeValueForColor))
-                            .clipShape(Capsule())
-                            .onTapGesture { toggleFinalGradeToFixed() }
-                    }
+        let yearBadge: some View = {
+            if let year = store.activeSchoolYearId {
+                return PillBadge(
+                    text: year,
+                    systemImage: "calendar",
+                    foreground: .indigo,
+                    background: Color.indigo.opacity(0.14)
+                )
+            }
+            return PillBadge(
+                text: "Aktuelles Schuljahr",
+                systemImage: "calendar",
+                foreground: .indigo,
+                background: Color.indigo.opacity(0.14)
+            )
+        }()
+
+        SettingsCard(
+            title: "Abschlussnote",
+            subtitle: "Stand heute",
+            systemImage: "rosette",
+            accent: .indigo,
+            trailing: { yearBadge }
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .center, spacing: 12) {
+                    Text("Ergebnis")
+                        .font(.headline)
+                    Spacer()
+                    Text(finalGradeText)
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(finalGradeColor(finalGradeValueForColor).opacity(0.15))
+                        .foregroundStyle(finalGradeColor(finalGradeValueForColor))
+                        .clipShape(Capsule())
+                        .onTapGesture { toggleFinalGradeToFixed() }
+                }
+
+                if passFailStatus == .open {
+                    Text("Tippe auf die Note, um die Rundung zu ändern.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
+        }
+    }
 
-            if passFailStatus != .open {
-                SettingsCard(
-                    title: "Prüfungsstatus",
-                    subtitle: nil,
-                    systemImage: "checkmark.seal.fill",
-                    accent: passFailStatus == .passed ? .green : .red
-                ) {
-                    SettingsSectionBox {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack(alignment: .center) {
-                                Text(passFailStatus == .passed ? "Bestanden" : "Nicht bestanden")
-                                    .font(.headline)
-                                Spacer()
-                                Text(passFailStatus == .passed ? "✔︎" : "✖︎")
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .background(
-                                        Capsule()
-                                            .fill(
-                                                passFailStatus == .passed
-                                                ? Color.green.opacity(0.2)
-                                                : Color(hex: "#ef4444")
-                                            )
-                                    )
-                                    .foregroundStyle(passFailStatus == .passed ? .green : .white)
-                            }
+    @ViewBuilder
+    private var statusCard: some View {
+        let status = statusDisplay
+        SettingsCard(
+            title: "Prüfungsstatus",
+            subtitle: nil,
+            systemImage: "checkmark.seal.fill",
+            accent: status.color
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text(status.text)
+                        .font(.headline)
+                    Spacer()
+                    Text(status.text == "Bestanden" ? "✔︎" : status.text == "Nicht bestanden" ? "✖︎" : "…")
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(status.color.opacity(0.18))
+                        .foregroundStyle(status.color == .secondary ? Color.primary : status.color)
+                        .clipShape(Capsule())
+                }
 
-                            if passFailStatus == .failed {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    if failedByHalfYearTooFew {
-                                        failureReasonRow("zu wenige Halbjahre eingebracht")
-                                    }
-                                    if failedByHalfYearTooMany {
-                                        failureReasonRow("zu viele Halbjahre eingebracht")
-                                    }
-                                    if failedByExamGrade {
-                                        failureReasonRow("benötigter Schnitt nicht erreicht")
-                                    }
-                                    if failedByFinalGrade {
-                                        failureReasonRow("benötigte Abschlussnote nicht erreicht")
-                                    }
-                                    if failedByMissingFachreferat {
-                                        failureReasonRow("Fachreferat Note nicht eingetragen")
-                                    }
-                                    if failedByMissingPracticalPerformance {
-                                        failureReasonRow("Praktikums-Jahresleistung fehlt")
-                                    }
-                                    if failedBySubjectPoints {
-                                        failureReasonRow("benötigte Punktzahl nicht erreicht")
-                                    }
-                                }
-                                Text("Hier tippen für mehr Infos")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .frame(maxWidth: .infinity, alignment: .center)
-                            } else if passFailStatus == .passed {
-                                Text("Herzlichen Glückwunsch! 🎉")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            }
+                switch passFailStatus {
+                case .failed:
+                    VStack(alignment: .leading, spacing: 6) {
+                        if failedByHalfYearTooFew {
+                            failureReasonRow("zu wenige Halbjahre eingebracht")
                         }
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            if passFailStatus == .failed {
-                                showStatusDetails = true
-                            }
+                        if failedByHalfYearTooMany {
+                            failureReasonRow("zu viele Halbjahre eingebracht")
+                        }
+                        if failedByExamGrade {
+                            failureReasonRow("benötigter Schnitt nicht erreicht")
+                        }
+                        if failedByFinalGrade {
+                            failureReasonRow("benötigte Abschlussnote nicht erreicht")
+                        }
+                        if failedByMissingFachreferat {
+                            failureReasonRow("Fachreferat Note nicht eingetragen")
+                        }
+                        if failedByMissingPracticalPerformance {
+                            failureReasonRow("Praktikums-Jahresleistung fehlt")
+                        }
+                        if failedBySubjectPoints {
+                            failureReasonRow("benötigte Punktzahl nicht erreicht")
                         }
                     }
+                    Button {
+                        showStatusDetails = true
+                    } label: {
+                        Text("Details anzeigen")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.primary.opacity(0.06))
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                case .open:
+                    Text("Noch offene Daten. Trage alle Prüfungsnoten und Halbjahre ein.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                case .passed:
+                    Text("Herzlichen Glückwunsch! 🎉")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
             }
         }
@@ -503,7 +527,7 @@ struct FinalGradeView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     if practicalYearSummary.count > 0 {
-                        Text("Praktikum 11.: \(Int(round(practicalYearSummary.totalPoints))) Punkte (\(practicalYearSummary.count) Jahresleistung).")
+                        Text("Praktikum 11.: \(Int(round(practicalYearSummary.totalPoints))) Punkte (\(practicalYearSummary.count) HJL).")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -525,12 +549,10 @@ struct FinalGradeView: View {
             systemImage: "info.circle",
             accent: .cyan
         ) {
-            SettingsSectionBox {
-                HStack(spacing: 10) {
-                    StatChip(title: "Fächer", value: "\(eligibleSubjectHandles.count)", accent: .cyan)
-                    let halfYearText: String = maxDroppedHalfYears > 0 ? "\(selectedDropCount) / \(maxDroppedHalfYears)" : "\(selectedDropCount)"
-                    StatChip(title: "Halbjahre", value: halfYearText, accent: .orange)
-                }
+            HStack(spacing: 10) {
+                StatChip(title: "Fächer", value: "\(eligibleSubjectHandles.count)", accent: .cyan)
+                let halfYearText: String = maxDroppedHalfYears > 0 ? "\(selectedDropCount) / \(maxDroppedHalfYears)" : "\(selectedDropCount)"
+                StatChip(title: "Halbjahre", value: halfYearText, accent: .orange)
             }
         }
     }
@@ -710,9 +732,16 @@ struct FinalGradeView: View {
 
     @ViewBuilder
     private var practicalPerformanceCard: some View {
+        let subtitleText: String? = {
+            if canUsePreviousYearSnapshot, let snapshot = previousYearSnapshot {
+                return "Daten aus dem Schuljahr \(snapshot.id)."
+            }
+            return nil
+        }()
+
         SettingsCard(
-            title: "Fachpraktische Ausbildung (11.)",
-            subtitle: nil,
+            title: "Fachpraktische Ausbildung",
+            subtitle: subtitleText,
             systemImage: "wrench.and.screwdriver.fill",
             accent: .teal
         ) {
@@ -730,11 +759,6 @@ struct FinalGradeView: View {
                                 .foregroundStyle(gradeColor(avg))
                                 .clipShape(Capsule())
                         }
-                    }
-                    if canUsePreviousYearSnapshot, let snapshot = previousYearSnapshot {
-                        Text("Daten aus dem Schuljahr \(snapshot.id).")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
                     }
 
                     if sortedPracticalGrades.isEmpty {
@@ -1323,6 +1347,17 @@ struct FinalGradeView: View {
         if isFailed { return .failed }
         if isPassed { return .passed }
         return .open
+    }
+
+    private var statusDisplay: (text: String, color: Color) {
+        switch passFailStatus {
+        case .passed:
+            return ("Bestanden", .green)
+        case .failed:
+            return ("Nicht bestanden", .red)
+        case .open:
+            return ("Offen", .secondary)
+        }
     }
 
     private var examSubjectFinals: [(handle: SubjectHandle, final: Double?)] {
