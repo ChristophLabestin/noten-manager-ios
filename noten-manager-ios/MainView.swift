@@ -14,13 +14,19 @@ struct MainView: View {
     let onLogout: () -> Void
     @StateObject private var gradesStore = GradesStore()
     @State private var currentTab: BottomNavView.Tab = .home
+    @EnvironmentObject private var offlineManager: OfflineModeManager
     @Environment(\.colorScheme) private var colorScheme
     @State private var navPath = NavigationPath()
     @State private var showOnboardingFunnel: Bool = false
+    @State private var offlineBannerVisible: Bool = false
+    @State private var offlineBannerDismissTask: Task<Void, Never>?
+    @State private var reconnectTask: Task<Void, Never>?
 
     // Von SubjectDetail per Preference gemeldetes Fach für „Note hinzufügen“
     @State private var quickAddSubjectName: String? = nil
     @State private var navigateToAbiturExam: Bool = false
+
+    private let spinnerStartDate = Date()
 
     var body: some View {
         ZStack {
@@ -106,60 +112,271 @@ struct MainView: View {
             .environmentObject(gradesStore)
         }
         .task {
-            // Live-Updates starten
-            await gradesStore.startListening()
+            await handleDataLoading()
+        }
+        .onChange(of: offlineManager.isOfflineModeActive) { active in
+            Task {
+                await handleOfflineToggle(active: active)
+            }
         }
         .overlay(alignment: .center) {
             if gradesStore.isLoading {
                 loadingOverlay
             }
         }
+        .overlay(alignment: .top) {
+            offlineBanner
+        }
+        .toolbar {
+            if offlineManager.isOfflineModeActive, navPath.isEmpty {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    offlineToolbarButton
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func handleDataLoading() async {
+        if offlineManager.isOfflineModeActive {
+            if let snapshot = offlineManager.cachedSnapshot ?? offlineManager.availableSnapshot() {
+                gradesStore.loadOfflineSnapshot(snapshot)
+            }
+            showOfflineBannerTemporarily()
+            return
+        }
+
+        // Fallback: wenn kein Internet, aber ein Snapshot existiert und innerhalb 3 Tage ist, direkt offline laden
+        if !offlineManager.isOnline {
+            if let snapshot = offlineManager.availableSnapshot(),
+               offlineManager.isOfflineLoginAllowed(for: snapshot.userId) {
+                gradesStore.loadOfflineSnapshot(snapshot)
+                showOfflineBannerTemporarily()
+                return
+            }
+        }
+
+        OfflineModeManager.shared.enableFirestoreNetworkIfNeeded()
+        await gradesStore.syncOfflinePendingChanges(forceLocalOverride: true)
+
+        gradesStore.leaveOfflineModePreservingState()
+        await gradesStore.startListening()
+        hideOfflineBanner()
+    }
+
+    @MainActor
+    private func handleOfflineToggle(active: Bool) async {
+        if active {
+            if let snapshot = offlineManager.cachedSnapshot ?? offlineManager.availableSnapshot() {
+                gradesStore.loadOfflineSnapshot(snapshot)
+            }
+            showOfflineBannerTemporarily()
+        } else {
+            OfflineModeManager.shared.enableFirestoreNetworkIfNeeded()
+            await gradesStore.syncOfflinePendingChanges(forceLocalOverride: true)
+            if offlineManager.isOnline {
+                gradesStore.leaveOfflineModePreservingState()
+                await gradesStore.startListening()
+                hideOfflineBanner()
+            } else {
+                await attemptReconnectOrFallback()
+            }
+        }
+    }
+
+    private var offlineBanner: some View {
+        Group {
+            if offlineManager.isOfflineModeActive, offlineBannerVisible {
+                HStack(spacing: 10) {
+                    Image(systemName: "wifi.slash")
+                        .font(.headline)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Offline-Modus aktiv")
+                            .font(.subheadline)
+                            .bold()
+                        Text(offlineStatusSubtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button {
+                        hideOfflineBanner()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Offline-Hinweis schließen")
+                }
+                .padding(12)
+                .background(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+            }
+        }
+    }
+
+    private var offlineStatusSubtitle: String {
+        let lastText = lastOnlineText
+        return "\(lastText) – synchronisieren, sobald du wieder online bist und dich anmeldest."
+    }
+
+    private var lastOnlineText: String {
+        if let last = offlineManager.lastLoginDate {
+            return "Letzter Online-Login: \(Self.offlineDateFormatter.string(from: last))"
+        }
+        return "Letzter Online-Login unbekannt"
+    }
+
+    private static let offlineDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
+    private var offlineToolbarButton: some View {
+        Button {
+            showOfflineBannerTemporarily()
+        } label: {
+            Image(systemName: "wifi.slash")
+                .imageScale(.medium)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.primary)
+    }
+
+    private func showOfflineBannerTemporarily() {
+        offlineBannerDismissTask?.cancel()
+        offlineBannerVisible = true
+        offlineBannerDismissTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 15_000_000_000)
+            offlineBannerVisible = false
+        }
+    }
+
+    private func hideOfflineBanner() {
+        offlineBannerDismissTask?.cancel()
+        offlineBannerDismissTask = nil
+        offlineBannerVisible = false
+    }
+
+    @MainActor
+    private func attemptReconnectOrFallback() async {
+        reconnectTask?.cancel()
+        reconnectTask = Task { @MainActor in
+            gradesStore.isLoading = true
+            for remaining in stride(from: 15, through: 1, by: -1) {
+                gradesStore.loadingLabel = "Verbinde … (\(remaining)s)"
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                if offlineManager.isOnline {
+                    OfflineModeManager.shared.enableFirestoreNetworkIfNeeded()
+                    await gradesStore.syncOfflinePendingChanges(forceLocalOverride: true)
+                    gradesStore.leaveOfflineModePreservingState()
+                    await gradesStore.startListening()
+                    hideOfflineBanner()
+                    gradesStore.isLoading = false
+                    reconnectTask = nil
+                    return
+                }
+            }
+            // Timeout -> im Offline-Modus bleiben
+            if let snapshot = offlineManager.cachedSnapshot ?? offlineManager.availableSnapshot() {
+                gradesStore.loadOfflineSnapshot(snapshot)
+                showOfflineBannerTemporarily()
+            }
+            gradesStore.isLoading = false
+            reconnectTask = nil
+        }
     }
 
     private var loadingOverlayLabel: String {
         if gradesStore.loadingLabel.isEmpty {
-            return "Noten werden synchronisiert …"
+            return "Daten werden geladen …"
         }
         return gradesStore.loadingLabel
     }
 
+    private var loadingAccent: Color {
+        if gradesStore.theme == "feminine" {
+            return Color(hex: "#ec4899")
+        }
+        return .indigo
+    }
+
+    private var loadingAccentSecondary: Color {
+        gradesStore.darkMode ? .white.opacity(0.8) : .primary.opacity(0.85)
+    }
+
     private var loadingOverlay: some View {
         ZStack {
-            // Verschwommener Hintergrund über der aktuellen View-Hierarchie
-            Rectangle()
-                .fill(.ultraThinMaterial)
+            Color.black.opacity(gradesStore.darkMode ? 0.45 : 0.28)
                 .ignoresSafeArea()
 
-            VStack(spacing: 16) {
-                VStack(spacing: 6) {
-                    Text("Noten werden synchronisiert")
+            VStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [loadingAccent.opacity(0.18), loadingAccent.opacity(0.34)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 70, height: 70)
+                    TimelineView(.periodic(from: spinnerStartDate, by: 1.0 / 60.0)) { context in
+                        let elapsed = context.date.timeIntervalSince(spinnerStartDate)
+                        let angle = Angle.degrees(elapsed * 240) // steady, continuous rotation
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 28, weight: .semibold))
+                            .foregroundStyle(loadingAccent)
+                            .rotationEffect(angle)
+                    }
+                }
+
+                VStack(spacing: 4) {
+                    Text("Synchronisiere deine Daten")
                         .font(.headline)
-                        .foregroundColor(.white)
+                        .foregroundStyle(loadingAccentSecondary)
                     Text(loadingOverlayLabel)
                         .font(.subheadline)
-                        .foregroundColor(.white.opacity(0.85))
+                        .foregroundStyle(loadingAccentSecondary.opacity(0.8))
+                        .multilineTextAlignment(.center)
                 }
-                .multilineTextAlignment(.center)
+                .padding(.horizontal, 4)
 
                 if gradesStore.progress > 0 {
                     VStack(spacing: 8) {
                         ProgressView(value: gradesStore.progress, total: 100)
-                            .tint(.white)
-                        Text("\(Int(gradesStore.progress.rounded()))%")
+                            .tint(loadingAccent)
+                        Text("\(Int(gradesStore.progress.rounded()))% abgeschlossen")
                             .font(.caption)
-                            .foregroundColor(.white.opacity(0.85))
+                            .foregroundStyle(loadingAccentSecondary.opacity(0.8))
                     }
-                    .frame(maxWidth: 220)
+                    .frame(maxWidth: 240)
+                } else {
+                    ProgressView()
+                        .tint(loadingAccent)
                 }
             }
-            .padding(.horizontal, 32)
+            .padding(.horizontal, 28)
             .padding(.vertical, 22)
             .background(
-                RoundedRectangle(cornerRadius: 24)
-                    .fill(Color.black.opacity(0.55))
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 24))
-                    .shadow(color: Color.black.opacity(0.45), radius: 30, x: 0, y: 18)
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .stroke(loadingAccent.opacity(0.25), lineWidth: 1)
+                    )
+                    .shadow(color: .black.opacity(gradesStore.darkMode ? 0.5 : 0.2), radius: 20, x: 0, y: 12)
             )
+            .padding(.horizontal, 32)
         }
         .zIndex(50)
     }

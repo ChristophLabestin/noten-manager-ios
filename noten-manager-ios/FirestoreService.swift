@@ -30,4 +30,18 @@ final class FirestoreService {
         }
         return UserProfile(id: id, name: name, email: email, encryptionSalt: encryptionSalt)
     }
+
+    func createSupportTicket(userId: String, email: String?, subject: String, message: String) async throws {
+        var data: [String: Any] = [
+            "userId": userId,
+            "subject": subject,
+            "message": message,
+            "createdAt": Timestamp(date: Date()),
+            "status": "open"
+        ]
+        if let email, !email.isEmpty {
+            data["email"] = email
+        }
+        try await db.collection("supportTickets").addDocument(data: data)
+    }
 }

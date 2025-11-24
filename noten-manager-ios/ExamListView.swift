@@ -158,7 +158,7 @@ struct ExamListView: View {
                     }
                 }
 
-                Text(formattedDateTime(exam.date))
+                Text(formattedExamDate(exam.date))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
@@ -229,10 +229,10 @@ struct ExamListView: View {
         }
     }
 
-    private func formattedDateTime(_ date: Date) -> String {
+    private func formattedExamDate(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
-        formatter.timeStyle = .short
+        formatter.timeStyle = .none
         return formatter.string(from: date)
     }
 
@@ -260,6 +260,7 @@ struct ExamListView: View {
 
     private func toggleReminder(_ exam: Exam) async {
         let newValue: Date? = (exam.reminderAt == nil) ? Date().addingTimeInterval(3600) : nil
+        let normalizedDate = Calendar.current.startOfDay(for: exam.date)
         do {
             if exam.isShared {
                 try await store.setUserReminderForSharedExam(examId: exam.id, reminderAt: newValue, groupId: exam.groupId)
@@ -269,7 +270,7 @@ struct ExamListView: View {
                     subjectName: exam.subjectName,
                     title: exam.title,
                     notes: exam.notes,
-                    date: exam.date,
+                    date: normalizedDate,
                     weight: exam.weight,
                     reminderAt: newValue,
                     isCompleted: exam.isCompleted
@@ -306,7 +307,7 @@ struct ExamDetailSheet: View {
     private var formattedDate: String {
         let fmt = DateFormatter()
         fmt.dateStyle = .full
-        fmt.timeStyle = .short
+        fmt.timeStyle = .none
         return fmt.string(from: exam.date)
     }
 

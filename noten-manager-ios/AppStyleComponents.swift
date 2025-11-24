@@ -1,6 +1,43 @@
 import SwiftUI
 import UIKit
 
+private struct SoftFadeModifier: ViewModifier {
+    let enabled: Bool
+    let delay: Double
+    let offset: CGFloat
+    let duration: Double
+
+    @State private var isVisible: Bool = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(isVisible ? 1 : 0)
+            .offset(y: isVisible ? 0 : offset)
+            .onAppear {
+                guard !isVisible else { return }
+                guard enabled else {
+                    isVisible = true
+                    return
+                }
+                withAnimation(.easeOut(duration: duration).delay(delay)) {
+                    isVisible = true
+                }
+            }
+    }
+}
+
+extension View {
+    /// Soft upward fade similar to the web app's "home-fade-up-soft".
+    func softFadeIn(enabled: Bool, delay: Double = 0, offset: CGFloat = 12, duration: Double = 0.42) -> some View {
+        modifier(SoftFadeModifier(enabled: enabled, delay: delay, offset: offset, duration: duration))
+    }
+
+    /// Soft downward fade (starting slightly above).
+    func softFadeDown(enabled: Bool, delay: Double = 0, distance: CGFloat = 10, duration: Double = 0.45) -> some View {
+        modifier(SoftFadeModifier(enabled: enabled, delay: delay, offset: -abs(distance), duration: duration))
+    }
+}
+
 extension Color {
     static var formCardBackground: Color {
         Color(

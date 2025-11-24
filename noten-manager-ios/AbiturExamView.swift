@@ -24,6 +24,14 @@ struct AbiturExamView: View {
         store.sortedSubjectsForDisplay(store.subjects.filter { $0.examSubject == true })
     }
 
+    private var examWeightFactor: Double {
+        let gy = store.gradeYear ?? 12
+        if store.schoolType == .fos {
+            return gy >= 13 ? 2 : 3
+        }
+        return 2
+    }
+
     private func calculateGradeWeightForSubject(_ subjectType: Int, _ grade: GradeWithId) -> Double {
         if subjectType == 1 {
             return grade.weight == 3 ? 2 : (grade.weight == 2 ? 2 : 1)
@@ -115,10 +123,6 @@ struct AbiturExamView: View {
 
     private var oralLimitReached: Bool { oralExamCount >= 3 }
 
-    private var examWeightFactor: Double {
-        store.schoolType == .fos ? 3 : 2
-    }
-
     private var totalExamPoints: Double {
         examSubjects.reduce(0) { sum, s in
             let state = examState[s.name]
@@ -137,6 +141,8 @@ struct AbiturExamView: View {
 
     private var totalPoints: Double { totalYearPoints + totalExamPoints }
     private var maxTotalPoints: Int { maxYearPoints + maxExamPoints }
+
+    private var animationsOn: Bool { store.animationsEnabled }
 
     // MARK: - Extracted views
 
@@ -381,8 +387,11 @@ struct AbiturExamView: View {
                     .font(.subheadline)
             } else {
                 VStack(spacing: 10) {
-                    ForEach(examSubjects, id: \.name) { subject in
+                    ForEach(Array(examSubjects.enumerated()), id: \.element.name) { entry in
+                        let subject = entry.element
+                        let delay = 0.12 + Double(entry.offset) * 0.05
                         examSubjectSummaryRow(subject)
+                            .softFadeIn(enabled: animationsOn, delay: delay, offset: 12)
                     }
                 }
             }
@@ -410,8 +419,11 @@ struct AbiturExamView: View {
                         .font(.subheadline)
                 } else {
                     VStack(spacing: 12) {
-                        ForEach(examSubjects, id: \.name) { subject in
+                        ForEach(Array(examSubjects.enumerated()), id: \.element.name) { entry in
+                            let subject = entry.element
+                            let delay = 0.18 + Double(entry.offset) * 0.05
                             examInputCard(subject: subject, state: examState[subject.name], oralLimitReached: oralLimitReached)
+                                .softFadeIn(enabled: animationsOn, delay: delay, offset: 12)
                         }
                     }
                 }
@@ -437,13 +449,17 @@ struct AbiturExamView: View {
                 }
 
                 headerCard
+                    .softFadeIn(enabled: animationsOn, delay: 0.03, offset: 12)
                 examSubjectsCard
+                    .softFadeIn(enabled: animationsOn, delay: 0.08, offset: 12)
                 examInputSection
+                    .softFadeIn(enabled: animationsOn, delay: 0.12, offset: 12)
 
                 Text("Hinweis: Die Berechnung dient als Orientierung für dein Abitur (FOS/BOS Bayern) und ersetzt keine offiziellen Angaben deiner Schule.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .softFadeIn(enabled: animationsOn, delay: 0.18, offset: 12)
             }
             .padding(.vertical, 10)
             .padding(.horizontal, 16)

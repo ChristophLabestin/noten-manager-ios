@@ -47,12 +47,14 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
 struct noten_manager_iosApp: App {
     // register app delegate for Firebase setup
     @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
+    @StateObject private var offlineManager = OfflineModeManager.shared
 
     var body: some Scene {
         WindowGroup {
             NavigationStack {
                 ContentView()
             }
+            .environmentObject(offlineManager)
         }
     }
 }

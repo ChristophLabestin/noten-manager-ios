@@ -173,6 +173,26 @@ struct SchoolYearSnapshot {
     let practicalPerformance: PracticalPerformance?
 }
 
+struct PendingGrade: Codable, Identifiable {
+    let id: String
+    let subjectId: String
+    let grade: Double
+    let weight: Double
+    let date: Date
+    let note: String?
+    let halfYear: Int?
+    let linkedExamId: String?
+    let createdAt: Date
+}
+
+struct PendingFachreferat: Codable {
+    let subjectName: String
+    let grade: Double
+    let date: Date
+    let note: String?
+    let createdAt: Date
+}
+
 @MainActor
 final class GradesStore: ObservableObject {
     @Published var subjects: [Subject] = []
@@ -226,6 +246,7 @@ final class GradesStore: ObservableObject {
     @Published var darkModeMode: String = "system" // "system" | "light" | "dark"
     @Published var homeworkReminderHour: Int = 19
     @Published var homeworkReminderMinute: Int = 0
+    @Published var encryptionSalt: String? = nil
 
     var preferredColorScheme: ColorScheme? {
         switch darkModeMode {
@@ -238,6 +259,7 @@ final class GradesStore: ObservableObject {
     @Published var schoolType: SchoolType = .bos
     @Published var activeSchoolYearId: String? = nil // z. B. "2025-26"
     @Published var onboardingRequired: Bool = false
+    @Published var isOfflineMode: Bool = false
 
     // New published properties for group subjects and mappings
     @Published var examGroupSubjects: [GroupSubject] = []
@@ -299,6 +321,41 @@ final class GradesStore: ObservableObject {
 
     private var schoolYearsCollectionListener: ListenerRegistration?
 
+    private var offlinePendingGrades: [PendingGrade] = []
+    private var offlinePendingFachreferat: PendingFachreferat? = nil
+
+    private func overlayPendingData() {
+        guard !offlinePendingGrades.isEmpty || offlinePendingFachreferat != nil else { return }
+
+        for pending in offlinePendingGrades {
+            var list = gradesBySubject[pending.subjectId] ?? []
+            if !list.contains(where: { $0.id == pending.id }) {
+                list.append(
+                    GradeWithId(
+                        id: pending.id,
+                        grade: pending.grade,
+                        weight: pending.weight,
+                        date: pending.date,
+                        note: pending.note,
+                        halfYear: pending.halfYear,
+                        linkedExamId: pending.linkedExamId
+                    )
+                )
+                gradesBySubject[pending.subjectId] = list
+            }
+        }
+
+        if let pendingFr = offlinePendingFachreferat {
+            fachreferat = Fachreferat(
+                id: "current",
+                grade: pendingFr.grade,
+                subjectName: pendingFr.subjectName,
+                date: pendingFr.date,
+                note: pendingFr.note
+            )
+        }
+    }
+
     init() {
         loadLocalPreferences()
     }
@@ -307,9 +364,13 @@ final class GradesStore: ObservableObject {
 
     func startListening() async {
         guard !isListening else { return }
+        guard !isOfflineMode else { return }
         guard let uid = Auth.auth().currentUser?.uid else {
             resetState()
             return
+        }
+        if OfflineModeManager.shared.isOnline {
+            OfflineModeManager.shared.recordOnlineLogin(uid: uid)
         }
         isListening = true
         isLoading = true
@@ -412,11 +473,13 @@ final class GradesStore: ObservableObject {
     private func resetState() {
         resetSchoolYearScopedData()
         encryptionKey = nil
+        encryptionSalt = nil
         subjectSortMode = .name
         subjectSortOrder = []
         gradeYear = nil
         schoolType = .bos
         onboardingRequired = false
+        isOfflineMode = false
         homeworkReminderHour = 19
         homeworkReminderMinute = 0
         isLoading = false
@@ -439,6 +502,9 @@ final class GradesStore: ObservableObject {
         examGroupName = nil
         homeworkGroupName = nil
         hasBootstrappedYearData = false
+
+        offlinePendingGrades = []
+        offlinePendingFachreferat = nil
     }
 
     private func resetSchoolYearScopedData() {
@@ -571,6 +637,7 @@ final class GradesStore: ObservableObject {
                     let docs = snapshot?.documents ?? []
                     let ids = docs.map { $0.documentID }.sorted(by: >)
                     self.schoolYears = ids
+                    self.persistOfflineSnapshotIfPossible()
                 }
             }
     }
@@ -809,6 +876,7 @@ final class GradesStore: ObservableObject {
 
                         self.progress = 60
                         self.loadingLabel = "Noten verbinden …"
+                        self.persistOfflineSnapshotIfPossible()
                     }
                 }
         }
@@ -826,9 +894,10 @@ final class GradesStore: ObservableObject {
                             self.finishInitialLoadingIfNeeded()
                             return
                         }
-                        let ts = data["date"] as? Timestamp
-                        let date = ts?.dateValue() ?? Date()
-                        let note = data["note"] as? String
+                       let ts = data["date"] as? Timestamp
+                       let date = ts?.dateValue() ?? Date()
+                       let note = data["note"] as? String
+                        let updatedAt = (data["updatedAt"] as? Timestamp)?.dateValue()
                         if let gradeStr = data["grade"] as? String,
                            let subjectName = data["subjectName"] as? String,
                            let key = self.encryptionKey {
@@ -846,6 +915,12 @@ final class GradesStore: ObservableObject {
                             // Ohne Key können wir nicht entschlüsseln; als „nicht vorhanden“ behandeln
                             self.fachreferat = nil
                         }
+                        if let pending = self.offlinePendingFachreferat,
+                           let serverTs = updatedAt,
+                           serverTs >= pending.createdAt {
+                            self.offlinePendingFachreferat = nil
+                        }
+                        self.overlayPendingData()
                         self.finishInitialLoadingIfNeeded()
                     }
                 }
@@ -914,6 +989,7 @@ final class GradesStore: ObservableObject {
                 reminderHour: self.homeworkReminderHour,
                 reminderMinute: self.homeworkReminderMinute
             )
+                        self.persistOfflineSnapshotIfPossible()
                     }
                 }
         }
@@ -961,6 +1037,7 @@ final class GradesStore: ObservableObject {
                         }
                         self.exams = list
                         ExamNotificationManager.syncNotifications(for: self.allExams)
+                        self.persistOfflineSnapshotIfPossible()
                     }
                 }
         }
@@ -1371,19 +1448,22 @@ final class GradesStore: ObservableObject {
                         let note = gd["note"] as? String
                         let halfYear = gd["halfYear"] as? Int
                         let linkedExamId = gd["linkedExamId"] as? String
+                        let updatedAt = (gd["updatedAt"] as? Timestamp)?.dateValue()
                         let eg = EncryptedGrade(
                             grade: gradeStr,
                             weight: weight,
                             date: date,
                             note: note,
                             halfYear: halfYear,
-                            linkedExamId: linkedExamId
+                            linkedExamId: linkedExamId,
+                            updatedAt: updatedAt
                         )
                         return (gdoc.documentID, eg)
                     }
                         self.encryptedGradesCache[sid] = encGrades
                         self.decryptGradesForSubjectIfPossible(subjectId: sid)
                         self.finishInitialLoadingIfNeeded()
+                        self.persistOfflineSnapshotIfPossible()
                     }
                 }
             gradesListeners[sid] = listener
@@ -1414,12 +1494,40 @@ final class GradesStore: ObservableObject {
             }
         }
         gradesBySubject[subjectId] = decrypted
+        removeSatisfiedPendingGrades(for: subjectId, decrypted: encList)
+        overlayPendingData()
     }
 
     private func decryptAllCachedGradesIfPossible() {
         for sid in encryptedGradesCache.keys {
             decryptGradesForSubjectIfPossible(subjectId: sid)
         }
+    }
+
+    private func removeSatisfiedPendingGrades(for subjectId: String, decrypted: [(String, EncryptedGrade)]) {
+        guard !offlinePendingGrades.isEmpty else { return }
+        let map: [String: Date] = decrypted.reduce(into: [:]) { acc, item in
+            let updated = item.1.updatedAt ?? item.1.date
+            acc[item.0] = updated
+        }
+        offlinePendingGrades = offlinePendingGrades.filter { pending in
+            guard pending.subjectId == subjectId else { return true }
+            guard let serverTs = map[pending.id] else { return true }
+            return serverTs <= pending.createdAt ? false : true
+        }
+        if offlinePendingGrades.isEmpty, offlinePendingFachreferat == nil {
+            persistOfflineSnapshotIfPossible()
+        }
+    }
+
+    var hasPendingOfflineChanges: Bool {
+        !(offlinePendingGrades.isEmpty && offlinePendingFachreferat == nil)
+    }
+
+    func discardPendingOfflineChanges() {
+        offlinePendingGrades = []
+        offlinePendingFachreferat = nil
+        persistOfflineSnapshotIfPossible()
     }
 
     private func finishInitialLoadingIfNeeded() {
@@ -1595,6 +1703,8 @@ final class GradesStore: ObservableObject {
             guard let self, let sid = self.activeSchoolYearId else { return }
             await self.preloadPreviousYearSnapshotIfNeeded(currentYearId: sid)
         }
+
+        persistOfflineSnapshotIfPossible()
     }
 
     private func applySchoolYearSettings(from data: [String: Any], uid: String, fallbackUserData: [String: Any]? = nil) {
@@ -1691,12 +1801,15 @@ final class GradesStore: ObservableObject {
         updateHomeworkGroupSubjectsListenerIfNeeded(forceReload: true)
         updateExamSubjectMappingListenerIfNeeded(uid: uid, forceReload: true)
         updateHomeworkSubjectMappingListenerIfNeeded(uid: uid, forceReload: true)
+
+        persistOfflineSnapshotIfPossible()
     }
 
     private func deriveKeyIfNeeded(from data: [String: Any], uid: String) async {
         // Leite Key aus encryptionSalt ab, wenn vorhanden
         if let salt = data["encryptionSalt"] as? String {
             do {
+                encryptionSalt = salt
                 let key = try CryptoService.deriveKeyFromPassword(password: uid, saltBase64: salt, iterations: 150_000)
                 let keyChanged = (self.encryptionKey == nil) // oder man könnte Keyvergleich machen
                 self.encryptionKey = key
@@ -1706,12 +1819,14 @@ final class GradesStore: ObservableObject {
                 }
             } catch {
                 self.encryptionKey = nil
+                encryptionSalt = nil
                 // Ohne Key bleiben Noten leer
                 self.decryptAllCachedGradesIfPossible()
             }
         } else {
             // Kein Salt -> kein Key
             self.encryptionKey = nil
+            encryptionSalt = nil
             self.decryptAllCachedGradesIfPossible()
         }
     }
@@ -1748,6 +1863,196 @@ final class GradesStore: ObservableObject {
         if defaults.object(forKey: "grades_animationsEnabled") != nil {
             animationsEnabled = defaults.bool(forKey: "grades_animationsEnabled")
         }
+    }
+
+    // MARK: - Offline Cache
+
+    private func persistOfflineSnapshotIfPossible() {
+        let uid = Auth.auth().currentUser?.uid ?? OfflineModeManager.shared.cachedSnapshot?.userId
+        guard let uid else { return }
+        OfflineModeManager.shared.scheduleSnapshotSave(from: self, userId: uid)
+    }
+
+    func makeOfflineSnapshot(userId: String) -> OfflineSnapshot {
+        OfflineSnapshot(
+            userId: userId,
+            capturedAt: Date(),
+            activeSchoolYearId: activeSchoolYearId,
+            encryptionSalt: encryptionSalt,
+            subjects: subjects,
+            gradesBySubject: gradesBySubject,
+            fachreferat: fachreferat,
+            practicalPerformance: practicalPerformance,
+            homeworks: homeworks,
+            exams: exams,
+            sharedExams: sharedExams,
+            sharedHomeworks: sharedHomeworks,
+            examGroupId: examGroupId,
+            homeworkGroupId: homeworkGroupId,
+            groupIds: groupIds,
+            groupNames: groupNames,
+            groupSubjectMappings: groupSubjectMappings,
+            groupExamsByGroup: groupExamsByGroup,
+            groupHomeworksByGroup: groupHomeworksByGroup,
+            schoolYears: schoolYears,
+            gradeYear: gradeYear,
+            schoolType: schoolType,
+            subjectSortMode: subjectSortMode,
+            subjectSortOrder: subjectSortOrder,
+            compactView: compactView,
+            animationsEnabled: animationsEnabled,
+            theme: theme,
+            darkMode: darkMode,
+            darkModeMode: darkModeMode,
+            homeworkReminderHour: homeworkReminderHour,
+            homeworkReminderMinute: homeworkReminderMinute,
+            pendingGrades: offlinePendingGrades,
+            pendingFachreferat: offlinePendingFachreferat
+        )
+    }
+
+    func loadOfflineSnapshot(_ snapshot: OfflineSnapshot) {
+        stopListening()
+        isOfflineMode = true
+
+        activeSchoolYearId = snapshot.activeSchoolYearId
+        subjects = snapshot.subjects
+        gradesBySubject = snapshot.gradesBySubject
+        fachreferat = snapshot.fachreferat
+        practicalPerformance = snapshot.practicalPerformance
+        homeworks = snapshot.homeworks
+        exams = snapshot.exams
+        sharedExams = snapshot.sharedExams
+        sharedHomeworks = snapshot.sharedHomeworks
+        examGroupId = snapshot.examGroupId
+        homeworkGroupId = snapshot.homeworkGroupId
+        groupIds = snapshot.groupIds
+        groupNames = snapshot.groupNames
+        groupSubjectMappings = snapshot.groupSubjectMappings
+        groupExamsByGroup = snapshot.groupExamsByGroup
+        groupHomeworksByGroup = snapshot.groupHomeworksByGroup
+        schoolYears = snapshot.schoolYears
+        gradeYear = snapshot.gradeYear
+        schoolType = snapshot.schoolType
+        subjectSortMode = snapshot.subjectSortMode
+        subjectSortOrder = snapshot.subjectSortOrder
+        compactView = snapshot.compactView
+        animationsEnabled = snapshot.animationsEnabled
+        theme = snapshot.theme
+        darkMode = snapshot.darkMode
+        darkModeMode = snapshot.darkModeMode
+        homeworkReminderHour = snapshot.homeworkReminderHour
+        homeworkReminderMinute = snapshot.homeworkReminderMinute
+        encryptionSalt = snapshot.encryptionSalt
+        offlinePendingGrades = snapshot.pendingGrades
+        offlinePendingFachreferat = snapshot.pendingFachreferat
+
+        if encryptionKey == nil, let salt = snapshot.encryptionSalt {
+            let uid = snapshot.userId
+            if let key = try? CryptoService.deriveKeyFromPassword(password: uid, saltBase64: salt, iterations: 150_000) {
+                encryptionKey = key
+                decryptAllCachedGradesIfPossible()
+            }
+        }
+
+        isLoading = false
+        loadingLabel = ""
+        progress = 0
+
+        HomeworkNotificationManager.syncNotifications(
+            for: allHomeworks,
+            reminderHour: homeworkReminderHour,
+            reminderMinute: homeworkReminderMinute
+        )
+
+        OfflineModeManager.shared.activateOfflineMode()
+    }
+
+    func exitOfflineModeIfNeeded() {
+        if isOfflineMode {
+            isOfflineMode = false
+            resetState()
+            OfflineModeManager.shared.deactivateOfflineMode()
+        }
+    }
+
+    func leaveOfflineModePreservingState() {
+        if isOfflineMode {
+            isOfflineMode = false
+            OfflineModeManager.shared.deactivateOfflineMode()
+        }
+    }
+
+    // MARK: - Offline Sync zurück ins Backend
+
+    func syncOfflinePendingChanges(forceLocalOverride: Bool = false) async {
+        guard !offlinePendingGrades.isEmpty || offlinePendingFachreferat != nil else { return }
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+
+        OfflineModeManager.shared.enableFirestoreNetworkIfNeeded()
+
+        if encryptionKey == nil, let salt = encryptionSalt {
+            if let key = try? CryptoService.deriveKeyFromPassword(password: uid, saltBase64: salt, iterations: 150_000) {
+                encryptionKey = key
+            }
+        }
+        guard let key = encryptionKey else { return }
+        guard let yearRef = try? await requireYearRef(uid: uid) else { return }
+
+        var remainingGrades: [PendingGrade] = []
+        for pending in offlinePendingGrades {
+            do {
+                let ref = yearRef.collection("subjects").document(pending.subjectId).collection("grades").document(pending.id)
+                let existing = try await ref.getDocument()
+                if !forceLocalOverride,
+                   let existingData = existing.data(),
+                   let ts = existingData["updatedAt"] as? Timestamp,
+                   ts.dateValue() >= pending.createdAt {
+                    continue // Server ist aktueller oder gleich
+                }
+                let encrypted = try CryptoService.encryptString(String(pending.grade), key: key)
+                var payload: [String: Any] = [
+                    "grade": encrypted,
+                    "weight": pending.weight,
+                    "date": pending.date,
+                    "note": pending.note as Any,
+                    "halfYear": pending.halfYear as Any,
+                    "updatedAt": pending.createdAt
+                ]
+                if let linked = pending.linkedExamId { payload["linkedExamId"] = linked }
+                try await ref.setData(payload, merge: true)
+                remainingGrades.append(pending) // bis Listener updatedAt bestätigt
+            } catch {
+                remainingGrades.append(pending)
+            }
+        }
+        offlinePendingGrades = remainingGrades
+
+        if let pendingFr = offlinePendingFachreferat {
+            do {
+                let ref = yearRef.collection("fachreferat").document("current")
+                let existing = try await ref.getDocument()
+                if !forceLocalOverride,
+                   let data = existing.data(),
+                   let ts = data["updatedAt"] as? Timestamp,
+                   ts.dateValue() >= pendingFr.createdAt {
+                    // Server-Version behalten
+                } else {
+                    let encrypted = try CryptoService.encryptString(String(pendingFr.grade), key: key)
+                    try await ref.setData([
+                        "grade": encrypted,
+                        "subjectName": pendingFr.subjectName,
+                        "date": pendingFr.date,
+                        "note": pendingFr.note as Any,
+                        "updatedAt": pendingFr.createdAt
+                    ], merge: true)
+                }
+            } catch {
+                // bleibt pending
+            }
+        }
+
+        persistOfflineSnapshotIfPossible()
     }
 
     // MARK: - Gemeinsame Klausurtermine (Gruppen)
@@ -1832,6 +2137,7 @@ final class GradesStore: ObservableObject {
                     self.legacySharedExams = list
                     self.recomputeSharedCollections()
                     await self.loadExamGroupName()
+                    self.persistOfflineSnapshotIfPossible()
                 }
             }
     }
@@ -1862,6 +2168,7 @@ final class GradesStore: ObservableObject {
                     let alias = data["alias"] as? String
                     return GroupSubject(id: d.documentID, name: name, type: type, alias: alias)
                 }
+                self.persistOfflineSnapshotIfPossible()
             }
         }
         sharedHomeworksListener = db.collection("homeworkGroups").document(gid).collection("homeworks").order(by: "createdAt", descending: false).addSnapshotListener { [weak self] snapshot, error in
@@ -1882,6 +2189,7 @@ final class GradesStore: ObservableObject {
                 }
                 self.legacySharedHomeworks = list
                 self.recomputeSharedCollections()
+                self.persistOfflineSnapshotIfPossible()
             }
         }
     }
@@ -2678,18 +2986,52 @@ final class GradesStore: ObservableObject {
         linkedExamId: String?,
         using key: SymmetricKey
     ) async throws -> String {
-        guard let uid = Auth.auth().currentUser?.uid else { throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"]) }
+        let offline = OfflineModeManager.shared.isOfflineModeActive
+        let uid = Auth.auth().currentUser?.uid ?? ""
+
+        let newId = UUID().uuidString
+        if offline || uid.isEmpty {
+            // Offline: lokal hinzufügen und Snapshot + Pending speichern
+            let pending = PendingGrade(
+                id: newId,
+                subjectId: subjectId,
+                grade: grade,
+                weight: weight,
+                date: date,
+                note: note,
+                halfYear: halfYear,
+                linkedExamId: linkedExamId,
+                createdAt: Date()
+            )
+            offlinePendingGrades.append(pending)
+            var list = gradesBySubject[subjectId] ?? []
+            list.append(
+                GradeWithId(
+                    id: newId,
+                    grade: grade,
+                    weight: weight,
+                    date: date,
+                    note: note,
+                    halfYear: halfYear,
+                    linkedExamId: linkedExamId
+                )
+            )
+            gradesBySubject[subjectId] = list
+            persistOfflineSnapshotIfPossible()
+            return newId
+        }
 
         let yearRef = try await requireYearRef(uid: uid)
         let encrypted = try CryptoService.encryptString(String(grade), key: key)
         let gradesRef = yearRef.collection("subjects").document(subjectId).collection("grades")
-        let newRef = gradesRef.document()
+        let newRef = gradesRef.document(newId)
         var payload: [String: Any] = [
             "grade": encrypted,
             "weight": weight,
             "date": date,
             "note": note as Any,
-            "halfYear": halfYear as Any
+            "halfYear": halfYear as Any,
+            "updatedAt": Date()
         ]
         if let linkedExamId {
             payload["linkedExamId"] = linkedExamId
@@ -2710,6 +3052,7 @@ final class GradesStore: ObservableObject {
             )
         )
         gradesBySubject[subjectId] = list
+        persistOfflineSnapshotIfPossible()
 
         return newRef.documentID
     }
@@ -2929,20 +3272,40 @@ final class GradesStore: ObservableObject {
     }
 
     func setFachreferatToFirestore(subjectName: String, grade: Double, date: Date, note: String?, using key: SymmetricKey) async throws {
-        guard let uid = Auth.auth().currentUser?.uid else { throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"]) }
+        let offline = OfflineModeManager.shared.isOfflineModeActive
+        let uid = Auth.auth().currentUser?.uid ?? ""
+        if offline || uid.isEmpty {
+            let pending = PendingFachreferat(
+                subjectName: subjectName,
+                grade: grade,
+                date: date,
+                note: note,
+                createdAt: Date()
+            )
+            offlinePendingFachreferat = pending
+            fachreferat = Fachreferat(id: "current", grade: grade, subjectName: subjectName, date: date, note: note)
+            persistOfflineSnapshotIfPossible()
+            return
+        }
 
-        let yearRef = try await requireYearRef(uid: uid)
+        guard let realUid = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
+        }
+
+        let yearRef = try await requireYearRef(uid: realUid)
         let encrypted = try CryptoService.encryptString(String(grade), key: key)
         let docRef = yearRef.collection("fachreferat").document("current")
         try await docRef.setData([
             "grade": encrypted,
             "subjectName": subjectName,
             "date": date,
-            "note": note as Any
+            "note": note as Any,
+            "updatedAt": Date()
         ], merge: true)
 
         // Optimistisch lokal (Listener setzt danach korrekt)
         fachreferat = Fachreferat(id: "current", grade: grade, subjectName: subjectName, date: date, note: note)
+        persistOfflineSnapshotIfPossible()
     }
 
     func upsertPracticalGrade(id: String? = nil,
@@ -3431,6 +3794,8 @@ final class GradesStore: ObservableObject {
         } catch {
             // optional rollback/loggen
         }
+
+        persistOfflineSnapshotIfPossible()
     }
 
     func updateHomeworkReminderTime(hour: Int, minute: Int) async {
@@ -3459,6 +3824,8 @@ final class GradesStore: ObservableObject {
             reminderHour: hr,
             reminderMinute: mn
         )
+
+        persistOfflineSnapshotIfPossible()
     }
 
     /// Wird aufgerufen, wenn die App im System-Modus läuft und sich das ColorScheme des Geräts ändert.
@@ -3482,6 +3849,8 @@ final class GradesStore: ObservableObject {
         } catch {
             // optional loggen
         }
+
+        persistOfflineSnapshotIfPossible()
     }
 
     func updateSchoolType(_ type: SchoolType) async {
@@ -3495,6 +3864,8 @@ final class GradesStore: ObservableObject {
         } catch {
             // optional loggen
         }
+
+        persistOfflineSnapshotIfPossible()
     }
 
     func markOnboardingCompletedIfPossible() async {
@@ -3508,6 +3879,8 @@ final class GradesStore: ObservableObject {
             // optional loggen
         }
         onboardingRequired = false
+
+        persistOfflineSnapshotIfPossible()
     }
 
     private func effectiveDarkMode(for mode: String) -> Bool {
@@ -3524,15 +3897,9 @@ final class GradesStore: ObservableObject {
     }
 
     func restartOnboarding() async {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
-        do {
-            try await db.collection("users").document(uid).setData([
-                "onboardingCompleted": false
-            ], merge: true)
-        } catch {
-            // optional loggen
-        }
         await MainActor.run {
+            // Nur lokal erneut anzeigen, ohne den Backend-Status zu überschreiben,
+            // damit ein abgebrochenes Onboarding nicht dauerhaft erneut gefordert wird.
             onboardingRequired = true
         }
     }
@@ -3988,6 +4355,7 @@ final class GradesStore: ObservableObject {
             reminderMinute: homeworkReminderMinute
         )
         ExamNotificationManager.syncNotifications(for: allExams)
+        persistOfflineSnapshotIfPossible()
     }
 
     private func mergeSharedExams(_ grouped: [Exam], _ legacy: [Exam]) -> [Exam] {

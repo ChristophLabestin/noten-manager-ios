@@ -154,6 +154,8 @@ struct InsightsView: View {
         }
     }
 
+    private var animationsOn: Bool { store.animationsEnabled }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
@@ -188,6 +190,7 @@ struct InsightsView: View {
                         }
                     }
                 }
+                .softFadeIn(enabled: animationsOn, delay: 0.03, offset: 12)
 
                 // Halbjahresvergleich
                 let hj1 = halfYearAverage(1)
@@ -205,6 +208,7 @@ struct InsightsView: View {
                             halfYearChip(title: "2. Halbjahr", value: hj2)
                         }
                     }
+                    .softFadeIn(enabled: animationsOn, delay: 0.10)
                 }
 
                 // Top-Fächer
@@ -216,7 +220,9 @@ struct InsightsView: View {
                         accent: .green
                     ) {
                         VStack(spacing: 8) {
-                            ForEach(topSubjects, id: \.name) { subject in
+                            ForEach(Array(topSubjects.enumerated()), id: \.element.name) { entry in
+                                let subject = entry.element
+                                let delay = 0.18 + Double(entry.offset) * 0.05
                                 NavigationLink {
                                     SubjectDetailView(subject: subject)
                                         .environmentObject(store)
@@ -224,9 +230,11 @@ struct InsightsView: View {
                                     subjectInsightRow(subject: subject, accent: .green)
                                 }
                                 .buttonStyle(.plain)
+                                .softFadeIn(enabled: animationsOn, delay: delay, offset: 12)
                             }
                         }
                     }
+                    .softFadeIn(enabled: animationsOn, delay: 0.14)
                 }
 
                 // Fächer mit Potenzial
@@ -238,7 +246,9 @@ struct InsightsView: View {
                         accent: .orange
                     ) {
                         VStack(spacing: 8) {
-                            ForEach(bottomSubjects, id: \.name) { subject in
+                            ForEach(Array(bottomSubjects.enumerated()), id: \.element.name) { entry in
+                                let subject = entry.element
+                                let delay = 0.22 + Double(entry.offset) * 0.05
                                 NavigationLink {
                                     SubjectDetailView(subject: subject)
                                         .environmentObject(store)
@@ -246,9 +256,11 @@ struct InsightsView: View {
                                     subjectInsightRow(subject: subject, accent: .orange)
                                 }
                                 .buttonStyle(.plain)
+                                .softFadeIn(enabled: animationsOn, delay: delay, offset: 12)
                             }
                         }
                     }
+                    .softFadeIn(enabled: animationsOn, delay: 0.18)
                 }
 
                 // Alle Fächer
@@ -260,7 +272,9 @@ struct InsightsView: View {
                         accent: .cyan
                     ) {
                         VStack(spacing: 8) {
-                            ForEach(sortedByAverageDesc, id: \.name) { subject in
+                            ForEach(Array(sortedByAverageDesc.enumerated()), id: \.element.name) { entry in
+                                let subject = entry.element
+                                let delay = 0.24 + Double(entry.offset) * 0.03
                                 NavigationLink {
                                     SubjectDetailView(subject: subject)
                                         .environmentObject(store)
@@ -268,9 +282,11 @@ struct InsightsView: View {
                                     subjectOverviewRow(subject: subject)
                                 }
                                 .buttonStyle(.plain)
+                                .softFadeIn(enabled: animationsOn, delay: delay, offset: 12)
                             }
                         }
                     }
+                    .softFadeIn(enabled: animationsOn, delay: 0.22)
                 } else {
                     Text("Lege zuerst Fächer an, um Insights zu sehen.")
                         .font(.footnote)

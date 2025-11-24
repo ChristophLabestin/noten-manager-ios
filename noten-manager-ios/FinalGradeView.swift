@@ -132,6 +132,7 @@ struct FinalGradeView: View {
     private var isFeminine: Bool { store.theme == "feminine" }
     private var isDark: Bool { store.darkMode }
     private var schoolType: SchoolType { store.schoolType }
+    private var gradeYear: Int { store.gradeYear ?? 12 }
 
     private var chipForegroundColor: Color {
         if isFeminine {
@@ -179,6 +180,13 @@ struct FinalGradeView: View {
         return store.practicalPerformance
     }
 
+    private var examWeightFactor: Double {
+        if schoolType == .fos {
+            return gradeYear >= 13 ? 2 : 3
+        }
+        return 2
+    }
+
     private var practicalGrades: [PracticalGradeEntry] {
         practicalPerformanceForDisplay?.grades ?? []
     }
@@ -193,6 +201,8 @@ struct FinalGradeView: View {
             return lhs.date < rhs.date
         }
     }
+
+    private var animationsOn: Bool { store.animationsEnabled }
 
     var body: some View {
         ScrollView {
@@ -287,24 +297,32 @@ struct FinalGradeView: View {
             loadingSection
             topSummarySection
                 .padding(.horizontal, 16)
+                .softFadeIn(enabled: animationsOn, delay: 0.03, offset: 12)
             statusCard
                 .padding(.horizontal, 16)
+                .softFadeIn(enabled: animationsOn, delay: 0.08, offset: 12)
             abiturOverviewCard
                 .padding(.horizontal, 16)
+                .softFadeIn(enabled: animationsOn, delay: 0.12, offset: 12)
             if schoolType == .fos {
                 practicalPerformanceCard
                     .padding(.horizontal, 16)
+                    .softFadeIn(enabled: animationsOn, delay: 0.16, offset: 12)
             }
             if fobosoSummary.maxPoints > 0 {
                 pointsCard
                     .padding(.horizontal, 16)
+                    .softFadeIn(enabled: animationsOn, delay: 0.20, offset: 12)
             }
             subjectCountRow
                 .padding(.horizontal)
+                .softFadeIn(enabled: animationsOn, delay: 0.22, offset: 12)
             droppedHalfYearsCard
                 .padding(.horizontal, 16)
+                .softFadeIn(enabled: animationsOn, delay: 0.25, offset: 12)
             subjectListSection
                 .padding(.horizontal)
+                .softFadeIn(enabled: animationsOn, delay: 0.28, offset: 12)
             if maxDroppedHalfYears > 0 && limitReached {
                 Text("Du hast bereits die maximal erlaubte Anzahl an gestrichenen Halbjahren ausgewählt. Entferne zuerst eine Auswahl, um ein weiteres Halbjahr zu streichen.")
                     .font(.footnote)
@@ -520,7 +538,7 @@ struct FinalGradeView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("\(Int(round(fobosoSummary.totalPoints))) / \(fobosoSummary.maxPoints)")
                         .font(.title3).bold()
-                    Text("Prüfungen (\(schoolType == .fos ? "dreifach" : "zweifach")): \(Int(round(fobosoSummary.examPointsDouble))) Punkte")
+                    Text("Prüfungen (\(Int(examWeightFactor))× Gewichtung): \(Int(round(fobosoSummary.examPointsDouble))) Punkte")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Text("Halbjahresergebnisse: \(Int(round(fobosoSummary.halfYearPoints))) Punkte (\(halfYearSummary.count) HJE).")
@@ -635,8 +653,11 @@ struct FinalGradeView: View {
                     .padding(.top, 8)
             } else {
                 VStack(spacing: 12) {
-                    ForEach(sortedSubjectHandles, id: \.id) { handle in
+                    ForEach(Array(sortedSubjectHandles.enumerated()), id: \.element.id) { entry in
+                        let handle = entry.element
+                        let delay = 0.30 + Double(entry.offset) * 0.05
                         subjectCard(handle)
+                            .softFadeIn(enabled: animationsOn, delay: delay, offset: 12)
                     }
                 }
             }
@@ -863,8 +884,14 @@ struct FinalGradeView: View {
     }
 
     private var finalGradeText: String {
-        if fobosoSummary.maxPoints > 0, let g = fobosoSummary.grade {
-            return String(format: "%.\(finalGradeToFixed)f", g)
+        if fobosoSummary.maxPoints > 0 {
+            if finalGradeToFixed == 1, let g = fobosoSummary.grade {
+                return String(format: "%.1f", g)
+            }
+            if let raw = fobosoSummary.gradeRaw {
+                let rawDisplay = max(1, raw)
+                return String(format: "%.\(finalGradeToFixed)f", rawDisplay)
+            }
         }
         return formatAverage(finalAverage)
     }
@@ -1057,7 +1084,7 @@ struct FinalGradeView: View {
         let es = examSubjectHandles
         guard !es.isEmpty else { return nil }
         var subjectFinals: [Double] = []
-        let examWeight = schoolType == .fos ? 3.0 : 2.0
+        let examWeight = examWeightFactor
 
         for handle in es {
             let examPoints = examPointsBySubject[handle.subject.name] ?? nil
@@ -1112,16 +1139,17 @@ struct FinalGradeView: View {
             reasons.append("Die beiden Praktikumsnoten (11.) fehlen für die FOS.")
         }
         if failedBySubjectPoints {
-            let threshold: Double
-            if schoolType == .fos {
-                threshold = 198
-            } else if subjectsBelowFourPoints >= 2 {
-                threshold = 156
+            let weak = weakExamCounts
+            if weak.weighted > 2 {
+                reasons.append("Zu viele Prüfungen unter 4 Punkten (0 zählt doppelt, maximal zwei erlaubt).")
             } else {
-                threshold = 130
+                let threshold = weak.weighted == 1 ? pointsThresholds.oneWeak : pointsThresholds.twoWeak
+                let missing = max(0, threshold - fobosoSummary.totalPoints)
+                reasons.append("Gesamtpunktzahl zu niedrig (\(Int(fobosoSummary.totalPoints))/\(Int(threshold)); es fehlen ca. \(Int(ceil(missing))) Punkte).")
             }
-            let missing = max(0, threshold - fobosoSummary.totalPoints)
-            reasons.append("Gesamtpunktzahl zu niedrig (\(Int(fobosoSummary.totalPoints))/\(Int(threshold)); es fehlen ca. \(Int(ceil(missing))) Punkte).")
+        }
+        if failedByForbiddenZeroExam {
+            reasons.append("0-Punkte-Prüfung ist in der 13. Jahrgangsstufe nicht zulässig.")
         }
         if failedByExamGrade, let avg = examAveragePoints {
             reasons.append("Prüfungsdurchschnitt zu niedrig (aktuell \(formatAverage(avg)) statt mindestens 4,0).")
@@ -1147,7 +1175,14 @@ struct FinalGradeView: View {
             tips.append("Beide Praktikumsnoten (11.) eintragen.")
         }
         if failedBySubjectPoints {
-            tips.append("Punkte erhöhen: bessere Halbjahresnoten oder Prüfungen helfen, den Schwellenwert zu erreichen.")
+            if weakExamCounts.weighted > 2 {
+                tips.append("Maximal zwei Prüfungen dürfen unter 4 Punkten liegen (0 zählt doppelt) – schwächste Prüfungen verbessern.")
+            } else {
+                tips.append("Punkte erhöhen: bessere Halbjahresnoten oder Prüfungen helfen, den Schwellenwert zu erreichen.")
+            }
+        }
+        if failedByForbiddenZeroExam {
+            tips.append("Keine Prüfung mit 0 Punkten zulässig – prüfe deine eingetragenen Prüfungsnoten.")
         }
         if failedByExamGrade {
             tips.append("Prüfungsnoten auf mindestens 4,0 im Schnitt bringen.")
@@ -1179,7 +1214,8 @@ struct FinalGradeView: View {
     }
 
     private var practicalYearSummary: (totalPoints: Double, count: Int) {
-        guard schoolType == .fos else { return (0, 0) }
+        let gy = store.gradeYear ?? 12
+        guard schoolType == .fos, gy <= 12 else { return (0, 0) }
         let grades = sortedPracticalGrades
         guard !grades.isEmpty else { return (0, 0) }
         let limited = grades.prefix(2)
@@ -1202,22 +1238,24 @@ struct FinalGradeView: View {
                                 grade: Double?,
                                 gradeRaw: Double?) {
         let examCount = examSubjectsWithPoints.count
-        let examWeight = schoolType == .fos ? 3 : 2
+        let examWeightDouble = examWeightFactor
         var examPointsDouble = 0.0
         for s in examSubjectsWithPoints {
             if let raw = examPointsBySubject[s.subject.name] ?? nil {
                 let v = roundedExamPoints(raw) ?? raw
-                examPointsDouble += v * Double(examWeight)
+                examPointsDouble += v * examWeightDouble
             }
         }
         let halfYearCount = halfYearSummary.count
         let halfYearPoints = halfYearSummary.totalPoints
-        let fachreferatCount = fachreferatHalfYearSummary.count
-        let fachreferatPoints = fachreferatHalfYearSummary.totalPoints
+        let includeFachreferat = gradeYear <= 12
+        let fachreferatCount = includeFachreferat ? fachreferatHalfYearSummary.count : 0
+        let fachreferatPoints = includeFachreferat ? fachreferatHalfYearSummary.totalPoints : 0
         let practicalCount = practicalYearSummary.count
         let practicalPoints = practicalYearSummary.totalPoints
 
-        let units = examCount * examWeight + halfYearCount + fachreferatCount + practicalCount
+        let examWeightInt = Int(examWeightDouble.rounded())
+        let units = examCount * examWeightInt + halfYearCount + fachreferatCount + practicalCount
         if units == 0 {
             return (examCount, halfYearCount, 0, 0, 0, 0, nil, nil)
         }
@@ -1225,8 +1263,8 @@ struct FinalGradeView: View {
         let totalPoints = examPointsDouble + halfYearPoints + fachreferatPoints + practicalPoints
         let gradeRaw = 17.0 / 3.0 - (5.0 * totalPoints) / Double(maxPoints)
 
-        let gradeRounded = (gradeRaw * 10.0).rounded(.toNearestOrAwayFromZero) / 10.0
-        let grade = max(1, gradeRounded)
+        let gradeTruncated = (gradeRaw * 10.0).rounded(.towardZero) / 10.0
+        let grade = max(1, gradeTruncated)
 
         return (examCount, halfYearCount, examPointsDouble, halfYearPoints, totalPoints, maxPoints, grade, gradeRaw)
     }
@@ -1235,7 +1273,7 @@ struct FinalGradeView: View {
         let es = examSubjectHandles
         guard !es.isEmpty else { return [] }
         var results: [(SubjectHandle, Double?)] = []
-        let examWeight = schoolType == .fos ? 3.0 : 2.0
+        let examWeight = examWeightFactor
         for handle in es {
             let rawExamPoints = examPointsBySubject[handle.subject.name] ?? nil
             let examPoints = rawExamPoints.flatMap { roundedExamPoints($0) ?? $0 }
@@ -1261,7 +1299,7 @@ struct FinalGradeView: View {
 
     private var hasAllExamPoints: Bool {
         let es = examSubjectHandles
-        guard !es.isEmpty else { return false }
+        guard es.count >= requiredExamCount else { return false }
         return es.allSatisfy { (examPointsBySubject[$0.subject.name] ?? nil) != nil }
     }
 
@@ -1281,12 +1319,24 @@ struct FinalGradeView: View {
         return total / Double(count)
     }
 
-    private var subjectsBelowFourPoints: Int {
-        guard hasAllExamPoints else { return 0 }
-        return subjectFinalResults.reduce(0) { sum, entry in
-            if let v = entry.finalPoints, v < 4 { return sum + 1 }
-            return sum
+    private var weakExamCounts: (weighted: Int, raw: Int, zeros: Int) {
+        guard hasAllExamPoints else { return (0, 0, 0) }
+        var weighted = 0
+        var raw = 0
+        var zeros = 0
+        for entry in examSubjectFinals {
+            guard let v = entry.final else { continue }
+            if v < 4 {
+                raw += 1
+                if v <= 0 {
+                    weighted += 2
+                    zeros += 1
+                } else {
+                    weighted += 1
+                }
+            }
         }
+        return (weighted, raw, zeros)
     }
 
     private var examResultAtLeastFour: Bool? {
@@ -1299,20 +1349,22 @@ struct FinalGradeView: View {
         return g <= 4
     }
 
-    private var requiredHalfYearCount: Int {
-        switch schoolType {
-        case .fos:
-            return 25
-        case .bos:
-            switch store.gradeYear {
-            case 13:
-                return 16
-            case 12:
-                return 17
-            default:
-                return 17
-            }
+    private var pointsThresholds: (oneWeak: Double, twoWeak: Double) {
+        if schoolType == .fos && gradeYear <= 12 {
+            return (200, 240)
         }
+        return (130, 156)
+    }
+
+    private var requiredExamCount: Int { 4 }
+
+    private var requiredHalfYearCount: Int {
+        let gy = store.gradeYear ?? 12
+        if schoolType == .fos {
+            return gy >= 13 ? 16 : 25
+        }
+        // BOS
+        return gy >= 13 ? 16 : 17
     }
 
     private var failedByHalfYearTooFew: Bool {
@@ -1325,13 +1377,21 @@ struct FinalGradeView: View {
         failedByHalfYearTooFew || failedByHalfYearTooMany
     }
     private var failedByMissingFachreferat: Bool {
-        !hasFachreferat
+        gradeYear <= 12 && !hasFachreferat
     }
     private var failedByMissingPracticalPerformance: Bool {
-        schoolType == .fos && practicalYearSummary.count < 2
+        schoolType == .fos && gradeYear <= 12 && practicalYearSummary.count < 2
     }
     private var failedBySubjectPoints: Bool {
-        hasAllExamPoints && ((subjectsBelowFourPoints == 1 && fobosoSummary.totalPoints < 130) || (subjectsBelowFourPoints >= 2 && fobosoSummary.totalPoints < 156))
+        guard hasAllExamPoints else { return false }
+        let weak = weakExamCounts
+        if weak.weighted > 2 { return true }
+        if weak.weighted == 0 { return false }
+        let threshold = weak.weighted == 1 ? pointsThresholds.oneWeak : pointsThresholds.twoWeak
+        return fobosoSummary.totalPoints < threshold
+    }
+    private var failedByForbiddenZeroExam: Bool {
+        gradeYear >= 13 && weakExamCounts.zeros > 0
     }
     private var failedByExamGrade: Bool {
         hasAllExamPoints && (examResultAtLeastFour == false)
@@ -1342,7 +1402,7 @@ struct FinalGradeView: View {
 
     private enum PassFailStatus { case open, passed, failed }
     private var passFailStatus: PassFailStatus {
-        let isFailed = failedByHalfYearCount || failedByMissingFachreferat || failedByMissingPracticalPerformance || failedBySubjectPoints || failedByExamGrade || failedByFinalGrade
+        let isFailed = failedByHalfYearCount || failedByMissingFachreferat || failedByMissingPracticalPerformance || failedBySubjectPoints || failedByExamGrade || failedByFinalGrade || failedByForbiddenZeroExam
         let isPassed = !isFailed && hasAllExamPoints && halfYearSummary.count == requiredHalfYearCount && examResultAtLeastFour == true && finalGradeAtLeastFour == true && !failedByMissingPracticalPerformance
         if isFailed { return .failed }
         if isPassed { return .passed }

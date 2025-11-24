@@ -9,7 +9,7 @@ struct AddExamView: View {
     @State private var subjectName: String = ""
     @State private var title: String = ""
     @State private var notes: String = ""
-    @State private var date: Date = Date().addingTimeInterval(60 * 60 * 24)
+    @State private var date: Date = Calendar.current.startOfDay(for: Date().addingTimeInterval(60 * 60 * 24))
     @State private var examWeight: Int = 0
     @State private var hasReminder: Bool = false
     @State private var reminderDate: Date = Date().addingTimeInterval(60 * 60)
@@ -117,9 +117,9 @@ struct AddExamView: View {
                                         Text("Termin")
                                             .font(.headline)
                                         DatePicker(
-                                            "Datum & Uhrzeit",
+                                            "Datum",
                                             selection: $date,
-                                            displayedComponents: [.date, .hourAndMinute]
+                                            displayedComponents: [.date]
                                         )
                                     }
                                 }
@@ -217,6 +217,7 @@ struct AddExamView: View {
             return
         }
         do {
+            let examDate = Calendar.current.startOfDay(for: date)
             let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
             let storedNotes = trimmedNotes.isEmpty ? nil : trimmedNotes
             let reminder: Date? = hasReminder ? reminderDate : nil
@@ -226,7 +227,7 @@ struct AddExamView: View {
                     subjectName: subjectName,
                     title: trimmedTitle,
                     notes: storedNotes,
-                    date: date,
+                    date: examDate,
                     weight: examWeight,
                     reminderAt: reminder,
                     requiresGrade: requiresGrade
@@ -236,7 +237,7 @@ struct AddExamView: View {
                         subjectName: subjectName,
                         title: trimmedTitle,
                         notes: storedNotes,
-                        date: date,
+                        date: examDate,
                         weight: examWeight,
                         reminderAt: reminder,
                         requiresGrade: requiresGrade
@@ -251,7 +252,7 @@ struct AddExamView: View {
                     subjectName: subjectName,
                     title: trimmedTitle,
                     notes: storedNotes,
-                    date: date,
+                    date: examDate,
                     weight: examWeight,
                     reminderAt: reminder,
                     requiresGrade: requiresGrade

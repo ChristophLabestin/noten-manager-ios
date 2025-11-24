@@ -128,6 +128,7 @@ struct SubjectDetailView: View {
 
     private var isFeminine: Bool { store.theme == "feminine" }
     private var isDark: Bool { store.darkMode }
+    private var animationsOn: Bool { store.animationsEnabled }
 
     private var subjectExams: [Exam] {
         store.allExams.filter { matchesSubject(name: $0.subjectName) }
@@ -294,7 +295,9 @@ struct SubjectDetailView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 VStack(spacing: 10) {
-                    ForEach(subjectExams, id: \.id) { exam in
+                    ForEach(Array(subjectExams.enumerated()), id: \.element.id) { entry in
+                        let exam = entry.element
+                        let delay = 0.14 + Double(entry.offset) * 0.05
                         examRow(exam, onAddGrade: { examForNewGrade = exam })
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
@@ -306,6 +309,7 @@ struct SubjectDetailView: View {
                                     examForNewGrade = exam
                                 }
                             }
+                            .softFadeIn(enabled: animationsOn, delay: delay, offset: 12)
                     }
                 }
             }
@@ -327,9 +331,12 @@ struct SubjectDetailView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 VStack(spacing: 10) {
-                    ForEach(subjectHomeworks, id: \.id) { hw in
+                    ForEach(Array(subjectHomeworks.enumerated()), id: \.element.id) { entry in
+                        let hw = entry.element
+                        let delay = 0.20 + Double(entry.offset) * 0.05
                         homeworkRow(hw)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .softFadeIn(enabled: animationsOn, delay: delay, offset: 12)
                     }
                 }
             }
@@ -358,9 +365,12 @@ struct SubjectDetailView: View {
                     .foregroundStyle(.secondary)
             } else {
                 VStack(spacing: 10) {
-                    ForEach(sortedGrades, id: \.id) { g in
+                    ForEach(Array(sortedGrades.enumerated()), id: \.element.id) { entry in
+                        let g = entry.element
+                        let delay = 0.26 + Double(entry.offset) * 0.04
                         gradeCard(g)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .softFadeIn(enabled: animationsOn, delay: delay, offset: 12)
                     }
                 }
             }
@@ -371,14 +381,19 @@ struct SubjectDetailView: View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 16) {
                 overviewCard
+                    .softFadeIn(enabled: animationsOn, delay: 0.03, offset: 12)
 
                 if hasDetails {
                     detailsCard
+                        .softFadeIn(enabled: animationsOn, delay: 0.08, offset: 12)
                 }
 
                 examsCard
+                    .softFadeIn(enabled: animationsOn, delay: 0.12, offset: 12)
                 homeworksCard
+                    .softFadeIn(enabled: animationsOn, delay: 0.16, offset: 12)
                 gradesSection
+                    .softFadeIn(enabled: animationsOn, delay: 0.20, offset: 12)
             }
             .padding(.horizontal, 16)
             .padding(.top, 6)
@@ -1185,6 +1200,7 @@ private func statusBadge(_ text: String, color: Color) -> some View {
         do {
             store.stopListening()
             try Auth.auth().signOut()
+            OfflineModeManager.shared.clearOfflineData()
         } catch {
             // optional: Fehlerbehandlung
         }

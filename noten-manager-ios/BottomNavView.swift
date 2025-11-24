@@ -170,7 +170,7 @@ struct BottomNavView: View {
                 .overlay(alignment: .top) {
                     if isFirstSubject && !isOpen {
                         hintBubble
-                            .offset(y: -72)
+                            .offset(y: -92)
                     }
                 }
             }

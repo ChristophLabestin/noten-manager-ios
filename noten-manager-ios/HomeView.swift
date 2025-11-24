@@ -25,6 +25,8 @@ struct HomeView: View {
     @State private var showExamSheet: Bool = false
     @State private var selectedSubject: Subject? = nil
     @State private var subjectLinkActive: Bool = false
+    @State private var greetingAnimationSeed: UUID = UUID()
+    @State private var greetingVisible: Bool = false
 
     private var subjectsWithoutFachreferat: [Subject] {
         store.subjects.filter { $0.name != "Fachreferat" }
@@ -38,6 +40,8 @@ struct HomeView: View {
         guard let perf = store.practicalPerformance else { return false }
         return !perf.grades.isEmpty
     }
+
+    private var animationsOn: Bool { store.animationsEnabled }
 
     // MARK: - Data preparation
 
@@ -539,10 +543,16 @@ struct HomeView: View {
 
             Section {
                 compactOverview
+                    .id(greetingAnimationSeed)
+                    .opacity((greetingVisible || !animationsOn) ? 1 : 0)
+                    .offset(y: (greetingVisible || !animationsOn) ? 0 : 12)
+                    .onAppear { startGreetingAnimation() }
+                    .onChange(of: greetingAnimationSeed) { _ in startGreetingAnimation() }
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                 subjectsControlCard
+                    .softFadeIn(enabled: animationsOn, delay: 0.08, offset: 12)
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -565,12 +575,15 @@ struct HomeView: View {
                         customOrderWorkingCopy.move(fromOffsets: indices, toOffset: newOffset)
                     }
                 } else {
-                    ForEach(sortedSubjectsComputed, id: \.name) { subject in
+                    ForEach(Array(sortedSubjectsComputed.enumerated()), id: \.element.name) { entry in
+                        let subject = entry.element
+                        let delay = 0.12 + Double(entry.offset) * 0.04
                         subjectRowAny(
                             subject: subject,
                             subjectGrades: subjectGradesComputed,
                             fachreferatSubjectName: store.fachreferat?.subjectName
                         )
+                        .softFadeIn(enabled: animationsOn, delay: delay, offset: 14)
                         .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
@@ -627,7 +640,11 @@ struct HomeView: View {
         }
         .onAppear {
             computeGreeting()
+            greetingAnimationSeed = UUID()
             Task { await loadUserDisplayName() }
+        }
+        .onChange(of: displayName) { _ in
+            greetingAnimationSeed = UUID()
         }
         .onChange(of: subjectLinkActive) { active in
             if !active {
@@ -691,6 +708,19 @@ struct HomeView: View {
             }
         } catch {
             displayName = ""
+        }
+    }
+
+    private func startGreetingAnimation() {
+        if !animationsOn {
+            greetingVisible = true
+            return
+        }
+        greetingVisible = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            withAnimation(.easeOut(duration: 0.45)) {
+                greetingVisible = true
+            }
         }
     }
 }

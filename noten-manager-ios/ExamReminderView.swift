@@ -60,6 +60,7 @@ struct ExamReminderView: View {
         error = nil
         do {
             let reminderAt: Date? = hasReminder ? reminderDate : nil
+            let normalizedDate = Calendar.current.startOfDay(for: exam.date)
             if exam.isShared {
                 try await store.setUserReminderForSharedExam(examId: exam.id, reminderAt: reminderAt)
             } else {
@@ -68,7 +69,7 @@ struct ExamReminderView: View {
                     subjectName: exam.subjectName,
                     title: exam.title,
                     notes: exam.notes,
-                    date: exam.date,
+                    date: normalizedDate,
                     weight: exam.weight,
                     reminderAt: reminderAt,
                     isCompleted: exam.isCompleted

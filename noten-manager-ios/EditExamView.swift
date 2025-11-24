@@ -27,7 +27,7 @@ struct EditExamView: View {
         _subjectName = State(initialValue: exam.subjectName)
         _title = State(initialValue: exam.title)
         _notes = State(initialValue: exam.notes ?? "")
-        _date = State(initialValue: exam.date)
+        _date = State(initialValue: Calendar.current.startOfDay(for: exam.date))
         _examWeight = State(initialValue: exam.weight ?? 0)
         let initialReminder = exam.reminderAt ?? Date().addingTimeInterval(60 * 60)
         _hasReminder = State(initialValue: exam.reminderAt != nil)
@@ -139,9 +139,9 @@ struct EditExamView: View {
                                         Text("Termin")
                                             .font(.headline)
                                         DatePicker(
-                                            "Datum & Uhrzeit",
+                                            "Datum",
                                             selection: $date,
-                                            displayedComponents: [.date, .hourAndMinute]
+                                            displayedComponents: [.date]
                                         )
                                     }
 
@@ -262,6 +262,7 @@ struct EditExamView: View {
         let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         let storedNotes = trimmedNotes.isEmpty ? nil : trimmedNotes
         do {
+            let examDate = Calendar.current.startOfDay(for: date)
             let reminder: Date? = hasReminder ? reminderDate : nil
             if exam.isShared {
                 guard let gid = exam.groupId else {
@@ -275,7 +276,7 @@ struct EditExamView: View {
                     subjectName: subjectName,
                     title: trimmedTitle,
                     notes: storedNotes,
-                    date: date,
+                    date: examDate,
                     weight: examWeight,
                     reminderAt: reminder
                 )
@@ -286,7 +287,7 @@ struct EditExamView: View {
                     subjectName: subjectName,
                     title: trimmedTitle,
                     notes: storedNotes,
-                    date: date,
+                    date: examDate,
                     weight: examWeight,
                     reminderAt: reminder,
                     isCompleted: isCompleted

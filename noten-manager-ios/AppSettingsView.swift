@@ -5,6 +5,7 @@ import UIKit
 struct AppSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var store: GradesStore
+    @EnvironmentObject var offlineManager: OfflineModeManager
 
     @State private var newName: String = ""
     @State private var isSavingName: Bool = false
@@ -44,6 +45,7 @@ struct AppSettingsView: View {
     @State private var isResettingAccount: Bool = false
     @State private var isResettingYear: Bool = false
     @State private var resetError: String?
+    @State private var offlineStatusMessage: String?
 
     // Typografie-Hierarchie
     private let sectionHeaderFont: Font = .headline.weight(.semibold)
@@ -118,6 +120,8 @@ struct AppSettingsView: View {
     private var gradeOptions: [Int] {
         store.schoolType == .fos ? [11, 12, 13] : [12, 13]
     }
+
+    private var animationsOn: Bool { store.animationsEnabled }
 
     private func isValidSchoolYear(_ value: String) -> Bool {
         let pattern = "^(\\d{4})-(\\d{2})$"
@@ -233,13 +237,25 @@ struct AppSettingsView: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 18) {
                     headerCard
+                        .softFadeIn(enabled: animationsOn, delay: 0.03, offset: 12)
                     generalCard
+                        .softFadeIn(enabled: animationsOn, delay: 0.08, offset: 12)
                     schoolYearCard
+                        .softFadeIn(enabled: animationsOn, delay: 0.12, offset: 12)
                     groupsCard
+                        .softFadeIn(enabled: animationsOn, delay: 0.16, offset: 12)
                     onboardingCard
+                        .softFadeIn(enabled: animationsOn, delay: 0.20, offset: 12)
+                    helpCard
+                        .softFadeIn(enabled: animationsOn, delay: 0.24, offset: 12)
+                    offlineCard
+                        .softFadeIn(enabled: animationsOn, delay: 0.26, offset: 12)
                     resetCard
+                        .softFadeIn(enabled: animationsOn, delay: 0.30, offset: 12)
                     accountCard
+                        .softFadeIn(enabled: animationsOn, delay: 0.34, offset: 12)
                     infoCard
+                        .softFadeIn(enabled: animationsOn, delay: 0.38, offset: 12)
 
                     NavigationLink(
                         destination: AbiturExamView().environmentObject(store),
@@ -887,6 +903,61 @@ struct AppSettingsView: View {
         }
     }
 
+    private var helpCard: some View {
+        SettingsCard(
+            title: "Hilfe & FAQ",
+            subtitle: "Antworten & Berechnungen",
+            systemImage: "cross.case.fill",
+            accent: .teal
+        ) {
+            SettingsSectionBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Leitfäden zur App, Berechnungslogik und häufige Fragen.")
+                        .font(helperFont)
+                        .foregroundStyle(.secondary)
+
+                    Text("Beinhaltet Tipps zu Workflows, Gewichtung in Dashboard/Insights und Abschlussnote sowie Gruppen-Sync.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    NavigationLink {
+                        HelpCenterView()
+                            .environmentObject(store)
+                    } label: {
+                        HStack(spacing: 10) {
+                            Label("Help Center öffnen", systemImage: "arrow.right.circle.fill")
+                                .font(.body.weight(.semibold))
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private func activateOfflineManually() {
+        guard let snapshot = offlineManager.cachedSnapshot ?? offlineManager.availableSnapshot() else {
+            offlineStatusMessage = "Kein Offline-Cache gefunden. Bitte einmal online anmelden, damit ein Cache erstellt wird."
+            return
+        }
+        guard offlineManager.isOfflineLoginAllowed(for: snapshot.userId) else {
+            offlineStatusMessage = "Letzter Online-Login ist länger als 3 Tage her. Bitte online anmelden."
+            return
+        }
+        offlineManager.activateOfflineMode()
+        offlineStatusMessage = "Offline-Modus aktiviert. Daten bleiben lokal verfügbar, bis du wieder online gehst."
+    }
+
+    private func deactivateOffline() {
+        offlineManager.deactivateOfflineMode()
+        store.exitOfflineModeIfNeeded()
+        offlineStatusMessage = "Offline-Modus beendet. Live-Synchronisation wird wiederhergestellt."
+    }
+
     private var infoCard: some View {
         SettingsCard(
             title: "Info",
@@ -895,9 +966,148 @@ struct AppSettingsView: View {
             accent: .gray
         ) {
             SettingsSectionBox {
-                Text("App Version 1.4")
-                    .font(helperFont)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("App Version 1.4")
+                        .font(helperFont)
+                        .foregroundStyle(.secondary)
+
+                    Divider()
+
+                    NavigationLink {
+                        PrivacyPolicyView()
+                            .environmentObject(store)
+                    } label: {
+                        HStack {
+                            Label("Datenschutz", systemImage: "lock.shield")
+                                .font(.body)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+
+                    NavigationLink {
+                        ImprintView()
+                            .environmentObject(store)
+                    } label: {
+                        HStack {
+                            Label("Impressum", systemImage: "doc.text")
+                                .font(.body)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var offlineCard: some View {
+        let snapshot = offlineManager.cachedSnapshot ?? offlineManager.availableSnapshot()
+        let hasCache = snapshot != nil
+        let lastLoginText: String = {
+            if let last = offlineManager.lastLoginDate {
+                let fmt = DateFormatter()
+                fmt.dateStyle = .medium
+                fmt.timeStyle = .short
+                return fmt.string(from: last)
+            }
+            return "unbekannt"
+        }()
+
+        return SettingsCard(
+            title: "Offline-Modus",
+            subtitle: "Cache steuern & jetzt starten",
+            systemImage: "wifi.slash",
+            accent: .purple
+        ) {
+            SettingsSectionBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Label(offlineManager.isOfflineModeActive ? "Offline aktiv" : "Online & Sync", systemImage: offlineManager.isOfflineModeActive ? "bolt.slash.fill" : "bolt.horizontal.fill")
+                            .font(.body.weight(.semibold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.9)
+                        Spacer()
+                        Capsule()
+                            .fill(offlineManager.isOfflineModeActive ? Color.orange.opacity(0.18) : Color.green.opacity(0.18))
+                            .overlay(
+                                Text(offlineManager.isOfflineModeActive ? "Offline" : "Online")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(offlineManager.isOfflineModeActive ? .orange : .green)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 4)
+                            )
+                            .frame(height: 28)
+                    }
+
+                    HStack {
+                        Label("Letzter Login: \(lastLoginText)", systemImage: "clock.arrow.circlepath")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.9)
+                        Spacer()
+                    }
+
+                    HStack {
+                        Label(hasCache ? "Offline-Daten verfügbar" : "Kein Offline-Cache", systemImage: hasCache ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                            .font(.footnote)
+                            .foregroundStyle(hasCache ? .green : .orange)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.9)
+                        Spacer()
+                    }
+
+                    VStack(spacing: 10) {
+                        Button {
+                            activateOfflineManually()
+                        } label: {
+                            Label {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Offline aktivieren")
+                                    Text("Letzten Cache nutzen")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            } icon: {
+                                Image(systemName: "wifi.slash")
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.purple)
+                        .disabled(!hasCache || offlineManager.isOfflineModeActive)
+
+                        Button {
+                            deactivateOffline()
+                        } label: {
+                            Label {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Offline verlassen")
+                                    Text("Sync wiederherstellen")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            } icon: {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(Color.purple.opacity(0.85))
+                        .disabled(!offlineManager.isOfflineModeActive)
+                    }
+
+                    if let message = offlineStatusMessage, !message.isEmpty {
+                        Text(message)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
         }
     }
@@ -914,6 +1124,7 @@ struct AppSettingsView: View {
                     Task {
                         store.stopListening()
                         try? Auth.auth().signOut()
+                        OfflineModeManager.shared.clearOfflineData()
                     }
                 } label: {
                     HStack {

@@ -78,6 +78,7 @@ struct EncryptedGrade: Codable {
     let note: String?
     let halfYear: Int? // 1 | 2
     let linkedExamId: String?
+    let updatedAt: Date?
 }
 
 struct Grade: Codable {

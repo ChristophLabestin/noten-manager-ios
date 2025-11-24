@@ -18,6 +18,9 @@ final class AuthManager: ObservableObject {
         if authHandle != nil { return }
         authHandle = Auth.auth().addStateDidChangeListener { [weak self] _, user in
             self?.isAuthenticated = (user != nil)
+            if let uid = user?.uid, OfflineModeManager.shared.isOnline {
+                OfflineModeManager.shared.recordOnlineLogin(uid: uid)
+            }
         }
     }
 
@@ -32,7 +35,8 @@ final class AuthManager: ObservableObject {
         guard !isLoading else { return }
         await MainActor.run { self.isLoading = true; self.errorMessage = nil }
         do {
-            _ = try await Auth.auth().signIn(withEmail: email, password: password)
+            let result = try await Auth.auth().signIn(withEmail: email, password: password)
+            OfflineModeManager.shared.recordOnlineLogin(uid: result.user.uid)
             await MainActor.run { self.isLoading = false }
         } catch {
             await MainActor.run {
@@ -53,6 +57,7 @@ final class AuthManager: ObservableObject {
             let saltB64 = CryptoService.generateSalt(length: 16)
             let profile = UserProfile(id: uid, name: name, email: email, encryptionSalt: saltB64)
             try await FirestoreService.shared.setUserProfile(profile: profile, onboardingCompleted: false)
+            OfflineModeManager.shared.recordOnlineLogin(uid: uid)
 
             await MainActor.run { self.isLoading = false }
         } catch {
@@ -81,6 +86,7 @@ final class AuthManager: ObservableObject {
     func signOut() {
         do {
             try Auth.auth().signOut()
+            OfflineModeManager.shared.clearOfflineData()
         } catch {
             self.errorMessage = "Abmelden fehlgeschlagen: \(error.localizedDescription)"
         }

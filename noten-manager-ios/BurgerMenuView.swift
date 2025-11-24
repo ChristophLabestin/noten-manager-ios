@@ -144,6 +144,7 @@ struct LogoutButtonView: View {
             // Listener stoppen, dann abmelden
             store.stopListening()
             try Auth.auth().signOut()
+            OfflineModeManager.shared.clearOfflineData()
         } catch {
             // Optional: Fehler anzeigen
         }
