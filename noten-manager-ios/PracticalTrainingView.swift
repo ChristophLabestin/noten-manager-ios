@@ -12,6 +12,11 @@ struct PracticalTrainingView: View {
     @State private var editingId: String?
     @State private var error: String?
     @State private var isSaving: Bool = false
+    @FocusState private var focusedField: Field?
+
+    private enum Field: Hashable {
+        case grade, company, note
+    }
 
     private var canSave: Bool {
         guard store.schoolType == .fos else { return false }
@@ -94,8 +99,17 @@ struct PracticalTrainingView: View {
 
                     TextField("Punkte (0–15)", text: $gradeText)
                         .keyboardType(.decimalPad)
+                        .submitLabel(.next)
+                        .focused($focusedField, equals: .grade)
+                        .onSubmit { focusedField = .company }
                     TextField("Unternehmen (optional)", text: $company)
+                        .submitLabel(.next)
+                        .focused($focusedField, equals: .company)
+                        .onSubmit { focusedField = .note }
                     TextField("Notiz (optional)", text: $note)
+                        .submitLabel(.done)
+                        .focused($focusedField, equals: .note)
+                        .onSubmit { hideKeyboard() }
                 }
 
                 if let error {
@@ -138,6 +152,14 @@ struct PracticalTrainingView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Schließen") { dismiss() }
                 }
+                ToolbarItemGroup(placement: .keyboard) {
+                    KeyboardNavigationAccessory(
+                        focus: $focusedField,
+                        fields: [.grade, .company, .note],
+                        label: nil,
+                        onDone: { hideKeyboard() }
+                    )
+                }
             }
             .onAppear {
                 syncFromStore()
@@ -146,6 +168,7 @@ struct PracticalTrainingView: View {
                 syncFromStore()
             }
         }
+        .modifier(KeyboardToolbarInset(height: 64))
     }
 
     private func label(for entry: PracticalGradeEntry) -> String {

@@ -14,6 +14,7 @@ struct AddFachreferatView: View {
     @State private var note: String = ""
     @State private var isSaving: Bool = false
     @State private var error: String?
+    @FocusState private var focusedField: Field?
 
     private var canSave: Bool {
         guard let _ = store.encryptionKey else { return false }
@@ -26,29 +27,84 @@ struct AddFachreferatView: View {
         self.preselectedSubjectName = preselectedSubjectName
     }
 
+    private enum Field: Hashable {
+        case grade, note
+    }
+
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Fachreferat") {
-                    Picker("Fach", selection: $subjectName) {
-                        ForEach(store.subjects.filter { $0.name != "Fachreferat" }, id: \.name) { s in
-                            Text(s.name).tag(s.name)
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 16) {
+                    SettingsCard(
+                        title: store.fachreferat == nil ? "Fachreferat" : "Fachreferat bearbeiten",
+                        subtitle: "Fach, Note und Datum",
+                        systemImage: "doc.text.fill",
+                        accent: .pink
+                    ) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            SettingsSectionBox {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("Fach")
+                                        .font(.headline)
+                                    Picker("Fach", selection: $subjectName) {
+                                        ForEach(store.subjects.filter { $0.name != "Fachreferat" }, id: \.name) { s in
+                                            Text(s.name).tag(s.name)
+                                        }
+                                    }
+                                    .pickerStyle(.menu)
+                                    .tint(.primary)
+                                    .padding(10)
+                                    .background(Color.formInputBackground)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                }
+                            }
+
+                            SettingsSectionBox {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text("Note")
+                                            .font(.headline)
+                                        TextField("z. B. 10.0", text: $gradeText)
+                                            .keyboardType(.decimalPad)
+                                            .submitLabel(.next)
+                                            .focused($focusedField, equals: .grade)
+                                            .onSubmit { focusedField = .note }
+                                            .padding(12)
+                                            .background(Color.formInputBackground)
+                                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    }
+
+                                    DatePicker("Datum", selection: $date, displayedComponents: .date)
+
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text("Notiz (optional)")
+                                            .font(.subheadline)
+                                        TextField("Kommentar hinzufügen", text: $note)
+                                            .submitLabel(.done)
+                                            .focused($focusedField, equals: .note)
+                                            .onSubmit { hideKeyboard() }
+                                            .padding(12)
+                                            .background(Color.formInputBackground)
+                                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    }
+                                }
+                            }
                         }
                     }
-                    TextField("Note (z. B. 10.0)", text: $gradeText)
-                        .keyboardType(.decimalPad)
-                        .submitLabel(.done)
-                        .onSubmit { hideKeyboard() }
-                    DatePicker("Datum", selection: $date, displayedComponents: .date)
-                    TextField("Notiz (optional)", text: $note)
-                        .submitLabel(.done)
-                        .onSubmit { hideKeyboard() }
+
+                    if let error {
+                        Text(error)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
-                if let error {
-                    Text(error).foregroundStyle(.red)
-                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
+            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine"))
             .navigationTitle(store.fachreferat == nil ? "Fachreferat" : "Fachreferat bearbeiten")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Abbrechen") { dismiss() }
@@ -60,6 +116,14 @@ struct AddFachreferatView: View {
                         if isSaving { ProgressView() } else { Text("Speichern") }
                     }
                     .disabled(!canSave || isSaving)
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    KeyboardNavigationAccessory(
+                        focus: $focusedField,
+                        fields: [.grade, .note],
+                        label: nil,
+                        onDone: { hideKeyboard() }
+                    )
                 }
             }
             .scrollDismissesKeyboard(.interactively)
@@ -82,7 +146,7 @@ struct AddFachreferatView: View {
                 }
             }
         }
-        .keyboardDismissToolbar()
+        .modifier(KeyboardToolbarInset(height: 64))
     }
 
     private func save() async {

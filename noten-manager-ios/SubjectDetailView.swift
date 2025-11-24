@@ -178,52 +178,48 @@ struct SubjectDetailView: View {
         return Color.blue.opacity(0.1)
     }
 
-    private var themedBackground: some View {
-        Group {
-            if store.darkMode {
-                RadialGradient(
-                    gradient: Gradient(colors: [
-                        Color(hex: "#1f2937"),
-                        Color(red: 2 / 255, green: 6 / 255, blue: 23 / 255)
-                    ]),
-                    center: .top,
-                    startRadius: 0,
-                    endRadius: 800
-                )
-            } else if store.theme == "feminine" {
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color(hex: "#fdf2ff"),
-                        Color(hex: "#fdf2f8"),
-                        Color(hex: "#fef2f2")
-                    ]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            } else {
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color(red: 238 / 255, green: 242 / 255, blue: 255 / 255),
-                        Color(red: 249 / 255, green: 250 / 255, blue: 251 / 255),
-                        Color(red: 247 / 255, green: 247 / 255, blue: 247 / 255)
-                    ]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            }
-        }
-        .ignoresSafeArea()
+    private var pageBackground: some View {
+        ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine")
     }
 
     @Environment(\.colorScheme) private var colorScheme
 
-    var body: some View {
-        ZStack {
-            themedBackground
+    private var hasDetails: Bool {
+        (currentTeacher?.isEmpty == false) ||
+        (currentAlias?.isEmpty == false) ||
+        (currentEmail?.isEmpty == false) ||
+        (currentRoom?.isEmpty == false)
+    }
 
-            ScrollView {
-                VStack(spacing: 16) {
-                    // Halbjahresfilter im pill-förmigen Container (wie Home-Layout)
+    private var detailItems: [(label: String, value: String, isEmail: Bool)] {
+        var items: [(label: String, value: String, isEmail: Bool)] = []
+        if let t = currentTeacher, !t.isEmpty { items.append(("Lehrkraft", t, false)) }
+        if let a = currentAlias, !a.isEmpty { items.append(("Kürzel", a, false)) }
+        if let e = currentEmail, !e.isEmpty { items.append(("E-Mail", e, true)) }
+        if let r = currentRoom, !r.isEmpty { items.append(("Raum", r, false)) }
+        return items
+    }
+
+    // MARK: - Cards
+
+    @ViewBuilder
+    private var overviewCard: some View {
+        SettingsCard(
+            title: currentSubjectName,
+            subtitle: "Fachübersicht",
+            systemImage: "text.book.closed",
+            accent: .indigo
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                    StatChip(title: "Gesamt", value: formatAverage(averageForSubject()), accent: .indigo)
+                    StatChip(title: "Noten", value: "\(allGrades.count)", accent: .orange)
+                    StatChip(title: "Klausuren", value: "\(upcomingExamsCount)", accent: .mint)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Halbjahr filtern")
+                        .font(.headline)
                     HStack {
                         HStack(spacing: 4) {
                             SegmentButton(title: "Alle", active: halfYear == .all) { halfYear = .all }
@@ -237,135 +233,143 @@ struct SubjectDetailView: View {
 
                         Spacer()
                     }
-                    .padding(.horizontal)
-
-                    // Summary
-                    HStack(spacing: 12) {
-                        SummaryCard(title: "Durchschnitt") {
-                            let avg = averageForSubject()
-                            Text(formatAverage(avg))
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(avgColor(avg).opacity(0.15))
-                                .foregroundStyle(avgColor(avg))
-                                .clipShape(Capsule())
-                        }
-                        SummaryCard(title: "Noten") {
-                            Text("\(allGrades.count)")
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(chipBackgroundColor)
-                                .foregroundStyle(chipForegroundColor)
-                                .clipShape(Capsule())
-                        }
-                        Button {
-                            showExamListSheet = true
-                        } label: {
-                            SummaryCard(title: "Klausuren") {
-                                Text("\(upcomingExamsCount)")
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .background(Color.blue.opacity(0.12))
-                                    .foregroundStyle(Color.blue)
-                                    .clipShape(Capsule())
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(.horizontal)
-
-                    // Details
-                    if (currentTeacher?.isEmpty == false) ||
-                       (currentAlias?.isEmpty == false) ||
-                       (currentEmail?.isEmpty == false) ||
-                       (currentRoom?.isEmpty == false) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Details").font(.title3).bold()
-                            VStack(spacing: 8) {
-                                if let t = currentTeacher, !t.isEmpty {
-                                    detailRow(label: "Lehrkraft", value: t)
-                                }
-                                if let a = currentAlias, !a.isEmpty {
-                                    detailRow(label: "Kürzel", value: a)
-                                }
-                                if let e = currentEmail, !e.isEmpty {
-                                    detailRow(label: "E-Mail", value: e, isEmail: true)
-                                }
-                                if let r = currentRoom, !r.isEmpty {
-                                    detailRow(label: "Raum", value: r)
-                                }
-                            }
-                            .padding()
-                            .background(.thinMaterial)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                        }
-                        .padding(.horizontal)
-                    }
-
-                    // Klausurtermine
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Klausurtermine").font(.title3).bold()
-                        if subjectExams.isEmpty {
-                            Text("Keine Klausurtermine für dieses Fach")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        } else {
-                            VStack(spacing: 10) {
-                                ForEach(subjectExams, id: \.id) { exam in
-                                    examRow(exam)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                            }
-                        }
-                    }
-                    .padding(.horizontal)
-
-                    // Hausaufgaben
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Hausaufgaben").font(.title3).bold()
-                        if subjectHomeworks.isEmpty {
-                            Text("Keine Hausaufgaben für dieses Fach")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        } else {
-                            VStack(spacing: 10) {
-                                ForEach(subjectHomeworks, id: \.id) { hw in
-                                    homeworkRow(hw)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                            }
-                        }
-                    }
-                    .padding(.horizontal)
-
-                    // Notenliste
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Noten").font(.title3).bold()
-
-                        if sortedGrades.isEmpty {
-                            Text("Keine Noten für dieses Fach")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        } else {
-                        Text("Tippe auf eine Note, um diese zu bearbeiten")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            VStack(spacing: 12) {
-                                ForEach(sortedGrades, id: \.id) { g in
-                                    gradeCard(g)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                            }
-                        }
-                    }
-                    .padding(.horizontal)
                 }
-                .padding(.vertical, 8)
             }
         }
+    }
+
+    @ViewBuilder
+    private var detailsCard: some View {
+        SettingsCard(
+            title: "Details",
+            subtitle: "Lehrkraft & Raum",
+            systemImage: "info.circle",
+            accent: .cyan
+        ) {
+            SettingsSectionBox {
+                VStack(spacing: 10) {
+                    ForEach(Array(detailItems.enumerated()), id: \.offset) { idx, item in
+                        detailRow(label: item.label, value: item.value, isEmail: item.isEmail)
+                        if idx < detailItems.count - 1 {
+                            Divider()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var examsCard: some View {
+        SettingsCard(
+            title: "Klausurtermine",
+            subtitle: nil,
+            systemImage: "calendar.badge.clock",
+            accent: .mint,
+            trailing: {
+                Button {
+                    showExamListSheet = true
+                } label: {
+                    Image(systemName: "list.bullet")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(Color(.secondarySystemBackground))
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        ) {
+            if subjectExams.isEmpty {
+                Text("Keine Klausurtermine für dieses Fach.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(subjectExams, id: \.id) { exam in
+                        examRow(exam)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var homeworksCard: some View {
+        SettingsCard(
+            title: "Hausaufgaben",
+            subtitle: nil,
+            systemImage: "checklist",
+            accent: .orange
+        ) {
+            if subjectHomeworks.isEmpty {
+                Text("Keine Hausaufgaben für dieses Fach.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(subjectHomeworks, id: \.id) { hw in
+                        homeworkRow(hw)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var gradesSection: some View {
+        SettingsCard(
+            title: "Noten",
+            subtitle: nil,
+            systemImage: "list.bullet.rectangle.portrait.fill",
+            accent: .indigo,
+            trailing: {
+                PillBadge(
+                    text: "\(sortedGrades.count)",
+                    systemImage: "number.circle",
+                    foreground: .indigo,
+                    background: Color.indigo.opacity(0.14)
+                )
+            }
+        ) {
+            if sortedGrades.isEmpty {
+                Text("Keine Noten für dieses Fach.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(sortedGrades, id: \.id) { g in
+                        gradeCard(g)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+        }
+    }
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 16) {
+                overviewCard
+
+                if hasDetails {
+                    detailsCard
+                }
+
+                examsCard
+                homeworksCard
+                gradesSection
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 6)
+            .padding(.bottom, 12)
+        }
+        .background(pageBackground)
         .sheet(isPresented: $showEditSubjectSheet) {
             NavigationStack {
                 Form {
@@ -465,36 +469,18 @@ struct SubjectDetailView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .principal) {
-                VStack(spacing: 2) {
-                    Text(currentSubjectName)
-                        .font(.headline)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                    if subject.isElective {
-                        Tag(text: "Wahlfach", style: .elective)
-                    } else if subject.type == 0 || subject.type == 1 {
-                        Tag(
-                            text: subject.type == 1 ? "Hauptfach" : "Nebenfach",
-                            style: subject.type == 1 ? .main : .minor
-                        )
-                    }
-                }
-            }
             ToolbarItem(placement: .navigationBarTrailing) {
-                HStack(spacing: 10) {
+                HStack(spacing: 0) {
                     Button {
                         startEditSubject()
                     } label: {
-                        Image(systemName: "pencil")
-                            .font(.title3)
+                        ToolbarIcon(symbol: "square.and.pencil", showDot: false)
                     }
 
                     Button {
                         showAddActions = true
                     } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.title3)
+                        ToolbarIcon(symbol: "plus", showDot: false)
                     }
                 }
             }
@@ -531,6 +517,7 @@ struct SubjectDetailView: View {
             ExamListView(subjectFilter: currentSubjectName, alternateSubjectNames: subjectFilterNames)
                 .environmentObject(store)
         }
+        .keyboardDismissToolbar()
         .background(
             Group {
                 NavigationLink(
@@ -596,9 +583,15 @@ struct SubjectDetailView: View {
                 color: exam.isCompleted ? .green : (exam.date < now ? .red : .blue)
             )
         }
-        .padding()
-        .background(.thinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color(.separator).opacity(0.15), lineWidth: 1)
+        )
     }
 
     @ViewBuilder
@@ -635,9 +628,15 @@ struct SubjectDetailView: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding()
-        .background(.thinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color(.separator).opacity(0.15), lineWidth: 1)
+        )
     }
 
 private func statusBadge(_ text: String, color: Color) -> some View {
@@ -728,122 +727,71 @@ private func statusBadge(_ text: String, color: Color) -> some View {
     @ViewBuilder
     private func gradeCard(_ grade: GradeWithId) -> some View {
         let isEditing = (editingGradeId == grade.id)
+        let typeLabel = gradeTypeLabel(weight: grade.weight)
+        let halfYearText = halfYearLabel(grade.halfYear)
 
-        VStack(spacing: 8) {
-            HStack(alignment: .top) {
-                // Meta links
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
-                    // Typ / Gewicht
-                    if isEditing {
-                        Picker("Typ", selection: $editedWeight) {
-                            if subject.type == 0 {
-                                Text("Fachreferat").tag(3.0)
-                                Text("Kurzarbeit").tag(1.0)
-                                Text("Mündlich").tag(0.0)
-                            } else {
-                                Text("Fachreferat").tag(3.0)
-                                Text("Schulaufgabe").tag(2.0)
-                                Text("Kurzarbeit").tag(1.0)
-                                Text("Mündlich").tag(0.0)
-                            }
+                    HStack(spacing: 8) {
+                        Text(typeLabel)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        if let halfYearLabel = halfYearText {
+                            PillBadge(
+                                text: halfYearLabel,
+                                systemImage: "calendar",
+                                foreground: .indigo,
+                                background: Color.indigo.opacity(0.14)
+                            )
                         }
-                        .labelsHidden()
-                        .pickerStyle(.menu)
-                    } else {
-                        Text(grade.weight == 0 ? "Mündlich" :
-                             grade.weight == 1 ? "Kurzarbeit" :
-                             grade.weight == 2 ? "Schulaufgabe" : "Fachreferat")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
                     }
-
-                    // Halbjahr
-                    if isEditing {
-                        Picker("Halbjahr", selection: $editedHalfYear) {
-                            Text("1. Hj").tag(1)
-                            Text("2. Hj").tag(2)
-                        }
-                        .labelsHidden()
-                        .pickerStyle(.segmented)
-                        .frame(maxWidth: 160)
-                    } else if let hj = grade.halfYear {
-                        Text(hj == 1 ? "1. Hj" : "2. Hj")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    // Datum
-                    if isEditing {
-                        DatePicker("", selection: $editedDate, displayedComponents: .date)
-                            .labelsHidden()
-                    } else {
+                    HStack(spacing: 8) {
                         Text(grade.date.formatted(date: .abbreviated, time: .omitted))
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        if let note = grade.note, !note.isEmpty {
+                            Label("Notiz", systemImage: "note.text")
+                                .font(.caption)
+                                .labelStyle(.titleOnly)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
 
                 Spacer()
 
-                // Note rechts
-                if isEditing {
-                    TextField("Note", text: $editedGradeValue)
-                        .keyboardType(.decimalPad)
-                        .frame(width: 80)
-                        .textFieldStyle(.roundedBorder)
-                } else {
-                    Text(String(format: "%.1f", grade.grade))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(gradeColor(grade.grade).opacity(0.15))
-                        .foregroundStyle(gradeColor(grade.grade))
-                        .clipShape(Capsule())
-                }
+                Text(String(format: "%.1f", grade.grade))
+                    .font(.title3.weight(.semibold))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(gradeColor(grade.grade).opacity(0.15))
+                    .foregroundStyle(gradeColor(grade.grade))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
 
-            HStack {
-                // Notiz
-                if let note = grade.note, !note.isEmpty {
-                    Button("Notiz anzeigen") {
-                        openNoteEditor(for: grade.id, current: note)
+            if !isEditing {
+                HStack(spacing: 10) {
+                    if let note = grade.note, !note.isEmpty {
+                        Button {
+                            openNoteEditor(for: grade.id, current: note)
+                        } label: {
+                            Label("Notiz ansehen", systemImage: "text.quote")
+                        }
+                    } else {
+                        Button {
+                            openNoteEditor(for: grade.id, current: "")
+                        } label: {
+                            Label("Notiz hinzufügen", systemImage: "square.and.pencil")
+                        }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .font(.footnote)
-                } else {
-                    Button("Notiz hinzufügen") {
-                        openNoteEditor(for: grade.id, current: "")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .font(.footnote)
-                }
 
-                Spacer()
+                    Spacer()
 
-                // Aktionen
-                if isSaving {
-                    ProgressView().padding(.trailing, 8)
-                }
-
-                if isEditing {
-                    Button {
-                        Task { await saveInlineEdit(gradeId: grade.id) }
-                    } label: {
-                        Image(systemName: "checkmark.circle.fill")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(isSaving)
-
-                    Button {
-                        cancelInlineEdit()
-                    } label: {
-                        Image(systemName: "xmark.circle")
-                    }
-                    .buttonStyle(.bordered)
-                } else {
                     Button {
                         startInlineEdit(grade)
                     } label: {
-                        Image(systemName: "pencil")
+                        Image(systemName: "slider.horizontal.3")
                     }
                     .buttonStyle(.bordered)
 
@@ -854,16 +802,109 @@ private func statusBadge(_ text: String, color: Color) -> some View {
                     }
                     .buttonStyle(.bordered)
                 }
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Note")
+                                .font(.subheadline)
+                            TextField("z. B. 10.0", text: $editedGradeValue)
+                                .keyboardType(.decimalPad)
+                                .padding(10)
+                                .background(Color.formInputBackground)
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Halbjahr")
+                                .font(.subheadline)
+                            Picker("", selection: $editedHalfYear) {
+                                Text("1. Hj").tag(1)
+                                Text("2. Hj").tag(2)
+                            }
+                            .pickerStyle(.segmented)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Art")
+                            .font(.subheadline)
+                        Picker("", selection: $editedWeight) {
+                            if subject.type == 0 {
+                                Text("Kurzarbeit").tag(1.0)
+                                Text("Mündlich").tag(0.0)
+                            } else {
+                                Text("Schulaufgabe").tag(2.0)
+                                Text("Kurzarbeit").tag(1.0)
+                                Text("Mündlich").tag(0.0)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                    }
+
+                    DatePicker("Datum", selection: $editedDate, displayedComponents: .date)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Notiz (optional)")
+                            .font(.subheadline)
+                        TextField("Kommentar zur Note", text: $editedNoteInline)
+                            .padding(10)
+                            .background(Color.formInputBackground)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+
+                    HStack(spacing: 10) {
+                        Button {
+                            Task { await saveInlineEdit(gradeId: grade.id) }
+                        } label: {
+                            if isSaving {
+                                ProgressView()
+                            }
+                            Text(isSaving ? "Speichern..." : "Speichern")
+                                .fontWeight(.semibold)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isSaving)
+
+                        Button {
+                            cancelInlineEdit()
+                        } label: {
+                            Text("Abbrechen")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .font(.footnote)
+                }
             }
         }
         .padding()
-        .background(.thinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color(.separator).opacity(0.15), lineWidth: 1)
+        )
         .onTapGesture {
             if !isEditing {
                 startInlineEdit(grade)
             }
         }
+    }
+
+    private func gradeTypeLabel(weight: Double) -> String {
+        switch weight {
+        case 3: return "Fachreferat"
+        case 2: return "Schulaufgabe"
+        case 1: return subject.type == 0 ? "Kurzarbeit" : "Kurzarbeit"
+        default: return "Mündlich / EX"
+        }
+    }
+
+    private func halfYearLabel(_ value: Int?) -> String? {
+        guard let v = value else { return nil }
+        return v == 1 ? "1. Halbjahr" : "2. Halbjahr"
     }
 
     private func startInlineEdit(_ grade: GradeWithId) {

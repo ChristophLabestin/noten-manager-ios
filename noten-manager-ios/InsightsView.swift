@@ -363,7 +363,7 @@ struct InsightsView: View {
                 }
             }
             ToolbarItem(placement: .navigationBarTrailing) {
-                HStack(spacing: 12) {
+                HStack(spacing: 0) {
                     Button {
                         showExamSheet = true
                     } label: {
@@ -436,7 +436,7 @@ struct InsightsView: View {
     }
 
     @ViewBuilder
-    private func subjectOverviewRow(subject: Subject) -> some View {
+private func subjectOverviewRow(subject: Subject) -> some View {
         let avg = subjectAverage(subject)
         let gradesCount = store.gradesBySubject[subject.name]?.count ?? 0
 
@@ -467,36 +467,6 @@ struct InsightsView: View {
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(Color(.separator).opacity(0.12), lineWidth: 1)
-        )
-    }
-}
-
-private struct StatChip: View {
-    let title: String
-    let value: String
-    let accent: Color
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title.uppercased())
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .monospacedDigit()
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(accent.opacity(0.2), lineWidth: 1)
         )
     }
 }

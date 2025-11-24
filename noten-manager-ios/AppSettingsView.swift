@@ -136,16 +136,12 @@ struct AppSettingsView: View {
     }
 
     private var headerCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Einstellungs-Board")
-                        .font(.title3.weight(.bold))
-                    Text("Status, Thema und Erinnerungen ohne Gedränge.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
+        SettingsCard(
+            title: "Einstellungen",
+            subtitle: "Status, Thema und Erinnerungen",
+            systemImage: "slider.horizontal.3",
+            accent: .indigo,
+            trailing: {
                 PillBadge(
                     text: store.schoolType == .fos ? "FOS" : "BOS",
                     systemImage: "seal.fill",
@@ -153,7 +149,7 @@ struct AppSettingsView: View {
                     background: Color.indigo.opacity(0.14)
                 )
             }
-
+        ) {
             VStack(spacing: 12) {
                 HStack(spacing: 12) {
                     HeaderTile(
@@ -183,76 +179,53 @@ struct AppSettingsView: View {
                         accent: .indigo
                     )
                 }
-            }
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    PillBadge(
-                        text: store.theme == "feminine" ? "Soft/Pink" : "Klassisch",
-                        systemImage: "paintpalette.fill",
-                        foreground: Color.orange,
-                        background: Color.orange.opacity(0.15)
-                    )
-                    if overdueHomeworksCount > 0 {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
                         PillBadge(
-                            text: "HW fällig: \(overdueHomeworksCount)",
-                            systemImage: "exclamationmark.triangle.fill",
-                            foreground: .orange,
-                            background: Color.orange.opacity(0.16)
+                            text: store.theme == "feminine" ? "Soft/Pink" : "Klassisch",
+                            systemImage: "paintpalette.fill",
+                            foreground: Color.orange,
+                            background: Color.orange.opacity(0.15)
                         )
+                        if overdueHomeworksCount > 0 {
+                            PillBadge(
+                                text: "HW fällig: \(overdueHomeworksCount)",
+                                systemImage: "exclamationmark.triangle.fill",
+                                foreground: .orange,
+                                background: Color.orange.opacity(0.16)
+                            )
+                        }
+                        if homeworkDueTomorrowCount > 0 {
+                            PillBadge(
+                                text: "HW morgen: \(homeworkDueTomorrowCount)",
+                                systemImage: "clock.badge.exclamationmark",
+                                foreground: .yellow,
+                                background: Color.yellow.opacity(0.16)
+                            )
+                        }
+                        if overdueExamsCount > 0 {
+                            PillBadge(
+                                text: "Prüfungen fällig: \(overdueExamsCount)",
+                                systemImage: "calendar.badge.exclamationmark",
+                                foreground: .red,
+                                background: Color.red.opacity(0.16)
+                            )
+                        }
+                        if overdueHomeworksCount == 0 && homeworkDueTomorrowCount == 0 && overdueExamsCount == 0 {
+                            PillBadge(
+                                text: "Alles im Plan",
+                                systemImage: "checkmark.circle.fill",
+                                foreground: .green,
+                                background: Color.green.opacity(0.15)
+                            )
+                        }
                     }
-                    if homeworkDueTomorrowCount > 0 {
-                        PillBadge(
-                            text: "HW morgen: \(homeworkDueTomorrowCount)",
-                            systemImage: "clock.badge.exclamationmark",
-                            foreground: .yellow,
-                            background: Color.yellow.opacity(0.16)
-                        )
-                    }
-                    if overdueExamsCount > 0 {
-                        PillBadge(
-                            text: "Prüfungen fällig: \(overdueExamsCount)",
-                            systemImage: "calendar.badge.exclamationmark",
-                            foreground: .red,
-                            background: Color.red.opacity(0.16)
-                        )
-                    }
-                    if overdueHomeworksCount == 0 && homeworkDueTomorrowCount == 0 && overdueExamsCount == 0 {
-                        PillBadge(
-                            text: "Alles im Plan",
-                            systemImage: "checkmark.circle.fill",
-                            foreground: .green,
-                            background: Color.green.opacity(0.15)
-                        )
-                    }
+                    .padding(.vertical, 2)
+                    .padding(.leading, 2)
                 }
-                .padding(.vertical, 2)
-                .padding(.leading, 2)
             }
         }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            ZStack {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(Color(.systemBackground))
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.cyan.opacity(0.10),
-                                Color.indigo.opacity(0.08)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .opacity(0.7)
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke(Color(.separator).opacity(0.18), lineWidth: 1)
-            }
-        )
-        .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 8)
     }
 
     var body: some View {
@@ -279,15 +252,7 @@ struct AppSettingsView: View {
                 .padding(.vertical, 12)
             }
             .background(
-                LinearGradient(
-                    colors: [
-                        Color(.systemGray6),
-                        Color(.systemBackground)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
+                ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine")
             )
             .scrollDismissesKeyboard(.interactively)
             .hideKeyboardOnTap()
@@ -305,7 +270,7 @@ struct AppSettingsView: View {
                     .multilineTextAlignment(.center)
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack(spacing: 12) {
+                    HStack(spacing: 0) {
                         Button { showExamSheet = true } label: {
                             ToolbarIcon(symbol: "calendar.badge.clock", showDot: hasOverdueExams)
                         }
@@ -408,13 +373,13 @@ struct AppSettingsView: View {
                         Text("Wird in Dashboard und Übersichten angezeigt.")
                             .font(helperFont)
                             .foregroundStyle(.secondary)
-                        HStack(spacing: 10) {
+                        VStack(spacing: 10) {
                             TextField("Dein Name", text: $newName)
                                 .textContentType(.name)
                                 .submitLabel(.done)
                                 .onSubmit { hideKeyboard() }
                                 .padding(12)
-                                .background(Color(.secondarySystemBackground))
+                                .background(Color.formInputBackground)
                                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                             Button {
                                 Task { await saveName() }
@@ -818,7 +783,7 @@ struct AppSettingsView: View {
                             .font(sectionHeaderFont)
                         TextField("Gruppenname (Pflichtfeld)", text: $groupNameInput)
                             .padding(12)
-                            .background(Color(.secondarySystemBackground))
+                            .background(Color.formInputBackground)
                             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Fächer einbringen")
@@ -883,7 +848,7 @@ struct AppSettingsView: View {
                             .textInputAutocapitalization(.characters)
                             .autocorrectionDisabled(true)
                             .padding(12)
-                            .background(Color(.secondarySystemBackground))
+                            .background(Color.formInputBackground)
                             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                         Button {
                             Task {
@@ -1162,7 +1127,7 @@ private struct ResetConfirmSheet: View {
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
                     .padding()
-                    .background(Color(.secondarySystemBackground))
+                    .background(Color.formInputBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
 
                 if let err = errorMessage {

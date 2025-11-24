@@ -146,6 +146,7 @@ struct EditHomeworkView: View {
                 Text("Diese Hausaufgabe wird dauerhaft gelöscht.")
             }
         }
+        .keyboardDismissToolbar()
     }
 
     private func save() async {

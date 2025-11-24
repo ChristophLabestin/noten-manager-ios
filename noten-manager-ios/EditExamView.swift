@@ -20,6 +20,7 @@ struct EditExamView: View {
     @State private var requiresGrade: Bool
     @State private var isDeleting: Bool = false
     @State private var showDeleteConfirm: Bool = false
+    @FocusState private var focusedField: Field?
 
     init(exam: Exam) {
         self.exam = exam
@@ -33,6 +34,10 @@ struct EditExamView: View {
         _reminderDate = State(initialValue: initialReminder)
         _isCompleted = State(initialValue: exam.isCompleted)
         _requiresGrade = State(initialValue: exam.requiresGrade ?? true)
+    }
+
+    private enum Field: Hashable {
+        case title, notes
     }
 
     private var subjects: [Subject] {
@@ -68,8 +73,9 @@ struct EditExamView: View {
 
                 TextField("Titel / Bezeichnung", text: $title)
                     .textInputAutocapitalization(.sentences)
-                    .submitLabel(.done)
-                    .onSubmit { hideKeyboard() }
+                    .submitLabel(.next)
+                    .focused($focusedField, equals: .title)
+                    .onSubmit { focusedField = .notes }
                     .textFieldStyle(.roundedBorder)
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -77,6 +83,7 @@ struct EditExamView: View {
                     TextEditor(text: $notes)
                         .frame(minHeight: 80)
                         .textInputAutocapitalization(.sentences)
+                        .focused($focusedField, equals: .notes)
                 }
 
                 let subjectType = subjects.first(where: { $0.name == subjectName })?.type ?? 0
@@ -168,7 +175,10 @@ struct EditExamView: View {
                 Text("Dieser Klausurtermin wird dauerhaft gelöscht.")
             }
         }
-        .keyboardDismissToolbar()
+        .keyboardNavigationToolbar(
+            focus: $focusedField,
+            fields: [.title, .notes]
+        )
     }
 
     private func save() async {

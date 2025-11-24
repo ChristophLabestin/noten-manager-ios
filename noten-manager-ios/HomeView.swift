@@ -352,52 +352,38 @@ struct HomeView: View {
         }.count
     }
 
-    private var examSubjectsCount: Int {
-        store.subjects.filter { $0.examSubject ?? false }.count
+    private var upcomingExamsNextTwoWeeksCount: Int {
+        let now = Date()
+        guard let twoWeeks = Calendar.current.date(byAdding: .day, value: 14, to: now) else { return 0 }
+        return store.allExams.filter { exam in
+            !exam.isCompleted && exam.date >= now && exam.date <= twoWeeks
+        }.count
     }
 
     // MARK: - Header & Overview
 
-    private var headerCard: some View {
+    private var compactOverview: some View {
         SettingsCard(
-            title: greeting.isEmpty ? "Hallo" : greeting,
-            subtitle: displayName.isEmpty ? "Willkommen zurück" : "\(displayName)!",
+            title: greeting.isEmpty ? "Willkommen" : greeting,
+            subtitle: displayName.isEmpty ? nil : displayName,
             systemImage: "hand.wave.fill",
-            accent: .indigo
+            accent: .indigo,
+            trailing: {
+                if let year = store.activeSchoolYearId {
+                    PillBadge(
+                        text: year,
+                        systemImage: "calendar",
+                        foreground: Color.cyan,
+                        background: Color.cyan.opacity(0.14)
+                    )
+                }
+            }
         ) {
             VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
-                    PillBadge(
-                        text: store.schoolType == .fos ? "FOS" : "BOS",
-                        systemImage: "seal.fill",
-                        foreground: Color.indigo,
-                        background: Color.indigo.opacity(0.15)
-                    )
-                    if let year = store.activeSchoolYearId {
-                        PillBadge(
-                            text: year,
-                            systemImage: "calendar",
-                            foreground: Color.cyan,
-                            background: Color.cyan.opacity(0.14)
-                        )
-                    }
-                    if let grade = store.gradeYear {
-                        PillBadge(
-                            text: "\(grade). Jahrgang",
-                            systemImage: "graduationcap.fill",
-                            foreground: Color.mint,
-                            background: Color.mint.opacity(0.16)
-                        )
-                    }
-                }
-
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        StatChip(title: "Gesamt", value: formatAverage(overallComputed), accent: .indigo)
-                        StatChip(title: "Fächer", value: "\(subjectsWithoutFachreferat.count)", accent: .cyan)
-                        StatChip(title: "Noten", value: "\(totalGradesCountComputed)", accent: .orange)
-                    }
-                    .padding(.vertical, 2)
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                    StatChip(title: "Gesamt-Ø", value: formatAverage(overallComputed), accent: .indigo)
+                    StatChip(title: "Fächer", value: "\(subjectsWithoutFachreferat.count)", accent: .cyan)
+                    StatChip(title: "Noten", value: "\(totalGradesCountComputed)", accent: .orange)
                 }
 
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -418,15 +404,15 @@ struct HomeView: View {
                                 background: Color.yellow.opacity(0.16)
                             )
                         }
-                        if overdueExamsCount > 0 {
+                        if upcomingExamsNextTwoWeeksCount > 0 {
                             PillBadge(
-                                text: "Prüfungen fällig: \(overdueExamsCount)",
-                                systemImage: "calendar.badge.exclamationmark",
+                                text: "\(upcomingExamsNextTwoWeeksCount) Klausuren stehen an",
+                                systemImage: "calendar.badge.clock",
                                 foreground: .red,
-                                background: Color.red.opacity(0.16)
+                                background: Color.red.opacity(0.12)
                             )
                         }
-                        if overdueHomeworksCount == 0 && homeworkDueTomorrowCount == 0 && overdueExamsCount == 0 {
+                        if overdueHomeworksCount == 0 && homeworkDueTomorrowCount == 0 && upcomingExamsNextTwoWeeksCount == 0 {
                             PillBadge(
                                 text: "Alles im Plan",
                                 systemImage: "checkmark.circle.fill",
@@ -441,36 +427,49 @@ struct HomeView: View {
         }
     }
 
-    private var filterCard: some View {
+    private var subjectsControlCard: some View {
         SettingsCard(
-            title: "Anzeige & Reihenfolge",
-            subtitle: "Filter und Sortierung anpassen",
-            systemImage: "slider.horizontal.3",
-            accent: .cyan
-        ) {
-            SettingsSectionBox {
-                FilterAndReorderRow(
-                    halfYear: $halfYear,
-                    enableDrag: enableDrag,
-                    isEditingOrder: $isEditingOrder,
-                    onToggleEdit: {
+            title: "Fächer & Noten",
+            subtitle: "Filter und Reihenfolge",
+            systemImage: "text.book.closed",
+            accent: .cyan,
+            trailing: {
+                if enableDrag {
+                    Button {
                         toggleEditMode(sortedNames: sortedSubjectsComputed.map { $0.name })
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.up.arrow.down")
+                            Text(isEditingOrder ? "Fertig" : "Sortieren")
+                        }
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 8)
+                            .background(Color.cyan.opacity(0.16))
+                            .foregroundStyle(Color.cyan)
+                            .clipShape(Capsule())
                     }
-                )
+                    .buttonStyle(.plain)
+                }
+            }
+        ) {
+            HStack(alignment: .center, spacing: 4) {
+                HalfYearFilterRow(halfYear: $halfYear)
             }
         }
     }
+
 
     // MARK: - Body
 
     var body: some View {
         List {
-            Section {
             if store.isLoading {
-                SettingsCard(
-                    title: "Sync läuft...",
-                    subtitle: store.loadingLabel,
-                    systemImage: "arrow.triangle.2.circlepath",
+                Section {
+                    SettingsCard(
+                        title: "Sync läuft...",
+                        subtitle: store.loadingLabel,
+                        systemImage: "arrow.triangle.2.circlepath",
                         accent: .cyan
                     ) {
                         ProgressView(value: store.progress, total: 100)
@@ -478,23 +477,22 @@ struct HomeView: View {
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                     .listRowBackground(Color.clear)
                 }
+                .listSectionSeparator(.hidden)
+            }
 
-                headerCard
+            Section {
+                compactOverview
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                     .listRowBackground(Color.clear)
-
-                filterCard
-                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
+                    .listRowSeparator(.hidden)
+                subjectsControlCard
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                     .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
             }
             .listSectionSeparator(.hidden)
 
             Section {
-                SectionHeader()
-                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-
                 if isEditingOrder && enableDrag {
                     ForEach(customOrderWorkingCopy, id: \.self) { name in
                         SubjectRowView(
@@ -504,6 +502,7 @@ struct HomeView: View {
                         )
                         .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                         .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                     }
                     .onMove { indices, newOffset in
                         customOrderWorkingCopy.move(fromOffsets: indices, toOffset: newOffset)
@@ -517,6 +516,7 @@ struct HomeView: View {
                         )
                         .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                         .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                     }
                 }
             }
@@ -526,17 +526,8 @@ struct HomeView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .listRowSeparator(.hidden)
-        .background(
-            LinearGradient(
-                colors: [
-                    Color(.systemGray6),
-                    Color(.systemBackground)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-        )
+        .listSectionSpacing(0)
+        .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine"))
 
         // Unsichtbare NavigationLinks (NavigationStack-Ziele)
         .background(
@@ -548,10 +539,10 @@ struct HomeView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                ToolbarTitleView(greeting: greeting, displayName: displayName)
+                ToolbarTitleView(title: "Übersicht", subtitle: "Fächer & Noten")
             }
             ToolbarItem(placement: .navigationBarTrailing) {
-                HStack(spacing: 12) {
+                HStack(spacing: 0) {
                     Button {
                         showExamSheet = true
                     } label: {
@@ -641,27 +632,7 @@ struct HomeView: View {
     }
 }
 
-private struct SectionHeader: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Fächer & Noten")
-                .font(.title3).bold()
-            Text("Tippe auf ein Fach für Details")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color(.separator).opacity(0.15), lineWidth: 1)
-        )
-    }
-}
+
 
 struct SegmentButton: View {
     @Environment(\.colorScheme) private var colorScheme
@@ -677,17 +648,25 @@ struct SegmentButton: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 6)
                 .padding(.horizontal, 10)
-                .background(active ? Color.white : Color.clear)
+                .background(active ? activeBackground : Color.clear)
                 .foregroundStyle(active ? activeTextColor : inactiveTextColor)
                 .clipShape(Capsule())
-                .shadow(color: active ? shadowColor : .clear,
-                        radius: active ? 4 : 0, x: 0, y: active ? 2 : 0)
+                .shadow(
+                    color: active ? shadowColor : .clear,
+                    radius: active ? 4 : 0,
+                    x: 0,
+                    y: active ? 2 : 0
+                )
         }
         .buttonStyle(.plain)
     }
 
+    private var activeBackground: Color {
+        colorScheme == .dark ? Color.white.opacity(0.14) : Color.white
+    }
+
     private var activeTextColor: Color {
-        colorScheme == .dark ? Color.black : Color(hex: "#111827")
+        colorScheme == .dark ? Color.white : Color(hex: "#111827")
     }
 
     private var inactiveTextColor: Color {
@@ -905,41 +884,39 @@ struct Tag: View {
 
 // MARK: - Extracted small views for HomeView body
 
-private struct FilterAndReorderRow: View {
+private struct HalfYearFilterRow: View {
     @Environment(\.colorScheme) private var colorScheme
-
     @Binding var halfYear: HomeView.HalfYearFilter
-    let enableDrag: Bool
-    @Binding var isEditingOrder: Bool
-    let onToggleEdit: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            HStack(spacing: 4) {
-                SegmentButton(title: "Alle", active: halfYear == .all) { halfYear = .all }
-                SegmentButton(title: "1. Hj", active: halfYear == .one) { halfYear = .one }
-                SegmentButton(title: "2. Hj", active: halfYear == .two) { halfYear = .two }
-            }
-            .padding(4)
-            .background(toggleBackground)
-            .clipShape(Capsule())
-            .shadow(color: toggleShadow, radius: 8, x: 0, y: 4)
-
-            Spacer()
-
-            if enableDrag {
-                Button(isEditingOrder ? "Fertig" : "Reihenfolge") {
-                    onToggleEdit()
-                }
-                .font(.footnote)
-            }
+        HStack(spacing: 6) {
+            SegmentButton(title: "Alle", active: halfYear == .all) { halfYear = .all }
+            SegmentButton(title: "1. Hj", active: halfYear == .one) { halfYear = .one }
+            SegmentButton(title: "2. Hj", active: halfYear == .two) { halfYear = .two }
         }
+        .padding(6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(toggleBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(toggleStroke, lineWidth: 1)
+        )
+        .shadow(color: toggleShadow, radius: 8, x: 0, y: 4)
     }
 
     private var toggleBackground: Color {
         colorScheme == .dark
-            ? Color(red: 15 / 255, green: 23 / 255, blue: 42 / 255).opacity(0.9)
-            : .white
+            ? Color.white.opacity(0.06)
+            : Color(.systemBackground)
+    }
+
+    private var toggleStroke: Color {
+        colorScheme == .dark
+            ? Color.white.opacity(0.08)
+            : Color.black.opacity(0.05)
     }
 
     private var toggleShadow: Color {
@@ -947,54 +924,22 @@ private struct FilterAndReorderRow: View {
     }
 }
 
-private struct StatChip: View {
-    let title: String
-    let value: String
-    let accent: Color
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title.uppercased())
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .monospacedDigit()
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(accent.opacity(0.2), lineWidth: 1)
-        )
-    }
-}
-
 
 private struct ToolbarTitleView: View {
-    let greeting: String
-    let displayName: String
+    let title: String
+    let subtitle: String
 
     var body: some View {
         VStack(spacing: 2) {
-            Text(greeting)
+            Text(title)
                 .font(.headline)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text(subtitle)
+                .font(.caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
-            if !displayName.isEmpty {
-                Text("\(displayName)!")
-                    .font(.title3)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
         }
         .frame(maxWidth: .infinity)
         .multilineTextAlignment(.center)

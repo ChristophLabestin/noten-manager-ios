@@ -16,6 +16,11 @@ struct AddHomeworkView: View {
     @State private var error: String?
     @State private var shareWithGroup: Bool = false
     @State private var selectedGroupId: String?
+    @FocusState private var focusedField: Field?
+
+    private enum Field: Hashable {
+        case title
+    }
 
     private var subjects: [Subject] {
         store.subjects.filter { $0.name != "Fachreferat" }
@@ -43,73 +48,136 @@ struct AddHomeworkView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Hausaufgabe") {
-                    Picker("Fach", selection: $subjectName) {
-                        ForEach(subjectOptions, id: \.self) { name in
-                            Text(name).tag(name)
-                        }
-                    }
-                    if subjects.isEmpty {
-                        Text("Lege zuerst ein Fach an, um Hausaufgaben zuzuordnen.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 16) {
+                    SettingsCard(
+                        title: "Hausaufgabe",
+                        subtitle: "Fach, Aufgabe und Fälligkeit",
+                        systemImage: "checklist",
+                        accent: .cyan
+                    ) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            SettingsSectionBox {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("Fach")
+                                        .font(.headline)
+                                    Picker("Fach", selection: $subjectName) {
+                                        ForEach(subjectOptions, id: \.self) { name in
+                                            Text(name).tag(name)
+                                        }
+                                    }
+                                    .pickerStyle(.menu)
+                                    .tint(.primary)
+                                    .padding(10)
+                                    .background(Color.formInputBackground)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-                    if subjectName == "Allgemein" {
-                        if store.groupIds.isEmpty {
-                            Text("Du bist in keiner Gruppe. Tritt einer Gruppe bei, um allgemeine Hausaufgaben anzulegen.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Picker("Gruppe", selection: Binding(
-                                get: { selectedGroupId ?? store.groupIds.first ?? "" },
-                                set: { selectedGroupId = $0 }
-                            )) {
-                                ForEach(store.groupIds, id: \.self) { gid in
-                                    Text(store.groupNames[gid] ?? gid).tag(gid)
+                                    if subjects.isEmpty {
+                                        Text("Lege zuerst ein Fach an, um Hausaufgaben zuzuordnen.")
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
+                                    }
+
+                                    if subjectName == "Allgemein" {
+                                        if store.groupIds.isEmpty {
+                                            Text("Du bist in keiner Gruppe. Tritt einer Gruppe bei, um allgemeine Hausaufgaben anzulegen.")
+                                                .font(.footnote)
+                                                .foregroundStyle(.secondary)
+                                        } else {
+                                            VStack(alignment: .leading, spacing: 6) {
+                                                Text("Gruppe")
+                                                    .font(.subheadline)
+                                                Picker("Gruppe", selection: Binding(
+                                                    get: { selectedGroupId ?? store.groupIds.first ?? "" },
+                                                    set: { selectedGroupId = $0 }
+                                                )) {
+                                                    ForEach(store.groupIds, id: \.self) { gid in
+                                                        Text(store.groupNames[gid] ?? gid).tag(gid)
+                                                    }
+                                                }
+                                                .pickerStyle(.menu)
+                                                .padding(10)
+                                                .background(Color.formInputBackground)
+                                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            SettingsSectionBox {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text("Aufgabe")
+                                            .font(.headline)
+                                        TextEditor(text: $title)
+                                            .frame(minHeight: 90)
+                                            .textInputAutocapitalization(.sentences)
+                                            .scrollContentBackground(.hidden)
+                                            .focused($focusedField, equals: .title)
+                                            .padding(10)
+                                            .background(Color.formInputBackground)
+                                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    }
+
+                                    Toggle("Fälligkeitsdatum verwenden", isOn: $hasDueDate)
+                                        .tint(.cyan)
+
+                                    if hasDueDate {
+                                        DatePicker(
+                                            "Fällig am",
+                                            selection: $dueDate,
+                                            displayedComponents: .date
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
 
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Aufgabe")
-                        TextEditor(text: $title)
-                            .frame(minHeight: 80)
-                            .textInputAutocapitalization(.sentences)
+                    SettingsCard(
+                        title: "Erinnerung & Teilen",
+                        subtitle: "Benachrichtigungen für die Aufgabe",
+                        systemImage: "bell.badge.fill",
+                        accent: .orange
+                    ) {
+                        SettingsSectionBox {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Toggle("Erinnerung planen", isOn: $hasReminder)
+                                    .tint(.orange)
+
+                                if hasReminder {
+                                    DatePicker(
+                                        "Erinnerung",
+                                        selection: $reminderDate,
+                                        displayedComponents: [.date, .hourAndMinute]
+                                    )
+                                }
+
+                                if !store.groupIds.isEmpty && subjectName != "Allgemein" {
+                                    Toggle("Mit Gruppen teilen", isOn: $shareWithGroup)
+                                        .tint(.orange)
+                                    Text("Geteilte Aufgaben erscheinen bei allen Gruppenmitgliedern.")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
                     }
 
-                    Toggle("Fälligkeitsdatum verwenden", isOn: $hasDueDate)
-
-                    if hasDueDate {
-                        DatePicker(
-                            "Fällig am",
-                            selection: $dueDate,
-                            displayedComponents: .date
-                        )
-                    }
-
-                    Toggle("Erinnerung planen", isOn: $hasReminder)
-
-                    if hasReminder {
-                        DatePicker(
-                            "Erinnerung",
-                            selection: $reminderDate,
-                            displayedComponents: [.date, .hourAndMinute]
-                        )
-                    }
-
-                    if !store.groupIds.isEmpty && subjectName != "Allgemein" {
-                        Toggle("Mit Gruppen teilen", isOn: $shareWithGroup)
+                    if let error {
+                        Text(error)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-                if let error {
-                    Text(error)
-                        .foregroundStyle(.red)
-                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
+            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine"))
             .navigationTitle("Hausaufgabe hinzufügen")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Abbrechen") { dismiss() }
@@ -121,6 +189,14 @@ struct AddHomeworkView: View {
                         if isSaving { ProgressView() } else { Text("Speichern") }
                     }
                     .disabled(!canSave || isSaving || subjects.isEmpty)
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    KeyboardNavigationAccessory(
+                        focus: $focusedField,
+                        fields: [.title],
+                        label: nil,
+                        onDone: { hideKeyboard() }
+                    )
                 }
             }
             .scrollDismissesKeyboard(.interactively)
@@ -140,7 +216,7 @@ struct AddHomeworkView: View {
                 selectedGroupId = store.groupIds.first
             }
         }
-        .keyboardDismissToolbar()
+        .modifier(KeyboardToolbarInset(height: 64))
     }
 
     private func save() async {

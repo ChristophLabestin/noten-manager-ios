@@ -58,6 +58,8 @@ struct MainView: View {
             .safeAreaInset(edge: .bottom) {
                 Color.clear.frame(height: 100)
             }
+            // BottomNav soll bei geöffneter Tastatur unten bleiben
+            .ignoresSafeArea(.keyboard, edges: .bottom)
             // Statische BottomNav als Overlay über allen Seiten
             .overlay(alignment: .bottom) {
                 BottomNavView(
@@ -71,6 +73,7 @@ struct MainView: View {
                     quickAddPreselectedSubjectName: quickAddSubjectName
                 )
                 .environmentObject(gradesStore)
+                .ignoresSafeArea(.keyboard, edges: .bottom)
             }
         }
         // Änderungen am gemeldeten Fachnamen von SubjectDetail entgegennehmen

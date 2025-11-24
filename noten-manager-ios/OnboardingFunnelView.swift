@@ -200,7 +200,7 @@ struct OnboardingFunnelView: View {
                     .submitLabel(.done)
                     .onSubmit { hideKeyboard() }
                     .padding(14)
-                    .background(Color(.secondarySystemBackground))
+                    .background(Color.formInputBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 14))
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -276,7 +276,7 @@ struct OnboardingFunnelView: View {
             .disabled(!isValidSchoolYear(schoolYearInput) || !gradeOptionsForSchoolType.contains(gradeSelection) || isSavingSchoolYear)
         }
         .padding(18)
-        .background(RoundedRectangle(cornerRadius: 18).fill(Color(.tertiarySystemBackground)))
+        .background(RoundedRectangle(cornerRadius: 18).fill(Color.formCardBackground))
     }
 
     private var groupsStep: some View {
@@ -293,7 +293,7 @@ struct OnboardingFunnelView: View {
                 .submitLabel(.done)
                 .onSubmit { hideKeyboard() }
                 .padding(12)
-                .background(Color(.secondarySystemBackground))
+                .background(Color.formInputBackground)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
 
             Button {
@@ -382,7 +382,7 @@ struct OnboardingFunnelView: View {
             .frame(maxWidth: .infinity)
         }
         .padding(18)
-        .background(RoundedRectangle(cornerRadius: 18).fill(Color(.tertiarySystemBackground)))
+        .background(RoundedRectangle(cornerRadius: 18).fill(Color.formCardBackground))
         .onAppear {
             if !didPrefetchGroupNames {
                 didPrefetchGroupNames = true
@@ -509,7 +509,7 @@ struct OnboardingFunnelView: View {
                             .submitLabel(.done)
                             .onSubmit { hideKeyboard() }
                             .padding(10)
-                            .background(Color(.secondarySystemBackground))
+                            .background(Color.formInputBackground)
                             .clipShape(RoundedRectangle(cornerRadius: 10))
 
                         Picker("Typ", selection: $manualType) {
@@ -620,7 +620,7 @@ struct OnboardingFunnelView: View {
             .disabled(isFinishing || !hasSubjects)
         }
         .padding(18)
-        .background(RoundedRectangle(cornerRadius: 18).fill(Color(.tertiarySystemBackground)))
+        .background(RoundedRectangle(cornerRadius: 18).fill(Color.formCardBackground))
     }
 
     private var stepSubtitle: String {

@@ -10,6 +10,11 @@ struct AddSubjectView: View {
     @State private var isElective: Bool = false
     @State private var isSaving: Bool = false
     @State private var error: String?
+    @FocusState private var focusedField: Field?
+
+    private enum Field: Hashable {
+        case name
+    }
 
     var body: some View {
         NavigationStack {
@@ -27,9 +32,10 @@ struct AddSubjectView: View {
                                     .font(.headline)
                                 TextField("z. B. Mathematik", text: $name)
                                     .submitLabel(.done)
+                                    .focused($focusedField, equals: .name)
                                     .onSubmit { hideKeyboard() }
                                     .padding(12)
-                                    .background(Color(.secondarySystemBackground))
+                                    .background(Color.formInputBackground)
                                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                             }
 
@@ -63,41 +69,16 @@ struct AddSubjectView: View {
                                     .font(.footnote)
                                     .foregroundStyle(.red)
                             }
-
-                            Button {
-                                Task { await save() }
-                            } label: {
-                                if isSaving { ProgressView() } else { Text("Fach speichern") }
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(.cyan)
-                            .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
                         }
                     }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
-            .background(
-                LinearGradient(
-                    colors: [
-                        Color(.systemGray6),
-                        Color(.systemBackground)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
-            )
+            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine"))
             .navigationTitle("Fach anlegen")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Text("Fach anlegen")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .multilineTextAlignment(.center)
-                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Abbrechen") { dismiss() }
                 }
@@ -111,11 +92,19 @@ struct AddSubjectView: View {
                     }
                     .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
                 }
+                ToolbarItemGroup(placement: .keyboard) {
+                    KeyboardNavigationAccessory(
+                        focus: $focusedField,
+                        fields: [.name],
+                        label: nil,
+                        onDone: { hideKeyboard() }
+                    )
+                }
             }
             .scrollDismissesKeyboard(.interactively)
             .hideKeyboardOnTap()
         }
-        .keyboardDismissToolbar()
+        .modifier(KeyboardToolbarInset(height: 64))
     }
 
     private func save() async {

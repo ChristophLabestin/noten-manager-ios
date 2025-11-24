@@ -21,6 +21,7 @@ struct AddGradeView: View {
     @State private var halfYearSelection: Int = AddGradeView.defaultHalfYear()
     @State private var isSaving: Bool = false
     @State private var error: String?
+    @FocusState private var focusedField: Field?
 
     @State private var linkToExam: Bool = false
     @State private var selectedLinkedExamId: String? = nil
@@ -56,104 +57,184 @@ struct AddGradeView: View {
         self.markLinkedExamCompletedByDefault = markLinkedExamCompletedByDefault
     }
 
+    private enum Field: Hashable {
+        case grade, note
+    }
+
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Fach & Leistung") {
-                    Picker("Fach", selection: $subjectName) {
-                        ForEach(subjects, id: \.name) { s in
-                            Text(s.name).tag(s.name)
-                        }
-                    }
-                    TextField("Note (0–15)", text: $gradeText)
-                        .keyboardType(.numberPad)
-                        .submitLabel(.done)
-                        .onSubmit { hideKeyboard() }
-
-                    // Art & Halbjahr wie im React-Client:
-                    // Hauptfach: Schulaufgabe (2), Kurzarbeit (1), Mündlich/EX (0)
-                    // Nebenfach: Kurzarbeit (1), Mündlich/EX (0)
-                    let subjectType = subjects.first(where: { $0.name == subjectName })?.type ?? 0
-                    Picker("Art", selection: $gradeWeight) {
-                        if subjectType == 0 {
-                            Text("Kurzarbeit").tag(1)
-                            Text("Mündlich / EX").tag(0)
-                        } else {
-                            Text("Schulaufgabe").tag(2)
-                            Text("Kurzarbeit").tag(1)
-                            Text("Mündlich / EX").tag(0)
-                        }
-                    }
-
-                    DatePicker("Datum", selection: $date, displayedComponents: .date)
-                    Picker("Halbjahr", selection: $halfYearSelection) {
-                        Text("1. Hj").tag(1)
-                        Text("2. Hj").tag(2)
-                    }
-                    .pickerStyle(.segmented)
-                    TextField("Notiz (optional)", text: $note)
-                        .submitLabel(.done)
-                        .onSubmit { hideKeyboard() }
-                }
-                Section("Prüfung verknüpfen") {
-                    Toggle("Mit Prüfung verknüpfen", isOn: $linkToExam)
-                        .onChange(of: linkToExam) { enabled in
-                            if enabled {
-                                ensureLinkedExamSelection()
-                            } else {
-                                selectedLinkedExamId = nil
-                            }
-                        }
-                    if linkToExam {
-                        if linkableExams.isEmpty {
-                            Text("Keine offenen Termine für dieses Fach gefunden.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            VStack(alignment: .leading, spacing: 10) {
-                                ForEach(linkableExams) { exam in
-                                    let isSelected = selectedLinkedExamId == exam.id
-                                    Button {
-                                        selectedLinkedExamId = exam.id
-                                    } label: {
-                                        HStack(alignment: .top, spacing: 10) {
-                                            VStack(alignment: .leading, spacing: 4) {
-                                                Text(examTitle(exam))
-                                                    .font(.body.weight(.semibold))
-                                                    .foregroundStyle(.primary)
-                                                    .lineLimit(2)
-                                                Text(examDateString(exam))
-                                                    .font(.caption)
-                                                    .foregroundStyle(.secondary)
-                                            }
-                                            Spacer()
-                                            Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
-                                                .foregroundStyle(isSelected ? .blue : .secondary)
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 16) {
+                    SettingsCard(
+                        title: "Note erfassen",
+                        subtitle: "Fach, Gewichtung und Halbjahr",
+                        systemImage: "list.bullet.rectangle.portrait.fill",
+                        accent: .indigo
+                    ) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            SettingsSectionBox {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("Fach")
+                                        .font(.headline)
+                                    Picker("Fach", selection: $subjectName) {
+                                        ForEach(subjects, id: \.name) { s in
+                                            Text(s.name).tag(s.name)
                                         }
-                                        .padding(10)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 10)
-                                                .fill(Color(.secondarySystemBackground))
-                                        )
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 10)
-                                                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1)
-                                        )
                                     }
-                                    .buttonStyle(.plain)
+                                    .pickerStyle(.menu)
+                                    .tint(.primary)
+                                    .padding(10)
+                                    .background(Color.formInputBackground)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                                    if subjects.isEmpty {
+                                        Text("Lege zuerst ein Fach an, um eine Note zuzuordnen.")
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
-                                Text("Die ausgewählte Prüfung wird als erledigt markiert.")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
+                            }
+
+                            SettingsSectionBox {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text("Leistung")
+                                        .font(.headline)
+
+                                    TextField("Note (0–15)", text: $gradeText)
+                                        .keyboardType(.numberPad)
+                                        .submitLabel(.next)
+                                        .focused($focusedField, equals: .grade)
+                                        .onSubmit { focusedField = .note }
+                                        .padding(12)
+                                        .background(Color.formInputBackground)
+                                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                                    HStack(spacing: 12) {
+                                        let subjectType = subjects.first(where: { $0.name == subjectName })?.type ?? 0
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            Text("Art")
+                                                .font(.subheadline)
+                                            Picker("", selection: $gradeWeight) {
+                                                if subjectType == 0 {
+                                                    Text("Kurzarbeit").tag(1)
+                                                    Text("Mündlich / EX").tag(0)
+                                                } else {
+                                                    Text("Schulaufgabe").tag(2)
+                                                    Text("Kurzarbeit").tag(1)
+                                                    Text("Mündlich / EX").tag(0)
+                                                }
+                                            }
+                                            .pickerStyle(.segmented)
+                                        }
+
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            Text("Halbjahr")
+                                                .font(.subheadline)
+                                            Picker("", selection: $halfYearSelection) {
+                                                Text("1. Hj").tag(1)
+                                                Text("2. Hj").tag(2)
+                                            }
+                                            .pickerStyle(.segmented)
+                                        }
+                                    }
+
+                                    DatePicker("Datum", selection: $date, displayedComponents: .date)
+
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text("Notiz (optional)")
+                                            .font(.subheadline)
+                                        TextField("Kommentar zur Leistung", text: $note)
+                                            .submitLabel(.done)
+                                            .focused($focusedField, equals: .note)
+                                            .onSubmit { hideKeyboard() }
+                                            .padding(12)
+                                            .background(Color.formInputBackground)
+                                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    }
+                                }
                             }
                         }
                     }
+
+                    SettingsCard(
+                        title: "Prüfung verknüpfen",
+                        subtitle: "Optional mit einem Termin verbinden",
+                        systemImage: "link.circle.fill",
+                        accent: .orange
+                    ) {
+                        SettingsSectionBox {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Toggle("Mit Prüfung verknüpfen", isOn: $linkToExam)
+                                    .tint(.orange)
+                                    .onChange(of: linkToExam) { enabled in
+                                        if enabled {
+                                            ensureLinkedExamSelection()
+                                        } else {
+                                            selectedLinkedExamId = nil
+                                        }
+                                    }
+
+                                if linkToExam {
+                                    if linkableExams.isEmpty {
+                                        Text("Keine offenen Termine für dieses Fach gefunden.")
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
+                                    } else {
+                                        VStack(alignment: .leading, spacing: 10) {
+                                            ForEach(linkableExams) { exam in
+                                                let isSelected = selectedLinkedExamId == exam.id
+                                                Button {
+                                                    selectedLinkedExamId = exam.id
+                                                } label: {
+                                                    HStack(alignment: .top, spacing: 10) {
+                                                        VStack(alignment: .leading, spacing: 4) {
+                                                            Text(examTitle(exam))
+                                                                .font(.body.weight(.semibold))
+                                                                .foregroundStyle(.primary)
+                                                                .lineLimit(2)
+                                                            Text(examDateString(exam))
+                                                                .font(.caption)
+                                                                .foregroundStyle(.secondary)
+                                                        }
+                                                        Spacer()
+                                                        Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
+                                                            .foregroundStyle(isSelected ? .orange : .secondary)
+                                                    }
+                                                    .padding(12)
+                                                    .background(
+                                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                            .fill(Color(.secondarySystemBackground))
+                                                    )
+                                                    .overlay(
+                                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                            .stroke(isSelected ? Color.orange.opacity(0.8) : Color(.separator).opacity(0.1), lineWidth: 1)
+                                                    )
+                                                }
+                                                .buttonStyle(.plain)
+                                            }
+                                            Text("Die ausgewählte Prüfung wird als erledigt markiert.")
+                                                .font(.footnote)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if let error {
+                        Text(error)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
-                if let error {
-                    Text(error).foregroundStyle(.red)
-                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
+            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine"))
             .navigationTitle("Note hinzufügen")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Abbrechen") { dismiss() }
@@ -165,6 +246,14 @@ struct AddGradeView: View {
                         if isSaving { ProgressView() } else { Text("Speichern") }
                     }
                     .disabled(!canSave || isSaving)
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    KeyboardNavigationAccessory(
+                        focus: $focusedField,
+                        fields: [.grade, .note],
+                        label: nil,
+                        onDone: { hideKeyboard() }
+                    )
                 }
             }
             .scrollDismissesKeyboard(.interactively)
@@ -178,7 +267,6 @@ struct AddGradeView: View {
                         subjectName = subjects.first?.name ?? ""
                     }
                 }
-                // Standardmäßig Mündlich / EX oder vorselektiertes Gewicht
                 if let w = preselectedWeight {
                     gradeWeight = w
                 } else {
@@ -219,7 +307,7 @@ struct AddGradeView: View {
                 }
             }
         }
-        .keyboardDismissToolbar()
+        .modifier(KeyboardToolbarInset(height: 64))
     }
 
     private func save() async {

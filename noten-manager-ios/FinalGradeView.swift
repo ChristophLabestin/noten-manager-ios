@@ -198,6 +198,7 @@ struct FinalGradeView: View {
         ScrollView {
             contentStack
         }
+        .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine"))
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showHomeworkSheet) {
             HomeworkListView()
@@ -259,36 +260,18 @@ struct FinalGradeView: View {
                 }
             }
             ToolbarItem(placement: .navigationBarTrailing) {
-                HStack {
+                HStack(spacing: 0) {
                     Button {
                         showExamSheet = true
                     } label: {
-                        ZStack(alignment: .topTrailing) {
-                            Image(systemName: "calendar.badge.clock")
-                                .imageScale(.large)
-                            if hasOverdueExams {
-                                Circle()
-                                    .fill(Color.red)
-                                    .frame(width: 8, height: 8)
-                                    .offset(x: 4, y: -4)
-                            }
-                        }
+                        ToolbarIcon(symbol: "calendar.badge.clock", showDot: hasOverdueExams)
                     }
                     .accessibilityLabel("Klausurtermine anzeigen")
 
                     Button {
                         showHomeworkSheet = true
                     } label: {
-                        ZStack(alignment: .topTrailing) {
-                            Image(systemName: "checklist")
-                                .imageScale(.large)
-                            if hasOverdueHomeworks || hasHomeworkDueTomorrow {
-                                Circle()
-                                    .fill(Color.red)
-                                    .frame(width: 8, height: 8)
-                                    .offset(x: 4, y: -4)
-                            }
-                        }
+                        ToolbarIcon(symbol: "checklist", showDot: hasOverdueHomeworks || hasHomeworkDueTomorrow)
                     }
                     .accessibilityLabel("Aktive Hausaufgaben anzeigen")
                 }
@@ -455,10 +438,13 @@ struct FinalGradeView: View {
 
     @ViewBuilder
     private var abiturOverviewCard: some View {
-        SummaryCard(title: "") {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Abiturnoten")
-                    .font(.headline)
+        SettingsCard(
+            title: "Abiturnoten",
+            subtitle: nil,
+            systemImage: "graduationcap.fill",
+            accent: .mint
+        ) {
+            SettingsSectionBox {
                 if examSubjectFinals.isEmpty {
                     Text("Trage deine Abiturnoten im Abitur-Bereich ein, um hier eine Übersicht zu sehen.")
                         .font(.caption)
@@ -477,19 +463,20 @@ struct FinalGradeView: View {
                                     .clipShape(Capsule())
                             }
                         }
-                    }
-                    if let avg = abiturExamAverage {
-                        HStack {
-                            Text("Durchschnitt")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Text(formatAverage(avg))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(gradeColor(avg).opacity(0.15))
-                                .foregroundStyle(gradeColor(avg))
-                                .clipShape(Capsule())
+                        if let avg = abiturExamAverage {
+                            Divider().padding(.vertical, 4)
+                            HStack {
+                                Text("Durchschnitt")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text(formatAverage(avg))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(gradeColor(avg).opacity(0.15))
+                                    .foregroundStyle(gradeColor(avg))
+                                    .clipShape(Capsule())
+                            }
                         }
                     }
                 }
@@ -499,27 +486,32 @@ struct FinalGradeView: View {
 
     @ViewBuilder
     private var pointsCard: some View {
-        SummaryCard(title: "") {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Erreichte Punkte")
-                    .font(.headline)
-                Text("\(Int(round(fobosoSummary.totalPoints))) / \(fobosoSummary.maxPoints)")
-                    .font(.title3).bold()
-                Text("Prüfungen (\(schoolType == .fos ? "dreifach" : "zweifach")): \(Int(round(fobosoSummary.examPointsDouble))) Punkte")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text("Halbjahresergebnisse: \(Int(round(fobosoSummary.halfYearPoints))) Punkte (\(halfYearSummary.count) HJE).")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if practicalYearSummary.count > 0 {
-                    Text("Praktikum 11.: \(Int(round(practicalYearSummary.totalPoints))) Punkte (\(practicalYearSummary.count) Jahresleistung).")
+        SettingsCard(
+            title: "Erreichte Punkte",
+            subtitle: nil,
+            systemImage: "chart.bar.fill",
+            accent: .orange
+        ) {
+            SettingsSectionBox {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("\(Int(round(fobosoSummary.totalPoints))) / \(fobosoSummary.maxPoints)")
+                        .font(.title3).bold()
+                    Text("Prüfungen (\(schoolType == .fos ? "dreifach" : "zweifach")): \(Int(round(fobosoSummary.examPointsDouble))) Punkte")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                }
-                if fachreferatHalfYearSummary.count > 0 {
-                    Text("Fachreferat: \(Int(round(fachreferatHalfYearSummary.totalPoints))) Punkte (\(fachreferatHalfYearSummary.count) HJE).")
+                    Text("Halbjahresergebnisse: \(Int(round(fobosoSummary.halfYearPoints))) Punkte (\(halfYearSummary.count) HJE).")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    if practicalYearSummary.count > 0 {
+                        Text("Praktikum 11.: \(Int(round(practicalYearSummary.totalPoints))) Punkte (\(practicalYearSummary.count) Jahresleistung).")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if fachreferatHalfYearSummary.count > 0 {
+                        Text("Fachreferat: \(Int(round(fachreferatHalfYearSummary.totalPoints))) Punkte (\(fachreferatHalfYearSummary.count) HJE).")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
@@ -527,30 +519,17 @@ struct FinalGradeView: View {
 
     @ViewBuilder
     private var subjectCountRow: some View {
-        HStack(spacing: 12) {
-            SummaryCard(title: "Fächer") {
-                Text("\(eligibleSubjectHandles.count)")
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(chipBackgroundColor)
-                    .foregroundStyle(chipForegroundColor)
-                    .clipShape(Capsule())
-            }
-            SummaryCard(title: "Halbjahre") {
-                if maxDroppedHalfYears > 0 {
-                    Text("\(selectedDropCount) / \(maxDroppedHalfYears)")
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(chipBackgroundColor)
-                        .foregroundStyle(chipForegroundColor)
-                        .clipShape(Capsule())
-                } else {
-                    Text("\(selectedDropCount)")
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(chipBackgroundColor)
-                        .foregroundStyle(chipForegroundColor)
-                        .clipShape(Capsule())
+        SettingsCard(
+            title: "Kurzüberblick",
+            subtitle: nil,
+            systemImage: "info.circle",
+            accent: .cyan
+        ) {
+            SettingsSectionBox {
+                HStack(spacing: 10) {
+                    StatChip(title: "Fächer", value: "\(eligibleSubjectHandles.count)", accent: .cyan)
+                    let halfYearText: String = maxDroppedHalfYears > 0 ? "\(selectedDropCount) / \(maxDroppedHalfYears)" : "\(selectedDropCount)"
+                    StatChip(title: "Halbjahre", value: halfYearText, accent: .orange)
                 }
             }
         }
@@ -558,10 +537,13 @@ struct FinalGradeView: View {
 
     @ViewBuilder
     private var droppedHalfYearsCard: some View {
-        SummaryCard(title: "") {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Gestrichene Halbjahre")
-                    .font(.headline)
+        SettingsCard(
+            title: "Gestrichene Halbjahre",
+            subtitle: nil,
+            systemImage: "scissors",
+            accent: .indigo
+        ) {
+            SettingsSectionBox {
                 Text(
                     maxDroppedHalfYears > 0
                     ? "Du kannst insgesamt bis zu \(maxDroppedHalfYears) Halbjahre streichen."
@@ -654,134 +636,138 @@ struct FinalGradeView: View {
         let secondHalfYearAverage = calculateHalfYearAverageForSubject(subjectGrades, handle.subject.type, 2)
         let subjectAverage = subjectAverageFor(handle: handle)
 
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 8) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(handle.subject.name).font(.headline)
-                    if let yearLabel = handle.yearLabel {
-                        Text("\(yearLabel) Jahrgang")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+        SettingsSectionBox {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(handle.subject.name).font(.headline)
+                        if let yearLabel = handle.yearLabel {
+                            Text("\(yearLabel) Jahrgang")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                }
-                Spacer()
-                HStack(spacing: 6) {
+                    Spacer()
                     Tag(
                         text: handle.subject.type == 1 ? "Hauptfach" : "Nebenfach",
                         style: handle.subject.type == 1 ? .main : .minor
                     )
                 }
-            }
 
-            HStack {
-                Text("Fach-Durchschnitt").font(.subheadline).foregroundStyle(.secondary)
-                Spacer()
-                Text(formatAverage(subjectAverage))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(gradeColor(subjectAverage).opacity(0.15))
-                    .foregroundStyle(gradeColor(subjectAverage))
-                    .clipShape(Capsule())
-            }
+                HStack {
+                    Text("Fach-Durchschnitt").font(.subheadline).foregroundStyle(.secondary)
+                    Spacer()
+                    Text(formatAverage(subjectAverage))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(gradeColor(subjectAverage).opacity(0.15))
+                        .foregroundStyle(gradeColor(subjectAverage))
+                        .clipShape(Capsule())
+                }
 
-            HStack {
-                Text("1. Halbjahr")
-                Spacer()
-                Text(formatAverage(firstHalfYearAverage))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(gradeColor(firstHalfYearAverage).opacity(0.15))
-                    .foregroundStyle(gradeColor(firstHalfYearAverage))
-                    .clipShape(Capsule())
-                    .opacity(isHalfYear1Selected ? 0.6 : 1.0)
-                //Spacer()
-                Toggle("", isOn: Binding(
-                    get: { isHalfYear1Selected },
-                    set: { _ in handleToggleHalfYear(handle: handle, halfYear: 1) }
-                ))
-                .labelsHidden()
-                .accessibilityLabel("1. Halbjahr streichen")
-                .disabled(disableHalfYear1 || !hasHalfYear1)
-            }
+                HStack {
+                    Text("1. Halbjahr")
+                    Spacer()
+                    Text(formatAverage(firstHalfYearAverage))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(gradeColor(firstHalfYearAverage).opacity(0.15))
+                        .foregroundStyle(gradeColor(firstHalfYearAverage))
+                        .clipShape(Capsule())
+                        .opacity(isHalfYear1Selected ? 0.6 : 1.0)
+                    Toggle("", isOn: Binding(
+                        get: { isHalfYear1Selected },
+                        set: { _ in handleToggleHalfYear(handle: handle, halfYear: 1) }
+                    ))
+                    .labelsHidden()
+                    .tint(.indigo)
+                    .accessibilityLabel("1. Halbjahr streichen")
+                    .disabled(disableHalfYear1 || !hasHalfYear1)
+                }
 
-            HStack {
-                Text("2. Halbjahr")
-                Spacer()
-                Text(formatAverage(secondHalfYearAverage))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(gradeColor(secondHalfYearAverage).opacity(0.15))
-                    .foregroundStyle(gradeColor(secondHalfYearAverage))
-                    .clipShape(Capsule())
-                    .opacity(isHalfYear2Selected ? 0.6 : 1.0)
-                //Spacer()
-                Toggle("", isOn: Binding(
-                    get: { isHalfYear2Selected },
-                    set: { _ in handleToggleHalfYear(handle: handle, halfYear: 2) }
-                ))
-                .labelsHidden()
-                .accessibilityLabel("2. Halbjahr streichen")
-                .disabled(disableHalfYear2 || !hasHalfYear2)
+                HStack {
+                    Text("2. Halbjahr")
+                    Spacer()
+                    Text(formatAverage(secondHalfYearAverage))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(gradeColor(secondHalfYearAverage).opacity(0.15))
+                        .foregroundStyle(gradeColor(secondHalfYearAverage))
+                        .clipShape(Capsule())
+                        .opacity(isHalfYear2Selected ? 0.6 : 1.0)
+                    Toggle("", isOn: Binding(
+                        get: { isHalfYear2Selected },
+                        set: { _ in handleToggleHalfYear(handle: handle, halfYear: 2) }
+                    ))
+                    .labelsHidden()
+                    .tint(.indigo)
+                    .accessibilityLabel("2. Halbjahr streichen")
+                    .disabled(disableHalfYear2 || !hasHalfYear2)
+                }
             }
         }
-        .padding()
-        .background(.thinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     @ViewBuilder
     private var practicalPerformanceCard: some View {
-        SummaryCard(title: "") {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("Fachpraktische Ausbildung (11.)")
-                        .font(.headline)
-                    Spacer()
+        SettingsCard(
+            title: "Fachpraktische Ausbildung (11.)",
+            subtitle: nil,
+            systemImage: "wrench.and.screwdriver.fill",
+            accent: .teal
+        ) {
+            SettingsSectionBox {
+                VStack(alignment: .leading, spacing: 8) {
                     if let avg = practicalAverageDisplay {
-                        Text(formatAverage(avg))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(gradeColor(avg).opacity(0.15))
-                            .foregroundStyle(gradeColor(avg))
-                            .clipShape(Capsule())
+                        HStack {
+                            Text("Durchschnitt")
+                                .font(.headline)
+                            Spacer()
+                            Text(formatAverage(avg))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(gradeColor(avg).opacity(0.15))
+                                .foregroundStyle(gradeColor(avg))
+                                .clipShape(Capsule())
+                        }
                     }
-                }
-                if canUsePreviousYearSnapshot, let snapshot = previousYearSnapshot {
-                    Text("Daten aus dem Schuljahr \(snapshot.id).")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
+                    if canUsePreviousYearSnapshot, let snapshot = previousYearSnapshot {
+                        Text("Daten aus dem Schuljahr \(snapshot.id).")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
 
-                if sortedPracticalGrades.isEmpty {
-                    Text("Erfasste Praktikumsnoten werden hier angezeigt. Nutze den Praktikumsbereich, um sie zu pflegen.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 4)
-                } else {
-                    VStack(spacing: 10) {
-                        ForEach(sortedPracticalGrades) { entry in
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(practicalLabel(for: entry))
-                                        .font(.subheadline)
-                                    if let company = entry.company, !company.isEmpty {
-                                        Text(company)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                    if sortedPracticalGrades.isEmpty {
+                        Text("Erfasste Praktikumsnoten werden hier angezeigt. Nutze den Praktikumsbereich, um sie zu pflegen.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 4)
+                    } else {
+                        VStack(spacing: 10) {
+                            ForEach(sortedPracticalGrades) { entry in
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(practicalLabel(for: entry))
+                                            .font(.subheadline)
+                                        if let company = entry.company, !company.isEmpty {
+                                            Text(company)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        if let note = entry.note, !note.isEmpty {
+                                            Text(note)
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
                                     }
-                                    if let note = entry.note, !note.isEmpty {
-                                        Text(note)
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                    }
+                                    Spacer()
+                                    Text(formatAverage(entry.grade))
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 6)
+                                        .background(gradeColor(entry.grade).opacity(0.15))
+                                        .foregroundStyle(gradeColor(entry.grade))
+                                        .clipShape(Capsule())
                                 }
-                                Spacer()
-                                Text(formatAverage(entry.grade))
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .background(gradeColor(entry.grade).opacity(0.15))
-                                    .foregroundStyle(gradeColor(entry.grade))
-                                    .clipShape(Capsule())
                             }
                         }
                     }
