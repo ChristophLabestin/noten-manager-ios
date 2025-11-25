@@ -127,14 +127,6 @@ struct HomeworkListView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                if hw.isShared {
-                    let name = hw.groupId.flatMap { store.groupNames[$0] } ?? hw.groupId ?? ""
-                    if !name.isEmpty {
-                        Text("Gruppe: \(name)")
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
-                    }
-                }
                 if let due = hw.dueDate {
                     Text("Fällig am \(formattedDate(due))")
                         .font(.caption2)
@@ -145,12 +137,20 @@ struct HomeworkListView: View {
                         .foregroundStyle(.secondary)
                 }
                 if hw.isShared {
-                    HStack(spacing: 4) {
-                        Image(systemName: "person.2.fill")
-                            .foregroundStyle(.blue)
-                        Text("Geteilte Hausaufgabe")
-                            .font(.caption2)
-                            .foregroundStyle(.blue)
+                    let name = hw.groupId.flatMap { store.groupNames[$0] } ?? hw.groupId ?? ""
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "person.2.fill")
+                                .foregroundStyle(.blue)
+                            Text("Geteilte Hausaufgabe")
+                                .font(.caption2)
+                                .foregroundStyle(.blue)
+                        }
+                        if !name.isEmpty {
+                            Text("Gruppe: \(name)")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
                     }
                 }
             }
@@ -240,6 +240,7 @@ struct HomeworkListView: View {
                                 .font(.system(size: 18, weight: .semibold))
                                 .foregroundStyle(.orange)
                         }
+                        .buttonStyle(.plain)
                     } else if !treatedCompleted {
                         Button {
                             Task { await markCompleted(hw) }
@@ -248,6 +249,7 @@ struct HomeworkListView: View {
                                 .font(.system(size: 18, weight: .semibold))
                                 .foregroundStyle(.primary)
                         }
+                        .buttonStyle(.plain)
                     }
                 }
             }

@@ -837,13 +837,7 @@ struct FinalGradeView: View {
     // MARK: - Helpers (Port von React)
 
     private func calculateGradeWeightForSubject(_ subjectType: Int, _ grade: GradeWithId) -> Double {
-        if subjectType == 1 {
-            return grade.weight == 3 ? 2 : (grade.weight == 2 ? 2 : 1)
-        }
-        if subjectType == 0 {
-            return grade.weight == 3 ? 2 : (grade.weight == 1 ? 2 : 1)
-        }
-        return 1
+        store.effectiveGradeWeight(subjectType: subjectType, rawWeight: grade.weight)
     }
 
     private func calculateHalfYearAverageForSubject(_ grades: [GradeWithId], _ subjectType: Int, _ halfYear: Int) -> Double? {
@@ -1263,8 +1257,8 @@ struct FinalGradeView: View {
         let totalPoints = examPointsDouble + halfYearPoints + fachreferatPoints + practicalPoints
         let gradeRaw = 17.0 / 3.0 - (5.0 * totalPoints) / Double(maxPoints)
 
-        let gradeTruncated = (gradeRaw * 10.0).rounded(.towardZero) / 10.0
-        let grade = max(1, gradeTruncated)
+        let gradeRounded = (gradeRaw * 10.0).rounded(.toNearestOrAwayFromZero) / 10.0
+        let grade = max(1, gradeRounded)
 
         return (examCount, halfYearCount, examPointsDouble, halfYearPoints, totalPoints, maxPoints, grade, gradeRaw)
     }

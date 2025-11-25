@@ -27,6 +27,7 @@ struct HomeView: View {
     @State private var subjectLinkActive: Bool = false
     @State private var greetingAnimationSeed: UUID = UUID()
     @State private var greetingVisible: Bool = false
+    @State private var upcomingHoliday: HolidayWindow?
 
     private var subjectsWithoutFachreferat: [Subject] {
         store.subjects.filter { $0.name != "Fachreferat" }
@@ -520,6 +521,61 @@ struct HomeView: View {
         }
     }
 
+    private func holidayNoticeCard(info: HolidayWindow) -> some View {
+        SettingsCard(
+            title: "Ferien voraus",
+            subtitle: holidaySubtitle(info: info),
+            systemImage: "sun.max.fill",
+            accent: .orange
+        ) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(holidayMessage(info: info))
+                    .font(.body)
+            }
+        }
+    }
+
+    private func holidaySubtitle(info: HolidayWindow) -> String {
+        let name = friendlyHolidayName(info.name)
+        let startText = holidayDateFormatter.string(from: info.start)
+        return "\(name) ab \(startText)"
+    }
+
+    private func holidayMessage(info: HolidayWindow) -> String {
+        let lower = info.name.lowercased()
+        let range = holidayRangeText(info: info)
+        if lower.contains("sommer") {
+            return "Nächste Woche starten die Sommerferien in Bayern (\(range))."
+        } else if lower.contains("pfingst") {
+            return "Die Pfingstferien stehen vor der Tür (\(range))."
+        } else if lower.contains("oster") {
+            return "Osterferien nächste Woche (\(range))."
+        } else if lower.contains("herbst") || lower.contains("winter") || lower.contains("weihnacht") {
+            return "Nächste Woche starten die \(friendlyHolidayName(info.name)) (\(range))."
+        } else {
+            return "Nächste Woche sind Ferien in Bayern (\(range))."
+        }
+    }
+
+    private func friendlyHolidayName(_ raw: String) -> String {
+        let trimmed = raw.replacingOccurrences(of: "bayern", with: "", options: .caseInsensitive)
+        return trimmed.trimmingCharacters(in: .whitespacesAndNewlines).capitalized
+    }
+
+    private func holidayRangeText(info: HolidayWindow) -> String {
+        let start = holidayDateFormatter.string(from: info.start)
+        let end = holidayDateFormatter.string(from: info.end)
+        return "\(start) – \(end)"
+    }
+
+    private var holidayDateFormatter: DateFormatter {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "dd.MM."
+        fmt.locale = Locale(identifier: "de_DE")
+        fmt.calendar = Calendar(identifier: .gregorian)
+        return fmt
+    }
+
 
     // MARK: - Body
 
@@ -551,6 +607,13 @@ struct HomeView: View {
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
+                if let upcomingHoliday {
+                    holidayNoticeCard(info: upcomingHoliday)
+                        .softFadeIn(enabled: animationsOn, delay: 0.05, offset: 10)
+                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
                 subjectsControlCard
                     .softFadeIn(enabled: animationsOn, delay: 0.08, offset: 12)
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
@@ -642,9 +705,17 @@ struct HomeView: View {
             computeGreeting()
             greetingAnimationSeed = UUID()
             Task { await loadUserDisplayName() }
+            Task { await loadUpcomingHolidayNotice() }
         }
         .onChange(of: displayName) { _ in
             greetingAnimationSeed = UUID()
+        }
+        .onChange(of: store.showHolidayHints) { enabled in
+            if enabled {
+                Task { await loadUpcomingHolidayNotice() }
+            } else {
+                upcomingHoliday = nil
+            }
         }
         .onChange(of: subjectLinkActive) { active in
             if !active {
@@ -723,6 +794,14 @@ struct HomeView: View {
             }
         }
     }
+
+    private func loadUpcomingHolidayNotice() async {
+        guard store.showHolidayHints else { return }
+        let info = await HolidaysService.shared.upcomingHolidayWithin(days: 7, from: Date())
+        await MainActor.run {
+            self.upcomingHoliday = info
+        }
+    }
 }
 
 
@@ -789,14 +868,7 @@ struct SubjectRowView: View {
         func calculateGradeWeight(_ subject: Subject, _ grade: Grade) -> Double {
             if subject.name == "Fachreferat" { return 3 }
             if subject.name == "Praktikum" { return 1 }
-            let t = subject.type
-            if t == 1 {
-                return (grade.weight == 3 ? 2 : (grade.weight == 2 ? 2 : 1))
-            }
-            if t == 0 {
-                return (grade.weight == 3 ? 2 : (grade.weight == 1 ? 2 : 1))
-            }
-            return 1
+            return store.effectiveGradeWeight(subjectType: subject.type, rawWeight: grade.weight)
         }
         var total = 0.0
         var totalWeight = 0.0

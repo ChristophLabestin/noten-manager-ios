@@ -14,6 +14,7 @@ struct AddFachreferatView: View {
     @State private var note: String = ""
     @State private var isSaving: Bool = false
     @State private var error: String?
+    @State private var showDeleteAlert: Bool = false
     @FocusState private var focusedField: Field?
 
     private var subjects: [Subject] {
@@ -102,6 +103,21 @@ struct AddFachreferatView: View {
                             .foregroundStyle(.red)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
+
+                    if store.fachreferat != nil {
+                        Button(role: .destructive) {
+                            showDeleteAlert = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "trash")
+                                Text("Fachreferat löschen")
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.red)
+                        .padding(.top, 8)
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
@@ -147,6 +163,14 @@ struct AddFachreferatView: View {
                     note = fr.note ?? ""
                 }
             }
+            .alert("Fachreferat löschen?", isPresented: $showDeleteAlert) {
+                Button("Löschen", role: .destructive) {
+                    Task { await deleteFachreferat() }
+                }
+                Button("Abbrechen", role: .cancel) { }
+            } message: {
+                Text("Diese Fachreferat-Note wird dauerhaft gelöscht.")
+            }
         }
         .modifier(KeyboardToolbarInset(height: 64))
     }
@@ -161,6 +185,16 @@ struct AddFachreferatView: View {
             dismiss()
         } catch {
             self.error = error.localizedDescription
+        }
+        isSaving = false
+    }
+
+    private func deleteFachreferat() async {
+        guard !isSaving else { return }
+        isSaving = true
+        await store.deleteFachreferat()
+        await MainActor.run {
+            dismiss()
         }
         isSaving = false
     }

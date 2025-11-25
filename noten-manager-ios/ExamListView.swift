@@ -149,14 +149,6 @@ struct ExamListView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                if exam.isShared {
-                    let name = exam.groupId.flatMap { store.groupNames[$0] } ?? exam.groupId ?? ""
-                    if !name.isEmpty {
-                        Text("Gruppe: \(name)")
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
-                    }
-                }
 
                 Text(formattedExamDate(exam.date))
                     .font(.caption2)
@@ -169,13 +161,21 @@ struct ExamListView: View {
                 }
 
                 if exam.isShared {
-                    HStack(spacing: 4) {
-                        Image(systemName: "person.2.fill")
-                            .foregroundStyle(.blue)
-                            .imageScale(.small)
-                        Text("Geteilter Termin")
-                            .font(.caption2)
-                            .foregroundStyle(.blue)
+                    let name = exam.groupId.flatMap { store.groupNames[$0] } ?? exam.groupId ?? ""
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "person.2.fill")
+                                .foregroundStyle(.blue)
+                                .imageScale(.small)
+                            Text("Geteilter Termin")
+                                .font(.caption2)
+                                .foregroundStyle(.blue)
+                        }
+                        if !name.isEmpty {
+                            Text("Gruppe: \(name)")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
                     }
                 }
             }

@@ -30,7 +30,9 @@ struct OfflineSnapshot: Codable {
     let subjectSortOrder: [String]
     let compactView: Bool
     let animationsEnabled: Bool
+    let showHolidayHints: Bool?
     let theme: String
+    let appIcon: String?
     let darkMode: Bool
     let darkModeMode: String
     let homeworkReminderHour: Int
@@ -138,7 +140,6 @@ final class OfflineModeManager: ObservableObject {
     }
 
     func saveSnapshot(from store: GradesStore, userId: String) async {
-        guard !isOfflineModeActive else { return }
         let snapshot = await store.makeOfflineSnapshot(userId: userId)
         await persist(snapshot: snapshot)
     }

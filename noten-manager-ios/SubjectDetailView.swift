@@ -9,6 +9,7 @@ struct SubjectDetailView: View {
     let subject: Subject
 
     enum HalfYearFilter: Hashable { case all, one, two }
+    private enum WeightChoice: Hashable { case preset(Double), custom }
 
     // Aktueller Fachzustand (lokal, damit Umbenennen direkt sichtbar ist)
     @State private var currentSubjectName: String
@@ -22,7 +23,8 @@ struct SubjectDetailView: View {
     // Inline-Editing State
     @State private var editingGradeId: String? = nil
     @State private var editedGradeValue: String = ""
-    @State private var editedWeight: Double = 1
+    @State private var editedWeightChoice: WeightChoice = .preset(1)
+    @State private var editedCustomWeightText: String = ""
     @State private var editedDate: Date = Date()
     @State private var editedHalfYear: Int = 1
     @State private var editedNoteInline: String = ""
@@ -87,14 +89,68 @@ struct SubjectDetailView: View {
         filteredGrades.sorted { $0.date > $1.date }
     }
 
-    private func calculateGradeWeightForSubject(subjectType: Int, weight: Double) -> Double {
-        if subjectType == 1 {
-            return (weight == 3 ? 2 : (weight == 2 ? 2 : 1))
+    private func weightOptions() -> [(title: String, value: Double)] {
+        if subject.type == 0 {
+            return [
+                ("Kurzarbeit", 1),
+                ("Mündlich / EX", 0)
+            ]
         }
-        if subjectType == 0 {
-            return (weight == 3 ? 2 : (weight == 1 ? 2 : 1))
+        return [
+            ("Schulaufgabe", 2),
+            ("Kurzarbeit", 1),
+            ("Mündlich / EX", 0)
+        ]
+    }
+
+    private func selectedEditedWeightLabel() -> String {
+        switch editedWeightChoice {
+        case .preset(let value):
+            if value == 3 { return "Fachreferat" }
+            if let match = weightOptions().first(where: { $0.value == value }) {
+                return match.title
+            }
+            return "Art auswählen"
+        case .custom:
+            if let weight = parsedEditedCustomWeight() {
+                return "Sonstige Leistung (\(formatWeight(weight))x)"
+            }
+            return "Sonstige Leistung"
         }
-        return 1
+    }
+
+    private func parsedEditedCustomWeight() -> Double? {
+        let cleaned = editedCustomWeightText
+            .replacingOccurrences(of: ",", with: ".")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty, let value = Double(cleaned), value > 0 else { return nil }
+        return value
+    }
+
+    private func resolvedEditedWeight() -> Double? {
+        switch editedWeightChoice {
+        case .preset(let value):
+            return value
+        case .custom:
+            guard let custom = parsedEditedCustomWeight() else { return nil }
+            return -abs(custom)
+        }
+    }
+
+    private func formatWeight(_ value: Double) -> String {
+        if value == floor(value) {
+            return String(Int(value))
+        }
+        return String(format: "%.2f", value)
+    }
+
+    private var canSaveInlineEdit: Bool {
+        if isSaving { return false }
+        if Double(editedGradeValue) == nil { return false }
+        if case .custom = editedWeightChoice {
+            return parsedEditedCustomWeight() != nil
+        }
+        return true
     }
 
     private func averageForSubject() -> Double? {
@@ -102,7 +158,7 @@ struct SubjectDetailView: View {
         var total = 0.0
         var totalWeight = 0.0
         for g in filteredGrades {
-            let w = calculateGradeWeightForSubject(subjectType: subject.type, weight: g.weight)
+            let w = store.effectiveGradeWeight(subjectType: subject.type, rawWeight: g.weight)
             total += g.grade * w
             totalWeight += w
         }
@@ -521,6 +577,7 @@ struct SubjectDetailView: View {
                 onGrade: { showAddGradeSheet = true },
                 onExam: { showAddExamSheet = true }
             )
+            .environmentObject(store)
             #if os(iOS)
             .presentationDetents([.medium])
             #endif
@@ -777,24 +834,42 @@ private func statusBadge(_ text: String, color: Color) -> some View {
         let onHomework: () -> Void
         let onGrade: () -> Void
         let onExam: () -> Void
+        @EnvironmentObject private var store: GradesStore
+        @Environment(\.colorScheme) private var colorScheme
 
         var body: some View {
             NavigationStack {
-                VStack(spacing: 16) {
-                    Text("Hinzufügen")
-                        .font(.title3).bold()
-                        .padding(.top, 12)
+                ZStack {
+                    ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine")
+                        .ignoresSafeArea()
 
-                    VStack(spacing: 12) {
-                        actionRow(icon: "checklist", title: "Hausaufgabe", subtitle: "Aufgabe mit Fälligkeit", action: onHomework)
-                        actionRow(icon: "list.bullet.rectangle.portrait.fill", title: "Note", subtitle: "Leistung eintragen", action: onGrade)
-                        actionRow(icon: "calendar.badge.clock", title: "Klausurtermin", subtitle: "Prüfung mit Datum", action: onExam)
+                    VStack(spacing: 18) {
+                        Capsule()
+                            .fill(Color.primary.opacity(0.12))
+                            .frame(width: 46, height: 5)
+                            .padding(.top, 8)
+
+                        VStack(spacing: 6) {
+                            Text("Hinzufügen")
+                                .font(.title2.weight(.bold))
+                                .foregroundStyle(primaryText)
+                            Text("Was möchtest du anlegen?")
+                                .font(.subheadline)
+                                .foregroundStyle(secondaryText)
+                        }
+
+                        VStack(spacing: 12) {
+                            actionRow(icon: "checklist", title: "Hausaufgabe", subtitle: "Aufgabe mit Fälligkeit", action: onHomework)
+                            actionRow(icon: "list.bullet.rectangle.portrait.fill", title: "Note", subtitle: "Leistung eintragen", action: onGrade)
+                            actionRow(icon: "calendar.badge.clock", title: "Klausurtermin", subtitle: "Prüfung mit Datum", action: onExam)
+                        }
+                        .padding(.top, 4)
+
+                        Spacer()
                     }
-
-                    Spacer()
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 12)
                 }
-                .padding()
-                .background(Color(UIColor.systemGroupedBackground).ignoresSafeArea())
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Schließen") {
@@ -813,23 +888,62 @@ private func statusBadge(_ text: String, color: Color) -> some View {
                     action()
                 }
             } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: icon)
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 34, height: 34)
-                        .background(Color.blue.opacity(0.12))
-                        .foregroundStyle(Color.blue)
-                        .clipShape(Circle())
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(title).font(.headline)
-                        Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 14) {
+                    ZStack {
+                        Circle()
+                            .fill(accentPrimary.opacity(0.14))
+                            .frame(width: 42, height: 42)
+                        Image(systemName: icon)
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(accentPrimary)
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(title)
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(primaryText)
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(secondaryText)
                     }
                     Spacer()
+                    Image(systemName: "chevron.forward")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(secondaryText)
                 }
-                .padding()
-                .background(RoundedRectangle(cornerRadius: 14).fill(Color(.systemBackground)))
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(tileBackground)
+                        .shadow(color: shadowColor, radius: 12, x: 0, y: 6)
+                )
             }
             .buttonStyle(.plain)
+        }
+
+        private var accentPrimary: Color {
+            if store.theme == "feminine" {
+                return Color(hex: store.darkMode ? "#f472b6" : "#ec4899")
+            }
+            return .indigo
+        }
+
+        private var primaryText: Color {
+            store.darkMode ? Color.white : Color(hex: "#0f172a")
+        }
+
+        private var secondaryText: Color {
+            store.darkMode ? Color.white.opacity(0.75) : Color.secondary
+        }
+
+        private var tileBackground: LinearGradient {
+            let top = accentPrimary.opacity(store.darkMode ? 0.16 : 0.08)
+            let bottom = Color(.secondarySystemBackground)
+            return LinearGradient(colors: [top, bottom], startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
+
+        private var shadowColor: Color {
+            Color.black.opacity(colorScheme == .dark ? 0.35 : 0.12)
         }
 
         @Environment(\.dismiss) private var dismiss
@@ -951,17 +1065,76 @@ private func statusBadge(_ text: String, color: Color) -> some View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Art")
                             .font(.subheadline)
-                        Picker("", selection: $editedWeight) {
-                            if subject.type == 0 {
-                                Text("Kurzarbeit").tag(1.0)
-                                Text("Mündlich").tag(0.0)
-                            } else {
-                                Text("Schulaufgabe").tag(2.0)
-                                Text("Kurzarbeit").tag(1.0)
-                                Text("Mündlich").tag(0.0)
+                        Menu {
+                            ForEach(weightOptions(), id: \.value) { option in
+                                let isSelected: Bool = {
+                                    if case .preset(let value) = editedWeightChoice {
+                                        return value == option.value
+                                    }
+                                    return false
+                                }()
+                                Button {
+                                    editedWeightChoice = .preset(option.value)
+                                    editedCustomWeightText = ""
+                                } label: {
+                                    HStack {
+                                        Text(option.title)
+                                        if isSelected {
+                                            Spacer()
+                                            Image(systemName: "checkmark")
+                                        }
+                                    }
+                                }
+                            }
+
+                            Divider()
+
+                            let isCustom = {
+                                if case .custom = editedWeightChoice { return true }
+                                return false
+                            }()
+                            Button {
+                                editedWeightChoice = .custom
+                            } label: {
+                                HStack {
+                                    Text("Sonstige Leistung")
+                                    if isCustom {
+                                        Spacer()
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        } label: {
+                            HStack {
+                                Text(selectedEditedWeightLabel())
+                                    .font(.subheadline.weight(.semibold))
+                                Spacer()
+                                Image(systemName: "chevron.down")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.formInputBackground)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        .tint(.primary)
+
+                        if case .custom = editedWeightChoice {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Gewichtung")
+                                    .font(.subheadline)
+                                TextField("Gewichtung z. B. 1 oder 2.5", text: $editedCustomWeightText)
+                                    .keyboardType(.decimalPad)
+                                    .padding(10)
+                                    .background(Color.formInputBackground)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                Text("Die eingetragene Gewichtung wird direkt für den Schnitt genutzt.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
                         }
-                        .pickerStyle(.segmented)
                     }
 
                     DatePicker("Datum", selection: $editedDate, displayedComponents: .date)
@@ -986,7 +1159,7 @@ private func statusBadge(_ text: String, color: Color) -> some View {
                                 .fontWeight(.semibold)
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(isSaving)
+                        .disabled(!canSaveInlineEdit)
 
                         Button {
                             cancelInlineEdit()
@@ -1016,12 +1189,15 @@ private func statusBadge(_ text: String, color: Color) -> some View {
     }
 
     private func gradeTypeLabel(weight: Double) -> String {
-        switch weight {
-        case 3: return "Fachreferat"
-        case 2: return "Schulaufgabe"
-        case 1: return subject.type == 0 ? "Kurzarbeit" : "Kurzarbeit"
-        default: return "Mündlich / EX"
+        if weight == 3 { return "Fachreferat" }
+        if let match = weightOptions().first(where: { $0.value == weight }) {
+            return match.title
         }
+        let effective = abs(weight)
+        if let match = weightOptions().first(where: { $0.value == effective }) {
+            return match.title
+        }
+        return "Sonstige Leistung (\(formatWeight(effective))x)"
     }
 
     private func halfYearLabel(_ value: Int?) -> String? {
@@ -1032,7 +1208,16 @@ private func statusBadge(_ text: String, color: Color) -> some View {
     private func startInlineEdit(_ grade: GradeWithId) {
         editingGradeId = grade.id
         editedGradeValue = String(grade.grade)
-        editedWeight = grade.weight
+        if grade.weight < 0 {
+            editedWeightChoice = .custom
+            editedCustomWeightText = formatWeight(abs(grade.weight))
+        } else if weightOptions().contains(where: { $0.value == grade.weight }) || grade.weight == 3 {
+            editedWeightChoice = .preset(grade.weight)
+            editedCustomWeightText = ""
+        } else {
+            editedWeightChoice = .custom
+            editedCustomWeightText = formatWeight(abs(grade.weight))
+        }
         editedDate = grade.date
         editedHalfYear = grade.halfYear ?? 1
         editedNoteInline = grade.note ?? ""
@@ -1048,13 +1233,14 @@ private func statusBadge(_ text: String, color: Color) -> some View {
         guard !isSaving, let key = store.encryptionKey else { return }
         isSaving = true
         defer { isSaving = false }
-        let value = Double(editedGradeValue) ?? 0
+        guard let resolvedWeight = resolvedEditedWeight() else { return }
+        guard let value = Double(editedGradeValue) else { return }
         do {
             try await store.updateGradeInFirestore(
                 subjectId: currentSubjectName,
                 gradeId: gradeId,
                 grade: value,
-                weight: editedWeight,
+                weight: resolvedWeight,
                 date: editedDate,
                 note: editedNoteInline.isEmpty ? nil : editedNoteInline,
                 halfYear: editedHalfYear,

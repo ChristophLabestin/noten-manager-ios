@@ -4,6 +4,7 @@ import FirebaseAuth
 import FirebaseFirestore
 import CryptoKit
 import SwiftUI
+import UIKit
 
 enum SchoolYearService {
     static func currentSchoolYearId(from date: Date = Date()) -> String {
@@ -241,12 +242,14 @@ final class GradesStore: ObservableObject {
     @Published var animationsEnabled: Bool = true
 
     // Settings-Erweiterungen (aus React)
+    @Published var appIcon: String = "default" // "default" | "pink" | "green" | "black"
     @Published var theme: String = "default" // "default" | "feminine"
     @Published var darkMode: Bool = false
     @Published var darkModeMode: String = "system" // "system" | "light" | "dark"
     @Published var homeworkReminderHour: Int = 19
     @Published var homeworkReminderMinute: Int = 0
     @Published var encryptionSalt: String? = nil
+    @Published var showHolidayHints: Bool = true
 
     var preferredColorScheme: ColorScheme? {
         switch darkModeMode {
@@ -268,6 +271,9 @@ final class GradesStore: ObservableObject {
     @Published var homeworkSubjectMapping: [String: String] = [:]
 
     private let db = Firestore.firestore()
+    private let pfingstferienPromptedKey = "grades_pfingst_prompted_year_ids"
+    private let appIconDefaultsKey = "grades_appIcon"
+    private let supportedAppIcons: Set<String> = ["default", "pink", "green", "black"]
 
     // Live-Listener
     private var userDocListener: ListenerRegistration?
@@ -323,6 +329,7 @@ final class GradesStore: ObservableObject {
 
     private var offlinePendingGrades: [PendingGrade] = []
     private var offlinePendingFachreferat: PendingFachreferat? = nil
+    private var pfingstferienPromptedYearIds: Set<String> = []
 
     private func overlayPendingData() {
         guard !offlinePendingGrades.isEmpty || offlinePendingFachreferat != nil else { return }
@@ -1654,6 +1661,8 @@ final class GradesStore: ObservableObject {
     // MARK: - User-Settings + Key
 
     private func applyUserSettings(from data: [String: Any]) {
+        let previousAppIcon = appIcon
+
         if let incomingActive = (data["activeSchoolYearId"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
            !incomingActive.isEmpty,
            incomingActive != activeSchoolYearId {
@@ -1663,9 +1672,14 @@ final class GradesStore: ObservableObject {
 
         compactView = (data["compactView"] as? Bool) ?? compactView
         animationsEnabled = (data["animationsEnabled"] as? Bool) ?? animationsEnabled
+        showHolidayHints = (data["holidayHintsEnabled"] as? Bool) ?? showHolidayHints
 
         if let themeVal = data["theme"] as? String, ["default","feminine"].contains(themeVal) {
             theme = themeVal
+        }
+        if let iconVal = data["appIcon"] as? String, supportedAppIcons.contains(iconVal) {
+            appIcon = iconVal
+            UserDefaults.standard.set(iconVal, forKey: appIconDefaultsKey)
         }
         if let hr = data["homeworkReminderHour"] as? Int, (0...23).contains(hr) {
             homeworkReminderHour = hr
@@ -1702,6 +1716,12 @@ final class GradesStore: ObservableObject {
         Task { [weak self] in
             guard let self, let sid = self.activeSchoolYearId else { return }
             await self.preloadPreviousYearSnapshotIfNeeded(currentYearId: sid)
+        }
+
+        if previousAppIcon != appIcon {
+            Task { [weak self] in
+                await self?.applyAppIconSelectionIfNeeded()
+            }
         }
 
         persistOfflineSnapshotIfPossible()
@@ -1838,6 +1858,12 @@ final class GradesStore: ObservableObject {
            ["default", "feminine"].contains(storedTheme) {
             theme = storedTheme
         }
+        if let storedIcon = defaults.string(forKey: appIconDefaultsKey),
+           supportedAppIcons.contains(storedIcon) {
+            appIcon = storedIcon
+        } else {
+            appIcon = "default"
+        }
         if defaults.object(forKey: "grades_hwReminderHour") != nil,
            defaults.object(forKey: "grades_hwReminderMinute") != nil {
             let hr = defaults.integer(forKey: "grades_hwReminderHour")
@@ -1863,6 +1889,87 @@ final class GradesStore: ObservableObject {
         if defaults.object(forKey: "grades_animationsEnabled") != nil {
             animationsEnabled = defaults.bool(forKey: "grades_animationsEnabled")
         }
+        if let stored = defaults.array(forKey: pfingstferienPromptedKey) as? [String] {
+            pfingstferienPromptedYearIds = Set(stored)
+        }
+        if defaults.object(forKey: "grades_showHolidayHints") != nil {
+            showHolidayHints = defaults.bool(forKey: "grades_showHolidayHints")
+        } else {
+            showHolidayHints = true
+        }
+
+        Task { await self.applyAppIconSelectionIfNeeded() }
+    }
+
+    @MainActor
+    private func applyAppIconSelectionIfNeeded() async {
+        guard UIApplication.shared.supportsAlternateIcons else { return }
+        let targetName = alternateIconName(for: appIcon)
+        guard UIApplication.shared.alternateIconName != targetName else { return }
+
+        if #available(iOS 16.0, *) {
+            do {
+                try await UIApplication.shared.setAlternateIconName(targetName)
+            } catch {
+                let resolved = selection(forAlternateIconName: UIApplication.shared.alternateIconName)
+                appIcon = resolved
+                UserDefaults.standard.set(appIcon, forKey: appIconDefaultsKey)
+            }
+        } else {
+            UIApplication.shared.setAlternateIconName(targetName) { error in
+                guard error != nil else { return }
+                let resolved = self.selection(forAlternateIconName: UIApplication.shared.alternateIconName)
+                Task { @MainActor in
+                    self.appIcon = resolved
+                    UserDefaults.standard.set(resolved, forKey: self.appIconDefaultsKey)
+                }
+            }
+        }
+    }
+
+    private func alternateIconName(for selection: String) -> String? {
+        switch selection {
+        case "pink": return "AppIconPink"
+        case "green": return "AppIconGreen"
+        case "black": return "AppIconBlack"
+        default: return nil
+        }
+    }
+
+    private func selection(forAlternateIconName name: String?) -> String {
+        switch name {
+        case "AppIconPink": return "pink"
+        case "AppIconGreen": return "green"
+        case "AppIconBlack": return "black"
+        default: return "default"
+        }
+    }
+
+    // MARK: - Pfingstferien Prompt
+
+    private func markPfingstferienPromptShown(for yearId: String) {
+        pfingstferienPromptedYearIds.insert(yearId)
+        UserDefaults.standard.set(Array(pfingstferienPromptedYearIds), forKey: pfingstferienPromptedKey)
+    }
+
+    private func hasShownPfingstferienPrompt(for yearId: String) -> Bool {
+        pfingstferienPromptedYearIds.contains(yearId)
+    }
+
+    func shouldOfferNextSchoolYearAfterPfingstferien(currentDate: Date = Date()) async -> String? {
+        guard gradeYear == 12 else { return nil }
+        guard let currentYearId = activeSchoolYearId else { return nil }
+        if hasShownPfingstferienPrompt(for: currentYearId) { return nil }
+
+        let calendar = Calendar(identifier: .gregorian)
+        let currentCalendarYear = calendar.component(.year, from: currentDate)
+
+        let pfingstEnd = await HolidaysService.shared.pfingstferienEndDate(forYear: currentCalendarYear)
+        guard let pfingstEnd else { return nil }
+        guard currentDate > pfingstEnd else { return nil }
+
+        markPfingstferienPromptShown(for: currentYearId)
+        return SchoolYearService.nextSchoolYearId(from: currentYearId)
     }
 
     // MARK: - Offline Cache
@@ -1901,7 +2008,9 @@ final class GradesStore: ObservableObject {
             subjectSortOrder: subjectSortOrder,
             compactView: compactView,
             animationsEnabled: animationsEnabled,
+            showHolidayHints: showHolidayHints,
             theme: theme,
+            appIcon: appIcon,
             darkMode: darkMode,
             darkModeMode: darkModeMode,
             homeworkReminderHour: homeworkReminderHour,
@@ -1938,7 +2047,12 @@ final class GradesStore: ObservableObject {
         subjectSortOrder = snapshot.subjectSortOrder
         compactView = snapshot.compactView
         animationsEnabled = snapshot.animationsEnabled
+        showHolidayHints = snapshot.showHolidayHints ?? true
         theme = snapshot.theme
+        if let icon = snapshot.appIcon, supportedAppIcons.contains(icon) {
+            appIcon = icon
+            UserDefaults.standard.set(icon, forKey: appIconDefaultsKey)
+        }
         darkMode = snapshot.darkMode
         darkModeMode = snapshot.darkModeMode
         homeworkReminderHour = snapshot.homeworkReminderHour
@@ -1965,6 +2079,8 @@ final class GradesStore: ObservableObject {
             reminderMinute: homeworkReminderMinute
         )
 
+        Task { await self.applyAppIconSelectionIfNeeded() }
+
         OfflineModeManager.shared.activateOfflineMode()
     }
 
@@ -1986,12 +2102,27 @@ final class GradesStore: ObservableObject {
     // MARK: - Offline Sync zurück ins Backend
 
     func syncOfflinePendingChanges(forceLocalOverride: Bool = false) async {
+        var snapshot = OfflineModeManager.shared.cachedSnapshot
+        if snapshot == nil {
+            snapshot = OfflineModeManager.shared.availableSnapshot()
+        }
+
+        if offlinePendingGrades.isEmpty && offlinePendingFachreferat == nil, let snap = snapshot {
+            offlinePendingGrades = snap.pendingGrades
+            offlinePendingFachreferat = snap.pendingFachreferat
+            if encryptionSalt == nil {
+                encryptionSalt = snap.encryptionSalt
+            }
+            overlayPendingData()
+        }
+
         guard !offlinePendingGrades.isEmpty || offlinePendingFachreferat != nil else { return }
         guard let uid = Auth.auth().currentUser?.uid else { return }
 
         OfflineModeManager.shared.enableFirestoreNetworkIfNeeded()
 
-        if encryptionKey == nil, let salt = encryptionSalt {
+        let saltForKey = encryptionSalt ?? snapshot?.encryptionSalt
+        if encryptionKey == nil, let salt = saltForKey {
             if let key = try? CryptoService.deriveKeyFromPassword(password: uid, saltBase64: salt, iterations: 150_000) {
                 encryptionKey = key
             }
@@ -3369,6 +3500,29 @@ final class GradesStore: ObservableObject {
         practicalPerformance = nil
     }
 
+    func deleteFachreferat() async {
+        let offline = OfflineModeManager.shared.isOfflineModeActive
+        let uid = Auth.auth().currentUser?.uid ?? ""
+
+        if offline || uid.isEmpty {
+            offlinePendingFachreferat = nil
+            fachreferat = nil
+            persistOfflineSnapshotIfPossible()
+            return
+        }
+
+        guard let realUid = Auth.auth().currentUser?.uid else { return }
+        guard let yearRef = try? await requireYearRef(uid: realUid) else { return }
+        do {
+            try await yearRef.collection("fachreferat").document("current").delete()
+        } catch {
+            // optional loggen
+        }
+        offlinePendingFachreferat = nil
+        fachreferat = nil
+        persistOfflineSnapshotIfPossible()
+    }
+
     private func persistPracticalGrades(_ grades: [PracticalGradeEntry], using key: SymmetricKey, docRef: DocumentReference? = nil) async throws {
         guard let uid = Auth.auth().currentUser?.uid else { throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"]) }
         let yearRef = try await requireYearRef(uid: uid)
@@ -3719,14 +3873,17 @@ final class GradesStore: ObservableObject {
         var total = 0.0
         var totalWeight = 0.0
         for g in grades {
-            let weight = calculateGradeWeightForOverall(subject: subject, grade: Grade(
-                grade: g.grade,
-                weight: g.weight,
-                date: g.date,
-                note: g.note,
-                halfYear: g.halfYear,
-                linkedExamId: g.linkedExamId
-            ))
+            let weight = calculateGradeWeightForOverall(
+                subject: subject,
+                grade: Grade(
+                    grade: g.grade,
+                    weight: g.weight,
+                    date: g.date,
+                    note: g.note,
+                    halfYear: g.halfYear,
+                    linkedExamId: g.linkedExamId
+                )
+            )
             total += g.grade * weight
             totalWeight += weight
         }
@@ -3735,14 +3892,29 @@ final class GradesStore: ObservableObject {
     }
 
     func calculateGradeWeightForOverall(subject: Subject, grade: Grade) -> Double {
-        let t = subject.type
-        if t == 1 {
-            return (grade.weight == 3 ? 2 : (grade.weight == 2 ? 2 : 1))
+        effectiveGradeWeight(subjectType: subject.type, rawWeight: grade.weight)
+    }
+
+    func effectiveGradeWeight(subjectType: Int, rawWeight: Double) -> Double {
+        if rawWeight < 0 {
+            let custom = abs(rawWeight)
+            return custom > 0 ? custom : 1
         }
-        if t == 0 {
-            return (grade.weight == 3 ? 2 : (grade.weight == 1 ? 2 : 1))
+
+        if subjectType == 1 {
+            if rawWeight == 3 || rawWeight == 2 { return 2 }
+            if rawWeight == 1 { return 1 }
+            if rawWeight <= 0 { return 1 }
+            return rawWeight
         }
-        return 1
+
+        if subjectType == 0 {
+            if rawWeight == 3 || rawWeight == 1 { return 2 }
+            if rawWeight <= 0 { return 1 }
+            return rawWeight
+        }
+
+        return rawWeight > 0 ? rawWeight : 1
     }
 
     func updateUserDisplayName(name: String) async {
@@ -3757,7 +3929,12 @@ final class GradesStore: ObservableObject {
         }
     }
 
-    func updatePreferences(theme: String? = nil, darkMode: Bool? = nil, darkModeMode: String? = nil, compactView: Bool? = nil, animationsEnabled: Bool? = nil) async {
+    func updatePreferences(theme: String? = nil,
+                           darkMode: Bool? = nil,
+                           darkModeMode: String? = nil,
+                           compactView: Bool? = nil,
+                           animationsEnabled: Bool? = nil,
+                           holidayHintsEnabled: Bool? = nil) async {
         guard let uid = Auth.auth().currentUser?.uid else { return }
 
         // lokalen State vorab aktualisieren (optimistic UI)
@@ -3772,6 +3949,7 @@ final class GradesStore: ObservableObject {
         }
         if let compactView { self.compactView = compactView }
         if let animationsEnabled { self.animationsEnabled = animationsEnabled }
+        if let holidayHintsEnabled { self.showHolidayHints = holidayHintsEnabled }
 
         // lokal speichern, damit Einstellungen direkt beim App-Start verfügbar sind
         let defaults = UserDefaults.standard
@@ -3780,6 +3958,7 @@ final class GradesStore: ObservableObject {
         if let mode = darkModeMode { defaults.set(mode, forKey: "grades_darkModeMode") }
         if let compactView { defaults.set(compactView, forKey: "grades_compactView") }
         if let animationsEnabled { defaults.set(animationsEnabled, forKey: "grades_animationsEnabled") }
+        if let holidayHintsEnabled { defaults.set(holidayHintsEnabled, forKey: "grades_showHolidayHints") }
 
         var payload: [String: Any] = [:]
         if let theme { payload["theme"] = theme }
@@ -3787,12 +3966,34 @@ final class GradesStore: ObservableObject {
         if let mode = darkModeMode { payload["darkModeMode"] = mode }
         if let compactView { payload["compactView"] = compactView }
         if let animationsEnabled { payload["animationsEnabled"] = animationsEnabled }
+        if let holidayHintsEnabled { payload["holidayHintsEnabled"] = holidayHintsEnabled }
 
         guard !payload.isEmpty else { return }
         do {
             try await db.collection("users").document(uid).updateData(payload)
         } catch {
             // optional rollback/loggen
+        }
+
+        persistOfflineSnapshotIfPossible()
+    }
+
+    func updateAppIcon(to selection: String) async {
+        let normalized = supportedAppIcons.contains(selection) ? selection : "default"
+        appIcon = normalized
+        UserDefaults.standard.set(normalized, forKey: appIconDefaultsKey)
+
+        await applyAppIconSelectionIfNeeded()
+
+        let resolvedIcon = appIcon
+        if let uid = Auth.auth().currentUser?.uid {
+            do {
+                try await db.collection("users").document(uid).setData([
+                    "appIcon": resolvedIcon
+                ], merge: true)
+            } catch {
+                // optional loggen
+            }
         }
 
         persistOfflineSnapshotIfPossible()

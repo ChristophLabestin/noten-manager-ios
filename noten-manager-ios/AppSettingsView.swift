@@ -50,6 +50,12 @@ struct AppSettingsView: View {
     // Typografie-Hierarchie
     private let sectionHeaderFont: Font = .headline.weight(.semibold)
     private let helperFont: Font = .footnote
+    private let appIconOptions: [(id: String, title: String, imageName: String)] = [
+        ("default", "Standard", "AppIconPreviewDefault"),
+        ("pink", "Pink", "AppIconPreviewPink"),
+        ("green", "Grün", "AppIconPreviewGreen"),
+        ("black", "Schwarz", "AppIconPreviewBlack")
+    ]
 
     private var maxExamSubjects: Int { 4 }
     private var currentExamSubjectsCount: Int {
@@ -437,6 +443,66 @@ struct AppSettingsView: View {
                 }
 
                 SettingsSectionBox {
+                    let canChangeIcon = UIApplication.shared.supportsAlternateIcons
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("App-Symbol")
+                            .font(sectionHeaderFont)
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 12) {
+                            ForEach(appIconOptions, id: \.id) { option in
+                                let isSelected = store.appIcon == option.id
+                                Button {
+                                    guard canChangeIcon else { return }
+                                    Task { await store.updateAppIcon(to: option.id) }
+                                } label: {
+                                    VStack(spacing: 8) {
+                                        Image(option.imageName)
+                                            .resizable()
+                                            .scaledToFit()
+                                            .frame(width: 72, height: 72)
+                                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                                    .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
+                                            )
+                                            .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 3)
+
+                                        HStack(spacing: 6) {
+                                            Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
+                                                .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                                            Text(option.title)
+                                                .font(.subheadline.weight(.semibold))
+                                                .foregroundStyle(.primary)
+                                        }
+                                        .padding(.vertical, 2)
+                                    }
+                                    .padding(10)
+                                    .frame(maxWidth: .infinity)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                            .fill(Color(.secondarySystemBackground))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                            .stroke(isSelected ? Color.accentColor.opacity(0.6) : Color.clear, lineWidth: 1.5)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("App Icon \(option.title)")
+                            }
+                        }
+
+                        Text("Wähle, welches Icon auf deinem Homescreen angezeigt wird.")
+                            .font(helperFont)
+                            .foregroundStyle(.secondary)
+                        if !canChangeIcon {
+                            Text("Symbolwechsel wird auf diesem Gerät nicht unterstützt.")
+                                .font(helperFont)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                SettingsSectionBox {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Darstellung & Animationen")
                             .font(sectionHeaderFont)
@@ -455,20 +521,20 @@ struct AppSettingsView: View {
 
                         Toggle(
                             isOn: Binding(
-                                get: { store.compactView },
-                                set: { val in Task { await store.updatePreferences(compactView: val) } }
-                            )
-                        ) {
-                            Text(store.compactView ? "Kompakte Tabellen-Ansicht aktiviert" : "Kompakte Tabellen-Ansicht deaktiviert")
-                        }
-
-                        Toggle(
-                            isOn: Binding(
                                 get: { store.animationsEnabled },
                                 set: { val in Task { await store.updatePreferences(animationsEnabled: val) } }
                             )
                         ) {
                             Text(store.animationsEnabled ? "Animationen aktiviert" : "Animationen deaktiviert")
+                        }
+
+                        Toggle(
+                            isOn: Binding(
+                                get: { store.showHolidayHints },
+                                set: { val in Task { await store.updatePreferences(holidayHintsEnabled: val) } }
+                            )
+                        ) {
+                            Text("Ferien-Hinweis auf Startseite anzeigen")
                         }
                     }
                 }
@@ -954,7 +1020,6 @@ struct AppSettingsView: View {
 
     private func deactivateOffline() {
         offlineManager.deactivateOfflineMode()
-        store.exitOfflineModeIfNeeded()
         offlineStatusMessage = "Offline-Modus beendet. Live-Synchronisation wird wiederhergestellt."
     }
 
@@ -1495,7 +1560,7 @@ private struct SlideToConfirmView: View {
                 HStack {
                     Spacer()
                     VStack(spacing: 6) {
-                        Text(isConfirmed ? "Loslassen zum Löschen" : "Zum Bestätigen nach rechts schieben")
+                        Text(isConfirmed ? "Bestätigt – jetzt Passwort eingeben" : "Zum Bestätigen nach rechts schieben")
                             .font(.footnote.weight(.semibold))
                             .foregroundStyle(.primary.opacity(isConfirmed ? 0.9 : 0.7))
                         Text("Sicherheits-Swipe verhindert versehentliches Löschen.")

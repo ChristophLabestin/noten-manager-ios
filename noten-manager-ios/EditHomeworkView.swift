@@ -160,6 +160,19 @@ struct EditHomeworkView: View {
                             .foregroundStyle(.red)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
+
+                    Button(role: .destructive) {
+                        showDeleteConfirm = true
+                    } label: {
+                        if isDeleting {
+                            ProgressView()
+                        } else {
+                            Text("Hausaufgabe löschen")
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
@@ -190,25 +203,6 @@ struct EditHomeworkView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .hideKeyboardOnTap()
-            .safeAreaInset(edge: .bottom) {
-                VStack(spacing: 8) {
-                    Button(role: .destructive) {
-                        showDeleteConfirm = true
-                    } label: {
-                        if isDeleting {
-                            ProgressView()
-                        } else {
-                            Text("Hausaufgabe löschen")
-                                .frame(maxWidth: .infinity)
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
-                    .padding(.horizontal)
-                    .padding(.bottom, 12)
-                }
-                .background(.thinMaterial)
-            }
             .alert(
                 "Hausaufgabe löschen?",
                 isPresented: $showDeleteConfirm

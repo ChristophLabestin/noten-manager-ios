@@ -15,7 +15,8 @@ struct AddGradeView: View {
 
     @State private var subjectName: String = ""
     @State private var gradeText: String = ""
-    @State private var gradeWeight: Int = 0
+    @State private var weightChoice: WeightChoice = .preset(0)
+    @State private var customWeightText: String = ""
     @State private var date: Date = Date()
     @State private var note: String = ""
     @State private var halfYearSelection: Int = AddGradeView.defaultHalfYear()
@@ -29,11 +30,15 @@ struct AddGradeView: View {
     private var subjects: [Subject] {
         store.sortedSubjectsForDisplay(store.subjects.filter { $0.name != "Fachreferat" })
     }
+    private var isWeightLocked: Bool {
+        linkToExam && selectedLinkedExamId != nil
+    }
     private var canSave: Bool {
         guard let _ = store.encryptionKey else { return false }
         guard !subjectName.isEmpty else { return false }
         guard let value = Double(gradeText),
               value >= 0, value <= 15 else { return false }
+        if case .custom = weightChoice, parsedCustomWeight() == nil { return false }
         if linkToExam && selectedLinkedExamId == nil { return false }
         return true
     }
@@ -63,7 +68,12 @@ struct AddGradeView: View {
         case grade, note
     }
 
-    private func weightOptions(for subjectType: Int) -> [(title: String, value: Int)] {
+    private enum WeightChoice: Hashable {
+        case preset(Double)
+        case custom
+    }
+
+    private func weightOptions(for subjectType: Int) -> [(title: String, value: Double)] {
         if subjectType == 0 {
             return [
                 ("Kurzarbeit", 1),
@@ -78,11 +88,34 @@ struct AddGradeView: View {
     }
 
     private func selectedWeightLabel(for subjectType: Int) -> String {
-        let options = weightOptions(for: subjectType)
-        if let match = options.first(where: { $0.value == gradeWeight }) {
-            return match.title
+        switch weightChoice {
+        case .preset(let value):
+            let options = weightOptions(for: subjectType)
+            if let match = options.first(where: { $0.value == value }) {
+                return match.title
+            }
+            return "Art auswählen"
+        case .custom:
+            if let weight = parsedCustomWeight() {
+                return "Sonstige Leistung (\(formatWeight(weight))x)"
+            }
+            return "Sonstige Leistung"
         }
-        return options.first?.title ?? "Art auswählen"
+    }
+
+    private func parsedCustomWeight() -> Double? {
+        let cleaned = customWeightText
+            .replacingOccurrences(of: ",", with: ".")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty, let value = Double(cleaned), value > 0 else { return nil }
+        return value
+    }
+
+    private func formatWeight(_ value: Double) -> String {
+        if value == floor(value) {
+            return String(Int(value))
+        }
+        return String(format: "%.2f", value)
     }
 
     var body: some View {
@@ -141,15 +174,42 @@ struct AddGradeView: View {
 
                                         Menu {
                                             ForEach(weightOptions(for: subjectType), id: \.value) { option in
+                                                let isSelected: Bool = {
+                                                    if case .preset(let value) = weightChoice {
+                                                        return value == option.value
+                                                    }
+                                                    return false
+                                                }()
                                                 Button {
-                                                    gradeWeight = option.value
+                                                    weightChoice = .preset(option.value)
                                                 } label: {
                                                     HStack {
                                                         Text(option.title)
-                                                        if gradeWeight == option.value {
+                                                        if isSelected {
                                                             Spacer()
                                                             Image(systemName: "checkmark")
                                                         }
+                                                    }
+                                                }
+                                            }
+
+                                            Divider()
+
+                                            let isCustomSelected = {
+                                                if case .custom = weightChoice { return true }
+                                                return false
+                                            }()
+                                            Button {
+                                                weightChoice = .custom
+                                                if customWeightText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                                    customWeightText = ""
+                                                }
+                                            } label: {
+                                                HStack {
+                                                    Text("Sonstige Leistung")
+                                                    if isCustomSelected {
+                                                        Spacer()
+                                                        Image(systemName: "checkmark")
                                                     }
                                                 }
                                             }
@@ -169,16 +229,40 @@ struct AddGradeView: View {
                                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                         }
                                         .tint(.primary)
+                                        .disabled(isWeightLocked)
+                                        .opacity(isWeightLocked ? 0.6 : 1.0)
 
-                                        let weightInfo: String = {
-                                            if subjectType == 1 {
-                                                return "Schulaufgaben zählen doppelt, Kurzarbeiten und mündliche Leistungen einfach."
+                                        if case .custom = weightChoice {
+                                            VStack(alignment: .leading, spacing: 6) {
+                                                Text("Gewichtung")
+                                                    .font(.subheadline)
+                                                TextField("Gewichtung z. B. 1 oder 2.5", text: $customWeightText)
+                                                    .keyboardType(.decimalPad)
+                                                    .padding(12)
+                                                    .background(Color.formInputBackground)
+                                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                                    .disabled(isWeightLocked)
+                                                    .opacity(isWeightLocked ? 0.6 : 1.0)
+                                                Text("Die eingetragene Gewichtung wird genau so in den Durchschnitt übernommen.")
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
                                             }
-                                            return "Kurzarbeiten zählen doppelt, mündliche Leistungen/EX einfach."
-                                        }()
-                                        Text(weightInfo)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                        } else {
+                                            let weightInfo: String = {
+                                                if subjectType == 1 {
+                                                    return "Schulaufgaben zählen doppelt, Kurzarbeiten und mündliche Leistungen einfach."
+                                                }
+                                                return "Kurzarbeiten zählen doppelt, mündliche Leistungen/EX einfach."
+                                            }()
+                                            Text(weightInfo)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        if isWeightLocked {
+                                            Text("Gewichtung durch verknüpfte Prüfung festgelegt.")
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
                                     }
 
                                     VStack(alignment: .leading, spacing: 8) {
@@ -319,9 +403,9 @@ struct AddGradeView: View {
                     }
                 }
                 if let w = preselectedWeight {
-                    gradeWeight = w
+                    weightChoice = .preset(Double(w))
                 } else {
-                    gradeWeight = 0
+                    weightChoice = .preset(0)
                 }
 
                 if let noteText = prefilledNote, note.isEmpty {
@@ -346,6 +430,7 @@ struct AddGradeView: View {
                     linkToExam = true
                 }
                 ensureLinkedExamSelection()
+                applyExamWeightIfAvailable(examId: selectedLinkedExamId)
             }
             .onChange(of: subjectName) { _ in
                 if linkToExam {
@@ -356,6 +441,7 @@ struct AddGradeView: View {
                 if let date = examDate(for: newValue) {
                     halfYearSelection = AddGradeView.defaultHalfYear(referenceDate: date)
                 }
+                applyExamWeightIfAvailable(examId: newValue)
             }
         }
         .modifier(KeyboardToolbarInset(height: 64))
@@ -366,7 +452,7 @@ struct AddGradeView: View {
         isSaving = true
         error = nil
         do {
-            guard let grade = Double(gradeText) else {
+            guard let grade = Double(gradeText), grade >= 0, grade <= 15 else {
                 error = "Bitte eine gültige Note zwischen 0 und 15 eingeben."
                 isSaving = false
                 return
@@ -376,7 +462,18 @@ struct AddGradeView: View {
                 isSaving = false
                 return
             }
-            let weight = Double(gradeWeight)
+            let weight: Double
+            switch weightChoice {
+            case .preset(let preset):
+                weight = preset
+            case .custom:
+                guard let custom = parsedCustomWeight(), custom > 0 else {
+                    error = "Bitte eine Gewichtung größer als 0 eingeben."
+                    isSaving = false
+                    return
+                }
+                weight = -custom
+            }
             let halfYear: Int? = halfYearSelection
 
             let finalNote: String? = {
@@ -421,6 +518,7 @@ struct AddGradeView: View {
             return
         }
         selectedLinkedExamId = linkableExams.first?.id
+        applyExamWeightIfAvailable(examId: selectedLinkedExamId)
     }
 
     private func matchesSubject(for exam: Exam) -> Bool {
@@ -447,6 +545,21 @@ struct AddGradeView: View {
     private func examDate(for examId: String?) -> Date? {
         guard let examId else { return nil }
         return store.allExams.first(where: { $0.id == examId })?.date
+    }
+
+    private func applyExamWeightIfAvailable(examId: String?) {
+        guard let examId else { return }
+        if let exam = store.allExams.first(where: { $0.id == examId }) {
+            if let w = exam.weight {
+                weightChoice = .preset(Double(w))
+            }
+            return
+        }
+        if let exam = store.sharedExams.first(where: { $0.id == examId }) {
+            if let w = exam.weight {
+                weightChoice = .preset(Double(w))
+            }
+        }
     }
 
     private static func defaultHalfYear(referenceDate: Date = Date()) -> Int {

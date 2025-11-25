@@ -33,13 +33,7 @@ struct AbiturExamView: View {
     }
 
     private func calculateGradeWeightForSubject(_ subjectType: Int, _ grade: GradeWithId) -> Double {
-        if subjectType == 1 {
-            return grade.weight == 3 ? 2 : (grade.weight == 2 ? 2 : 1)
-        }
-        if subjectType == 0 {
-            return grade.weight == 3 ? 2 : (grade.weight == 1 ? 2 : 1)
-        }
-        return 1
+        store.effectiveGradeWeight(subjectType: subjectType, rawWeight: grade.weight)
     }
 
     private func calculateHalfYearAverageForSubject(_ grades: [GradeWithId], _ subjectType: Int, _ halfYear: Int) -> Double? {

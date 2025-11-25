@@ -21,12 +21,13 @@ struct MainView: View {
     @State private var offlineBannerVisible: Bool = false
     @State private var offlineBannerDismissTask: Task<Void, Never>?
     @State private var reconnectTask: Task<Void, Never>?
+    @State private var showPfingstferienPrompt: Bool = false
+    @State private var nextSchoolYearSuggestion: String?
+    @State private var spinnerAnimating: Bool = false
 
     // Von SubjectDetail per Preference gemeldetes Fach für „Note hinzufügen“
     @State private var quickAddSubjectName: String? = nil
     @State private var navigateToAbiturExam: Bool = false
-
-    private let spinnerStartDate = Date()
 
     var body: some View {
         ZStack {
@@ -105,6 +106,15 @@ struct MainView: View {
         .onChange(of: gradesStore.onboardingRequired) { required in
             showOnboardingFunnel = required
         }
+        .onChange(of: gradesStore.gradeYear) { _ in
+            Task { await evaluatePfingstferienPrompt() }
+        }
+        .onChange(of: gradesStore.activeSchoolYearId) { _ in
+            Task { await evaluatePfingstferienPrompt() }
+        }
+        .onChange(of: gradesStore.isLoading) { loading in
+            spinnerAnimating = loading
+        }
         .fullScreenCover(isPresented: $showOnboardingFunnel) {
             OnboardingFunnelView {
                 showOnboardingFunnel = false
@@ -134,6 +144,18 @@ struct MainView: View {
                 }
             }
         }
+        .alert("Neues Schuljahr anlegen?", isPresented: $showPfingstferienPrompt, presenting: nextSchoolYearSuggestion) { yearId in
+            Button("Ja, \(yearId) erstellen") {
+                Task {
+                    await createNextSchoolYear(id: yearId)
+                }
+            }
+            Button("Später", role: .cancel) {
+                showPfingstferienPrompt = false
+            }
+        } message: { yearId in
+            Text("Die Pfingstferien sind vorbei. Möchtest du das neue Schuljahr \(yearId) jetzt anlegen?")
+        }
     }
 
     @MainActor
@@ -143,6 +165,7 @@ struct MainView: View {
                 gradesStore.loadOfflineSnapshot(snapshot)
             }
             showOfflineBannerTemporarily()
+            await evaluatePfingstferienPrompt()
             return
         }
 
@@ -152,6 +175,7 @@ struct MainView: View {
                offlineManager.isOfflineLoginAllowed(for: snapshot.userId) {
                 gradesStore.loadOfflineSnapshot(snapshot)
                 showOfflineBannerTemporarily()
+                await evaluatePfingstferienPrompt()
                 return
             }
         }
@@ -162,6 +186,7 @@ struct MainView: View {
         gradesStore.leaveOfflineModePreservingState()
         await gradesStore.startListening()
         hideOfflineBanner()
+        await evaluatePfingstferienPrompt()
     }
 
     @MainActor
@@ -182,6 +207,25 @@ struct MainView: View {
                 await attemptReconnectOrFallback()
             }
         }
+    }
+
+    @MainActor
+    private func evaluatePfingstferienPrompt() async {
+        guard !showPfingstferienPrompt else { return }
+        if let suggestion = await gradesStore.shouldOfferNextSchoolYearAfterPfingstferien() {
+            nextSchoolYearSuggestion = suggestion
+            showPfingstferienPrompt = true
+        }
+    }
+
+    @MainActor
+    private func createNextSchoolYear(id: String) async {
+        let created = await gradesStore.createSchoolYear(name: id)
+        if created == nil {
+            await gradesStore.setActiveSchoolYear(id: id)
+        }
+        showPfingstferienPrompt = false
+        nextSchoolYearSuggestion = nil
     }
 
     private var offlineBanner: some View {
@@ -316,7 +360,11 @@ struct MainView: View {
 
     private var loadingOverlay: some View {
         ZStack {
-            Color.black.opacity(gradesStore.darkMode ? 0.45 : 0.28)
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .ignoresSafeArea()
+
+            Color.black.opacity(gradesStore.darkMode ? 0.18 : 0.10)
                 .ignoresSafeArea()
 
             VStack(spacing: 14) {
@@ -330,14 +378,11 @@ struct MainView: View {
                             )
                         )
                         .frame(width: 70, height: 70)
-                    TimelineView(.periodic(from: spinnerStartDate, by: 1.0 / 60.0)) { context in
-                        let elapsed = context.date.timeIntervalSince(spinnerStartDate)
-                        let angle = Angle.degrees(elapsed * 240) // steady, continuous rotation
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .font(.system(size: 28, weight: .semibold))
-                            .foregroundStyle(loadingAccent)
-                            .rotationEffect(angle)
-                    }
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 28, weight: .semibold))
+                        .foregroundStyle(loadingAccent)
+                        .rotationEffect(.degrees(spinnerAnimating ? 360 : 0))
+                        .animation(.linear(duration: 1.2).repeatForever(autoreverses: false), value: spinnerAnimating)
                 }
 
                 VStack(spacing: 4) {
@@ -378,6 +423,8 @@ struct MainView: View {
             )
             .padding(.horizontal, 32)
         }
+        .onAppear { spinnerAnimating = true }
+        .onDisappear { spinnerAnimating = false }
         .zIndex(50)
     }
 
