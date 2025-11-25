@@ -49,6 +49,13 @@ struct AddSubjectView: View {
                                     }
                                     .pickerStyle(.segmented)
                                     .disabled(isElective)
+
+                                    Text("Hauptfach: Schulaufgaben zählen doppelt, Kurzarbeiten und Mündlich / EX einfach.")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                    Text("Nebenfach: Kurzarbeiten zählen doppelt, Mündlich / EX einfach.")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
                                 }
                             }
 

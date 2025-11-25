@@ -2,6 +2,12 @@ import Foundation
 import Combine
 import FirebaseAuth
 
+enum SignInResult {
+    case success
+    case wrongPassword
+    case failure
+}
+
 @MainActor
 final class AuthManager: ObservableObject {
     @Published var isAuthenticated: Bool = false
@@ -31,18 +37,25 @@ final class AuthManager: ObservableObject {
     }
 
     // Login
-    func signIn(email: String, password: String) async {
-        guard !isLoading else { return }
+    func signIn(email: String, password: String) async -> SignInResult {
+        guard !isLoading else { return .failure }
         await MainActor.run { self.isLoading = true; self.errorMessage = nil }
         do {
             let result = try await Auth.auth().signIn(withEmail: email, password: password)
             OfflineModeManager.shared.recordOnlineLogin(uid: result.user.uid)
             await MainActor.run { self.isLoading = false }
+            return .success
         } catch {
+            var outcome: SignInResult = .failure
+            if let authError = AuthErrorCode(_bridgedNSError: error as NSError),
+               authError.code == .wrongPassword {
+                outcome = .wrongPassword
+            }
             await MainActor.run {
                 self.errorMessage = self.mapAuthError(error)
                 self.isLoading = false
             }
+            return outcome
         }
     }
 
@@ -52,6 +65,7 @@ final class AuthManager: ObservableObject {
         await MainActor.run { self.isLoading = true; self.errorMessage = nil }
         do {
             let result = try await Auth.auth().createUser(withEmail: email, password: password)
+            try? await result.user.sendEmailVerification()
             let uid = result.user.uid
 
             let saltB64 = CryptoService.generateSalt(length: 16)
@@ -65,6 +79,16 @@ final class AuthManager: ObservableObject {
                 self.errorMessage = self.mapAuthError(error)
                 self.isLoading = false
             }
+        }
+    }
+
+    func sendVerificationEmail() async -> String? {
+        guard let user = Auth.auth().currentUser else { return "Kein angemeldeter Nutzer." }
+        do {
+            try await user.sendEmailVerification()
+            return nil
+        } catch {
+            return mapAuthError(error)
         }
     }
 
@@ -102,6 +126,8 @@ final class AuthManager: ObservableObject {
                 return "Ungültige E-Mail-Adresse."
             case .wrongPassword:
                 return "Falsches Passwort."
+            case .invalidCredential:
+                return "Anmeldedaten ungültig. Bitte E-Mail und Passwort prüfen."
             case .userNotFound:
                 return "Kein Benutzer mit dieser E-Mail gefunden."
             case .emailAlreadyInUse:
@@ -111,10 +137,10 @@ final class AuthManager: ObservableObject {
             case .networkError:
                 return "Netzwerkfehler. Bitte später erneut versuchen."
             default:
-                return "Fehler: \(ns.localizedDescription)"
+                return "Anmeldung fehlgeschlagen. Bitte E-Mail/Passwort prüfen oder später erneut versuchen."
             }
         } else {
-            return "Fehler: \(ns.localizedDescription)"
+            return "Anmeldung fehlgeschlagen. Bitte E-Mail/Passwort prüfen oder später erneut versuchen."
         }
     }
 }

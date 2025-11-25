@@ -3,9 +3,12 @@ import FirebaseAuth
 import UIKit
 
 struct AppSettingsView: View {
+    let scrollToAccount: Bool
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var store: GradesStore
     @EnvironmentObject var offlineManager: OfflineModeManager
+    @EnvironmentObject var biometricManager: BiometricAuthManager
+    @EnvironmentObject var authManager: AuthManager
 
     @State private var newName: String = ""
     @State private var isSavingName: Bool = false
@@ -46,6 +49,17 @@ struct AppSettingsView: View {
     @State private var isResettingYear: Bool = false
     @State private var resetError: String?
     @State private var offlineStatusMessage: String?
+    @State private var biometricToggleState: Bool = false
+    @State private var biometricStatusMessage: String?
+    @State private var isUpdatingBiometric: Bool = false
+    @State private var isEmailVerified: Bool? = nil
+    @State private var isSendingVerification: Bool = false
+    @State private var verificationMessage: String?
+    @State private var hasScrolledToAccount: Bool = false
+
+    init(scrollToAccount: Bool = false) {
+        self.scrollToAccount = scrollToAccount
+    }
 
     // Typografie-Hierarchie
     private let sectionHeaderFont: Font = .headline.weight(.semibold)
@@ -240,38 +254,47 @@ struct AppSettingsView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 18) {
-                    headerCard
-                        .softFadeIn(enabled: animationsOn, delay: 0.03, offset: 12)
-                    generalCard
-                        .softFadeIn(enabled: animationsOn, delay: 0.08, offset: 12)
-                    schoolYearCard
-                        .softFadeIn(enabled: animationsOn, delay: 0.12, offset: 12)
-                    groupsCard
-                        .softFadeIn(enabled: animationsOn, delay: 0.16, offset: 12)
-                    onboardingCard
-                        .softFadeIn(enabled: animationsOn, delay: 0.20, offset: 12)
-                    helpCard
-                        .softFadeIn(enabled: animationsOn, delay: 0.24, offset: 12)
-                    offlineCard
-                        .softFadeIn(enabled: animationsOn, delay: 0.26, offset: 12)
-                    resetCard
-                        .softFadeIn(enabled: animationsOn, delay: 0.30, offset: 12)
-                    accountCard
-                        .softFadeIn(enabled: animationsOn, delay: 0.34, offset: 12)
-                    infoCard
-                        .softFadeIn(enabled: animationsOn, delay: 0.38, offset: 12)
+            ScrollViewReader { proxy in
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 18) {
+                        headerCard
+                            .softFadeIn(enabled: animationsOn, delay: 0.03, offset: 12)
+                        generalCard
+                            .softFadeIn(enabled: animationsOn, delay: 0.08, offset: 12)
+                        schoolYearCard
+                            .softFadeIn(enabled: animationsOn, delay: 0.12, offset: 12)
+                        groupsCard
+                            .softFadeIn(enabled: animationsOn, delay: 0.16, offset: 12)
+                        onboardingCard
+                            .softFadeIn(enabled: animationsOn, delay: 0.20, offset: 12)
+                        helpCard
+                            .softFadeIn(enabled: animationsOn, delay: 0.24, offset: 12)
+                        offlineCard
+                            .softFadeIn(enabled: animationsOn, delay: 0.26, offset: 12)
+                        resetCard
+                            .softFadeIn(enabled: animationsOn, delay: 0.30, offset: 12)
+                        accountCard
+                            .softFadeIn(enabled: animationsOn, delay: 0.34, offset: 12)
+                            .id("accountCard")
+                        infoCard
+                            .softFadeIn(enabled: animationsOn, delay: 0.38, offset: 12)
 
-                    NavigationLink(
-                        destination: AbiturExamView().environmentObject(store),
-                        isActive: $navigateToFinal
-                    ) { EmptyView() }
-                    .frame(width: 0, height: 0)
-                    .hidden()
+                        NavigationLink(
+                            destination: AbiturExamView().environmentObject(store),
+                            isActive: $navigateToFinal
+                        ) { EmptyView() }
+                        .frame(width: 0, height: 0)
+                        .hidden()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .onAppear {
+                    maybeScrollToAccount(proxy: proxy)
+                }
+                .onChange(of: scrollToAccount) { _ in
+                    maybeScrollToAccount(proxy: proxy)
+                }
             }
             .background(
                 ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine")
@@ -309,6 +332,8 @@ struct AppSettingsView: View {
                 newName = ""
                 nameSavedSuccess = false
                 selectedSubjectsForNewGroup = []
+                syncBiometricToggle()
+                Task { await refreshEmailVerification() }
             }
             .sheet(isPresented: $showHomeworkSheet) {
                 HomeworkListView()
@@ -1184,6 +1209,60 @@ struct AppSettingsView: View {
             systemImage: "person.crop.circle.badge.xmark",
             accent: .gray
         ) {
+            if let verified = isEmailVerified, verified == false {
+                SettingsSectionBox {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("E-Mail nicht bestätigt")
+                            .font(sectionHeaderFont)
+                        Text("Bitte bestätige deine E-Mail, um dein Konto zu sichern.")
+                            .font(helperFont)
+                            .foregroundStyle(.secondary)
+                        Button {
+                            Task { await resendVerificationEmail() }
+                        } label: {
+                            if isSendingVerification { ProgressView() } else { Text("Bestätigungs-E-Mail erneut senden") }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.orange)
+                        .disabled(isSendingVerification)
+                        if let info = verificationMessage {
+                            Text(info)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+
+            SettingsSectionBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle(isOn: Binding(
+                        get: { biometricToggleState },
+                        set: { handleBiometricToggle($0) }
+                    )) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(biometricManager.biometryName()) zum Entsperren")
+                                .font(sectionHeaderFont)
+                            Text("Schütze die App mit \(biometricManager.biometryName()).")
+                                .font(helperFont)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .toggleStyle(SwitchToggleStyle(tint: .blue))
+                    .disabled(isUpdatingBiometric || !biometricManager.biometricsAvailable)
+
+                    if let status = biometricStatusMessage {
+                        Text(status)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else if !biometricManager.biometricsAvailable {
+                        Text("\(biometricManager.biometryName()) wird auf diesem Gerät nicht unterstützt.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
             SettingsSectionBox {
                 Button(role: .destructive) {
                     Task {
@@ -1281,6 +1360,93 @@ struct AppSettingsView: View {
     }
 
     // MARK: - Actions
+
+    private var biometricUserId: String? {
+        Auth.auth().currentUser?.uid
+        ?? offlineManager.cachedSnapshot?.userId
+        ?? offlineManager.lastLoginUserId
+    }
+
+    private func syncBiometricToggle() {
+        biometricManager.setActiveUser(id: biometricUserId)
+        biometricToggleState = biometricManager.isEnabled(for: biometricUserId)
+        biometricStatusMessage = nil
+    }
+
+    private func maybeScrollToAccount(proxy: ScrollViewProxy) {
+        guard scrollToAccount, !hasScrolledToAccount else { return }
+        hasScrolledToAccount = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            withAnimation {
+                proxy.scrollTo("accountCard", anchor: .top)
+            }
+        }
+    }
+
+    private func refreshEmailVerification() async {
+        guard let user = Auth.auth().currentUser else {
+            await MainActor.run { isEmailVerified = nil }
+            return
+        }
+        do {
+            try await user.reload()
+            await MainActor.run {
+                isEmailVerified = user.isEmailVerified
+                verificationMessage = nil
+            }
+        } catch {
+            await MainActor.run {
+                isEmailVerified = nil
+                verificationMessage = "E-Mail-Status konnte nicht aktualisiert werden."
+            }
+        }
+    }
+
+    private func resendVerificationEmail() async {
+        guard !isSendingVerification else { return }
+        isSendingVerification = true
+        verificationMessage = nil
+        let message = await authManager.sendVerificationEmail()
+        await MainActor.run {
+            isSendingVerification = false
+            verificationMessage = message ?? "Bestätigungs-E-Mail wurde gesendet."
+        }
+    }
+
+    private func handleBiometricToggle(_ newValue: Bool) {
+        guard let uid = biometricUserId else {
+            biometricToggleState = false
+            biometricStatusMessage = "Kein Nutzerkonto erkannt."
+            return
+        }
+        biometricStatusMessage = nil
+        if newValue {
+            guard biometricManager.biometricsAvailable else {
+                biometricToggleState = false
+                biometricStatusMessage = "\(biometricManager.biometryName()) wird auf diesem Gerät nicht unterstützt."
+                return
+            }
+            isUpdatingBiometric = true
+            Task {
+                let reason = "\(biometricManager.biometryName()) für den Schnellzugriff freigeben."
+                let success = await biometricManager.authenticate(reason: reason)
+                await MainActor.run {
+                    if success {
+                        biometricManager.setActiveUser(id: uid)
+                        biometricManager.setEnabled(true, for: uid)
+                        biometricToggleState = true
+                    } else {
+                        biometricToggleState = false
+                        biometricStatusMessage = "\(biometricManager.biometryName()) abgebrochen oder fehlgeschlagen."
+                    }
+                    isUpdatingBiometric = false
+                }
+            }
+        } else {
+            biometricManager.setEnabled(false, for: uid)
+            biometricToggleState = false
+        }
+    }
 
     private func saveName() async {
         guard !isSavingName else { return }

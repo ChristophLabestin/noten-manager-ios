@@ -250,9 +250,9 @@ struct AddGradeView: View {
                                         } else {
                                             let weightInfo: String = {
                                                 if subjectType == 1 {
-                                                    return "Schulaufgaben zählen doppelt, Kurzarbeiten und mündliche Leistungen einfach."
+                                                    return "Schulaufgaben zählen doppelt, Kurzarbeiten und Mündlich / EX einfach. Sonstige Leistungen können eigene Gewichtung haben"
                                                 }
-                                                return "Kurzarbeiten zählen doppelt, mündliche Leistungen/EX einfach."
+                                                return "Kurzarbeiten zählen doppelt, Mündlich / EX einfach. Sonstige Leistungen können eigene Gewichtung haben"
                                             }()
                                             Text(weightInfo)
                                                 .font(.caption)

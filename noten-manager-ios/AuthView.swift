@@ -1,8 +1,11 @@
 // AuthView.swift
 import SwiftUI
+import FirebaseAuth
 
 struct AuthView: View {
     @ObservedObject var authManager: AuthManager
+    @EnvironmentObject var biometricManager: BiometricAuthManager
+    @EnvironmentObject var offlineManager: OfflineModeManager
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var isLoginTab: Bool = true
@@ -10,6 +13,10 @@ struct AuthView: View {
     @State private var loginEmail: String = ""
     @State private var loginPassword: String = ""
     @State private var rememberMe: Bool = true
+    @State private var enableBiometricLogin: Bool = false
+    @State private var applyBiometricAfterLogin: Bool = false
+    @State private var biometricOptionAvailable: Bool = false
+    @State private var loginFailedAttempts: Int = 0
 
     @State private var registerName: String = ""
     @State private var registerEmail: String = ""
@@ -133,6 +140,24 @@ struct AuthView: View {
         }
         .onChange(of: isLoginTab) { _ in
             authManager.errorMessage = nil
+            loginFailedAttempts = 0
+        }
+        .onAppear {
+            biometricManager.refreshAvailability()
+            biometricOptionAvailable = biometricManager.biometricsAvailable
+            let lastId = offlineManager.lastLoginUserId ?? offlineManager.cachedSnapshot?.userId
+            enableBiometricLogin = biometricManager.isEnabled(for: lastId)
+        }
+        .onChange(of: authManager.isAuthenticated) { isAuth in
+            if isAuth && applyBiometricAfterLogin {
+                let uid = authManager.currentUser?.uid ?? offlineManager.lastLoginUserId ?? offlineManager.cachedSnapshot?.userId
+                biometricManager.setActiveUser(id: uid)
+                biometricManager.setEnabled(true, for: uid)
+                applyBiometricAfterLogin = false
+            }
+            if !isAuth {
+                applyBiometricAfterLogin = false
+            }
         }
         .keyboardDismissToolbar()
     }
@@ -225,18 +250,33 @@ struct AuthView: View {
                         .foregroundStyle(subLabelColor)
                 }
                 .toggleStyle(SwitchToggleStyle(tint: accentPrimary))
+            }
 
-                Spacer()
+            if biometricOptionAvailable {
+                Toggle(isOn: $enableBiometricLogin) {
+                    Text("\(biometricManager.biometryName()) zum Entsperren nutzen")
+                        .font(.footnote)
+                        .foregroundStyle(subLabelColor)
+                }
+                .toggleStyle(SwitchToggleStyle(tint: accentPrimary))
 
+                Text("Nach dem ersten Login kannst du \(biometricManager.biometryName()) nutzen, um die App schnell zu entsperren.")
+                    .font(.footnote)
+                    .foregroundStyle(subLabelColor)
+            }
+
+            if loginFailedAttempts >= 2 {
                 Button {
                     resetEmail = loginEmail
                     showResetSheet = true
                 } label: {
                     Label("Passwort vergessen?", systemImage: "arrow.uturn.backward")
-                        .font(.footnote)
+                        .font(.footnote.weight(.semibold))
                         .labelStyle(.titleOnly)
                         .foregroundStyle(accentPrimary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .buttonStyle(.plain)
             }
 
             PrimaryButton(
@@ -244,8 +284,15 @@ struct AuthView: View {
                 isLoading: authManager.isLoading,
                 disabled: authManager.isLoading || loginEmail.isEmpty || loginPassword.isEmpty
             ) {
+                applyBiometricAfterLogin = biometricOptionAvailable && enableBiometricLogin
                 Task {
-                    await authManager.signIn(email: loginEmail, password: loginPassword)
+                    let result = await authManager.signIn(email: loginEmail, password: loginPassword)
+                    switch result {
+                    case .success:
+                        loginFailedAttempts = 0
+                    case .wrongPassword, .failure:
+                        loginFailedAttempts += 1
+                    }
                 }
             }
         }
@@ -332,6 +379,9 @@ struct AuthView: View {
                         .keyboardType(.emailAddress)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                    Text("Wir senden dir einen Link zum Zurücksetzen an diese Adresse.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
                 if let info = resetInfo {
                     Text(info).foregroundStyle(.secondary)
@@ -344,15 +394,25 @@ struct AuthView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Senden") {
+                        let email = resetEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !email.isEmpty else {
+                            resetInfo = "Bitte gib deine E-Mail ein."
+                            return
+                        }
                         Task {
-                            await authManager.resetPassword(email: resetEmail)
+                            await authManager.resetPassword(email: email)
                             resetInfo = "E-Mail zum Zurücksetzen wurde gesendet (falls Konto existiert)."
                         }
                     }
-                    .disabled(resetEmail.isEmpty)
+                    .disabled(authManager.isLoading)
                 }
             }
             .keyboardDismissToolbar()
+            .onAppear {
+                if resetEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    resetEmail = loginEmail
+                }
+            }
         }
     }
 

@@ -1,5 +1,6 @@
 // MainView.swift
 import SwiftUI
+import FirebaseAuth
 
 // PreferenceKey, mit dem Detailseiten (SubjectDetail) den aktuellen Fachnamen
 // an den Container melden, damit die global überlagerte BottomNav die Vorauswahl kennt.
@@ -15,6 +16,8 @@ struct MainView: View {
     @StateObject private var gradesStore = GradesStore()
     @State private var currentTab: BottomNavView.Tab = .home
     @EnvironmentObject private var offlineManager: OfflineModeManager
+    @EnvironmentObject private var authManager: AuthManager
+    @EnvironmentObject private var biometricManager: BiometricAuthManager
     @Environment(\.colorScheme) private var colorScheme
     @State private var navPath = NavigationPath()
     @State private var showOnboardingFunnel: Bool = false
@@ -24,6 +27,10 @@ struct MainView: View {
     @State private var showPfingstferienPrompt: Bool = false
     @State private var nextSchoolYearSuggestion: String?
     @State private var spinnerAnimating: Bool = false
+    @State private var emailBannerVisible: Bool = false
+    @State private var emailBannerDismissTask: Task<Void, Never>?
+    @State private var needsEmailVerification: Bool = false
+    @State private var scrollToAccountOnOpen: Bool = false
 
     // Von SubjectDetail per Preference gemeldetes Fach für „Note hinzufügen“
     @State private var quickAddSubjectName: String? = nil
@@ -32,61 +39,7 @@ struct MainView: View {
     var body: some View {
         ZStack {
             themedBackground
-
-            NavigationStack(path: $navPath) {
-                Group {
-                    switch currentTab {
-                    case .home:
-                        HomeView()
-                            .environmentObject(gradesStore)
-                    case .insights:
-                        InsightsView()
-                            .environmentObject(gradesStore)
-                    case .final:
-                        FinalGradeView()
-                            .environmentObject(gradesStore)
-                    case .settings:
-                        AppSettingsView()
-                            .environmentObject(gradesStore)
-                    }
-                }
-                NavigationLink(
-                    destination: AbiturExamView().environmentObject(gradesStore),
-                    isActive: $navigateToAbiturExam
-                ) {
-                    EmptyView()
-                }
-            }
-            .navigationDestination(for: Subject.self) { subject in
-                if subject.name == "Fachreferat" {
-                    FachreferatDetailView(subject: subject)
-                        .environmentObject(gradesStore)
-                } else {
-                    SubjectDetailView(subject: subject)
-                        .environmentObject(gradesStore)
-                }
-            }
-            // Platz für die BottomNav im Safe-Area-Bereich reservieren
-            .safeAreaInset(edge: .bottom) {
-                Color.clear.frame(height: 100)
-            }
-            // BottomNav soll bei geöffneter Tastatur unten bleiben
-            .ignoresSafeArea(.keyboard, edges: .bottom)
-            // Statische BottomNav als Overlay über allen Seiten
-            .overlay(alignment: .bottom) {
-                BottomNavView(
-                    currentTab: currentTab,
-                    onOpenHome: { currentTab = .home },
-                    onOpenFinalGrade: { currentTab = .final },
-                    onOpenSettings: { currentTab = .settings },
-                    onOpenInsights: { currentTab = .insights },
-                    onOpenAbitur: { navigateToAbiturExam = true },
-                    // Vorauswahl für „Note hinzufügen“ (kommt von SubjectDetail)
-                    quickAddPreselectedSubjectName: quickAddSubjectName
-                )
-                .environmentObject(gradesStore)
-                .ignoresSafeArea(.keyboard, edges: .bottom)
-            }
+            navigationContainer
         }
         // Änderungen am gemeldeten Fachnamen von SubjectDetail entgegennehmen
         .onPreferenceChange(QuickAddSubjectPreferenceKey.self) { value in
@@ -123,10 +76,19 @@ struct MainView: View {
         }
         .task {
             await handleDataLoading()
+            await refreshEmailVerification()
         }
         .onChange(of: offlineManager.isOfflineModeActive) { active in
             Task {
                 await handleOfflineToggle(active: active)
+            }
+        }
+        .onChange(of: authManager.isAuthenticated) { _ in
+            Task { await refreshEmailVerification() }
+        }
+        .onChange(of: currentTab) { newTab in
+            if newTab != .settings {
+                scrollToAccountOnOpen = false
             }
         }
         .overlay(alignment: .center) {
@@ -135,12 +97,23 @@ struct MainView: View {
             }
         }
         .overlay(alignment: .top) {
-            offlineBanner
+            VStack(spacing: 8) {
+                if emailBannerVisible {
+                    emailVerificationBanner
+                }
+                offlineBanner
+            }
+            .animation(.easeInOut(duration: 0.2), value: emailBannerVisible)
         }
         .toolbar {
             if offlineManager.isOfflineModeActive, navPath.isEmpty {
                 ToolbarItem(placement: .navigationBarLeading) {
                     offlineToolbarButton
+                }
+            }
+            if needsEmailVerification, navPath.isEmpty {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    emailVerificationToolbarButton
                 }
             }
         }
@@ -165,6 +138,7 @@ struct MainView: View {
                 gradesStore.loadOfflineSnapshot(snapshot)
             }
             showOfflineBannerTemporarily()
+            await refreshEmailVerification()
             await evaluatePfingstferienPrompt()
             return
         }
@@ -175,6 +149,7 @@ struct MainView: View {
                offlineManager.isOfflineLoginAllowed(for: snapshot.userId) {
                 gradesStore.loadOfflineSnapshot(snapshot)
                 showOfflineBannerTemporarily()
+                await refreshEmailVerification()
                 await evaluatePfingstferienPrompt()
                 return
             }
@@ -298,6 +273,11 @@ struct MainView: View {
 
     private func showOfflineBannerTemporarily() {
         offlineBannerDismissTask?.cancel()
+        // Toggle: wenn bereits sichtbar, dann schließen
+        if offlineBannerVisible {
+            hideOfflineBanner()
+            return
+        }
         offlineBannerVisible = true
         offlineBannerDismissTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 15_000_000_000)
@@ -309,6 +289,160 @@ struct MainView: View {
         offlineBannerDismissTask?.cancel()
         offlineBannerDismissTask = nil
         offlineBannerVisible = false
+    }
+
+    private var emailVerificationBanner: some View {
+        VStack(spacing: 10) {
+        HStack(spacing: 10) {
+            Image(systemName: "info.circle.fill")
+                .font(.headline)
+                .foregroundStyle(.white)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("E-Mail noch nicht bestätigt")
+                    .font(.subheadline)
+                    .bold()
+                    .foregroundStyle(.white)
+                Text("Bitte bestätige deine Adresse über die E-Mail, die wir gesendet haben.")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(1))
+            }
+            Spacer()
+
+            Button {
+                hideEmailBanner()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.headline)
+                    .foregroundStyle(.white.opacity(1))
+            }
+            .buttonStyle(.plain)
+        }
+            Button {
+                scrollToAccountOnOpen = true
+                currentTab = .settings
+                hideEmailBanner()
+            } label: {
+                Label("Zu Einstellungen", systemImage: "arrow.right.circle")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.white.opacity(0.25))
+            .controlSize(.small)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.red.opacity(1))
+        )
+        .padding(.horizontal, 16)
+    }
+
+    private var emailVerificationToolbarButton: some View {
+        Button {
+            showEmailBannerTemporarily()
+        } label: {
+            Image(systemName: "info.circle.fill")
+                .imageScale(.medium)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.red)
+    }
+
+    private func showEmailBannerTemporarily() {
+        emailBannerDismissTask?.cancel()
+        // Toggle: wenn bereits sichtbar, dann schließen
+        if emailBannerVisible {
+            hideEmailBanner()
+            return
+        }
+        emailBannerVisible = true
+        emailBannerDismissTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 15_000_000_000)
+            emailBannerVisible = false
+        }
+    }
+
+    private func hideEmailBanner() {
+        emailBannerDismissTask?.cancel()
+        emailBannerDismissTask = nil
+        emailBannerVisible = false
+    }
+
+    @MainActor
+    private func refreshEmailVerification() async {
+        guard let user = Auth.auth().currentUser else {
+            needsEmailVerification = false
+            emailBannerVisible = false
+            return
+        }
+        do {
+            try await user.reload()
+            needsEmailVerification = !user.isEmailVerified
+            if !needsEmailVerification {
+                hideEmailBanner()
+            }
+        } catch {
+            needsEmailVerification = false
+            hideEmailBanner()
+        }
+    }
+
+    @ViewBuilder
+    private var navigationContainer: some View {
+        NavigationStack(path: $navPath) {
+            Group {
+                switch currentTab {
+                case .home:
+                    HomeView()
+                        .environmentObject(gradesStore)
+                case .insights:
+                    InsightsView()
+                        .environmentObject(gradesStore)
+                case .final:
+                    FinalGradeView()
+                        .environmentObject(gradesStore)
+                case .settings:
+                    AppSettingsView(scrollToAccount: scrollToAccountOnOpen)
+                        .environmentObject(gradesStore)
+                        .environmentObject(authManager)
+                        .environmentObject(offlineManager)
+                        .environmentObject(biometricManager)
+                }
+            }
+            NavigationLink(
+                destination: AbiturExamView().environmentObject(gradesStore),
+                isActive: $navigateToAbiturExam
+            ) {
+                EmptyView()
+            }
+        }
+        .navigationDestination(for: Subject.self) { subject in
+            if subject.name == "Fachreferat" {
+                FachreferatDetailView(subject: subject)
+                    .environmentObject(gradesStore)
+            } else {
+                SubjectDetailView(subject: subject)
+                    .environmentObject(gradesStore)
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            Color.clear.frame(height: 100)
+        }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
+        .overlay(alignment: .bottom) {
+            BottomNavView(
+                currentTab: currentTab,
+                onOpenHome: { currentTab = .home },
+                onOpenFinalGrade: { currentTab = .final },
+                onOpenSettings: { currentTab = .settings },
+                onOpenInsights: { currentTab = .insights },
+                onOpenAbitur: { navigateToAbiturExam = true },
+                quickAddPreselectedSubjectName: quickAddSubjectName
+            )
+            .environmentObject(gradesStore)
+            .ignoresSafeArea(.keyboard, edges: .bottom)
+        }
     }
 
     @MainActor
