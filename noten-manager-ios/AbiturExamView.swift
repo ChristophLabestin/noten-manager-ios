@@ -407,6 +407,13 @@ struct AbiturExamView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+                HelpCenterLink(
+                    title: "Hilfe zu Prüfungen",
+                    subtitle: "Gewichtung schriftlich/mündlich, Mindestpunkte & Zulassung",
+                    section: .exams,
+                    accent: .mint
+                )
+
                 if examSubjects.isEmpty {
                     Text("Lege in den Einstellungen deine Prüfungsfächer fest, um Abiturnoten einzutragen.")
                         .foregroundStyle(.secondary)

@@ -52,16 +52,28 @@ enum ExamNotificationManager {
         }
     }
 
-    static func syncNotifications(for exams: [Exam]) {
+    static func syncNotifications(
+        for exams: [Exam],
+        standardReminderEnabled: Bool = true
+    ) {
+        // Ensure categories are available before scheduling notifications
+        configureCategories()
         requestAuthorizationIfNeeded()
 
         let center = UNUserNotificationCenter.current()
         center.getPendingNotificationRequests { existing in
             let examIds = existing
-                .filter { $0.identifier.hasPrefix("exam_") }
-                .map { $0.identifier }
+                .map(\.identifier)
+                .filter { $0.hasPrefix("exam_") && !$0.contains("_snooze_") }
             if !examIds.isEmpty {
                 center.removePendingNotificationRequests(withIdentifiers: examIds)
+            }
+
+            let inactiveSnoozes = exams
+                .filter { !$0.isActive }
+                .map { "exam_snooze_\($0.id)" }
+            if !inactiveSnoozes.isEmpty {
+                center.removePendingNotificationRequests(withIdentifiers: inactiveSnoozes)
             }
 
             let now = Date()
@@ -92,7 +104,8 @@ enum ExamNotificationManager {
                     }
                 } else {
                     // Eigene Klausuren: Standardlogik (Tag vorher + zusätzliche Erinnerung)
-                    if let reminder = reminderDate(before: exam.date),
+                    if standardReminderEnabled,
+                       let reminder = reminderDate(before: exam.date),
                        reminder > now {
                         let content = UNMutableNotificationContent()
                         content.title = "Klausur morgen"

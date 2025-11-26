@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		55050D342ED6292C0082A2EE /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 55050D332ED6292C0082A2EE /* GoogleSignIn */; };
+		55050D362ED6292C0082A2EE /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 55050D352ED6292C0082A2EE /* GoogleSignInSwift */; };
 		5535B85D2ECC2C7A00B778F4 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 5535B85C2ECC2C7A00B778F4 /* FirebaseAuth */; };
 		5535B85F2ECC2C7F00B778F4 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5535B85E2ECC2C7F00B778F4 /* FirebaseCore */; };
 		5535B8612ECC2C8500B778F4 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 5535B8602ECC2C8500B778F4 /* FirebaseFirestore */; };
@@ -16,9 +18,22 @@
 		5535B84A2ECC21F600B778F4 /* noten-manager-ios.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "noten-manager-ios.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		55050D382ED62A370082A2EE /* Exceptions for "noten-manager-ios" folder in "noten-manager-ios" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 5535B8492ECC21F600B778F4 /* noten-manager-ios */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		5535B84C2ECC21F600B778F4 /* noten-manager-ios */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				55050D382ED62A370082A2EE /* Exceptions for "noten-manager-ios" folder in "noten-manager-ios" target */,
+			);
 			path = "noten-manager-ios";
 			sourceTree = "<group>";
 		};
@@ -29,7 +44,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				55050D362ED6292C0082A2EE /* GoogleSignInSwift in Frameworks */,
 				5535B85F2ECC2C7F00B778F4 /* FirebaseCore in Frameworks */,
+				55050D342ED6292C0082A2EE /* GoogleSignIn in Frameworks */,
 				5535B85D2ECC2C7A00B778F4 /* FirebaseAuth in Frameworks */,
 				5535B8612ECC2C8500B778F4 /* FirebaseFirestore in Frameworks */,
 			);
@@ -85,6 +102,8 @@
 				5535B85C2ECC2C7A00B778F4 /* FirebaseAuth */,
 				5535B85E2ECC2C7F00B778F4 /* FirebaseCore */,
 				5535B8602ECC2C8500B778F4 /* FirebaseFirestore */,
+				55050D332ED6292C0082A2EE /* GoogleSignIn */,
+				55050D352ED6292C0082A2EE /* GoogleSignInSwift */,
 			);
 			productName = "noten-manager-ios";
 			productReference = 5535B84A2ECC21F600B778F4 /* noten-manager-ios.app */;
@@ -116,6 +135,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				5535B85A2ECC29C800B778F4 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				55050D322ED6292C0082A2EE /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 5535B84B2ECC21F600B778F4 /* Products */;
@@ -202,7 +222,6 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				INFOPLIST_KEY_NSFaceIDUsageDescription = "Face ID wird genutzt, um den Zugang zur App zu entsperren.";
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -260,7 +279,6 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				INFOPLIST_KEY_NSFaceIDUsageDescription = "Face ID wird genutzt, um den Zugang zur App zu entsperren.";
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
@@ -272,7 +290,6 @@
 		5535B8562ECC21FA00B778F4 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconPink AppIconGreen AppIconBlack";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "Apple Development";
@@ -281,6 +298,7 @@
 				DEVELOPMENT_TEAM = 48BM67TY9G;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "noten-manager-ios/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "Noten Manager";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -309,7 +327,6 @@
 		5535B8572ECC21FA00B778F4 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconPink AppIconGreen AppIconBlack";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "Apple Development";
@@ -318,6 +335,7 @@
 				DEVELOPMENT_TEAM = 48BM67TY9G;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "noten-manager-ios/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "Noten Manager";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -367,6 +385,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		55050D322ED6292C0082A2EE /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 9.0.0;
+			};
+		};
 		5535B85A2ECC29C800B778F4 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
@@ -378,6 +404,16 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		55050D332ED6292C0082A2EE /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 55050D322ED6292C0082A2EE /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
+		};
+		55050D352ED6292C0082A2EE /* GoogleSignInSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 55050D322ED6292C0082A2EE /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignInSwift;
+		};
 		5535B85C2ECC2C7A00B778F4 /* FirebaseAuth */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 5535B85A2ECC29C800B778F4 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;

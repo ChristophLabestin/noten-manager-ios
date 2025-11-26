@@ -29,6 +29,7 @@ struct FinalGradeView: View {
     @State private var maxDroppedHalfYears: Int = 3
     @State private var examPointsBySubject: [String: Double?] = [:]
     @State private var finalGradeToFixed: Int = 1
+    @State private var finalGradeTapState: Int = 0 // 0 -> 1 Nachkommastelle, 1 -> 2, 2 -> 3
     @State private var showHomeworkSheet: Bool = false
     @State private var showExamSheet: Bool = false
     @State private var showStatusDetails: Bool = false
@@ -301,6 +302,14 @@ struct FinalGradeView: View {
             statusCard
                 .padding(.horizontal, 16)
                 .softFadeIn(enabled: animationsOn, delay: 0.08, offset: 12)
+            HelpCenterLink(
+                title: "Hilfe zur Abschlussnote",
+                subtitle: "Regeln, Gewichtung & Beispiele nach BayFOBOSO",
+                section: .pass,
+                accent: .indigo
+            )
+            .padding(.horizontal, 16)
+            .softFadeIn(enabled: animationsOn, delay: 0.10, offset: 12)
             abiturOverviewCard
                 .padding(.horizontal, 16)
                 .softFadeIn(enabled: animationsOn, delay: 0.12, offset: 12)
@@ -383,25 +392,37 @@ struct FinalGradeView: View {
             trailing: { yearBadge }
         ) {
             VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .center, spacing: 12) {
-                    Text("Ergebnis")
-                        .font(.headline)
-                    Spacer()
-                    Text(finalGradeText)
-                        .font(.title2)
-                        .fontWeight(.semibold)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(finalGradeColor(finalGradeValueForColor).opacity(0.15))
-                        .foregroundStyle(finalGradeColor(finalGradeValueForColor))
-                        .clipShape(Capsule())
-                        .onTapGesture { toggleFinalGradeToFixed() }
-                }
+                HStack(alignment: .center, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Ergebnis")
+                            .font(.headline)
+                        if let gradeValue = finalGradeValueForColor {
+                            GradeProgressBar(value: gradeValue)
+                                .frame(height: 6)
+                                .padding(.trailing, 8)
+                                .padding(.top, 2)
+                            Text(finalGradeDescriptor(gradeValue))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
 
-                if passFailStatus == .open {
-                    Text("Tippe auf die Note, um die Rundung zu ändern.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Spacer()
+
+                    VStack(alignment: .trailing, spacing: 6) {
+                        Text(finalGradeText)
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(finalGradeColor(finalGradeValueForColor).opacity(0.15))
+                            .foregroundStyle(finalGradeColor(finalGradeValueForColor))
+                            .clipShape(Capsule())
+                            .onTapGesture { toggleFinalGradeToFixed() }
+                        Text("Note antippen")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
@@ -879,12 +900,13 @@ struct FinalGradeView: View {
 
     private var finalGradeText: String {
         if fobosoSummary.maxPoints > 0 {
-            if finalGradeToFixed == 1, let g = fobosoSummary.grade {
-                return String(format: "%.1f", g)
-            }
+            let decimals = max(1, min(3, finalGradeToFixed))
             if let raw = fobosoSummary.gradeRaw {
                 let rawDisplay = max(1, raw)
-                return String(format: "%.\(finalGradeToFixed)f", rawDisplay)
+                return String(format: "%.\(decimals)f", rawDisplay)
+            }
+            if let g = fobosoSummary.grade {
+                return String(format: "%.\(decimals)f", g)
             }
         }
         return formatAverage(finalAverage)
@@ -899,9 +921,19 @@ struct FinalGradeView: View {
 
     private func finalGradeColor(_ value: Double?) -> Color {
         guard let v = value else { return .secondary }
-        if v <= 3 { return .green }
-        if v < 5 { return .orange }
+        if v <= 3.4 { return .green }
+        if v <= 4.4 { return .orange }
         return .red
+    }
+
+    private func finalGradeDescriptor(_ value: Double?) -> String {
+        guard let v = value else { return "Noch keine Note berechnet" }
+        if v == 1 { return "Exzellenter Schnitt" }
+        if v <= 1.4 { return "Sehr starker Schnitt" }
+        if v <= 2.4 { return "Guter Schnitt" }
+        if v <= 3.4 { return "Stabiler Schnitt" }
+        if v <= 4.4 { return "Ausreichender Schnitt - Dran bleiben!"}
+        return "Achtung: Schnitt im roten Bereich"
     }
 
     private func roundedExamPoints(_ value: Double?) -> Double? {
@@ -1509,7 +1541,18 @@ struct FinalGradeView: View {
     }
 
     private func toggleFinalGradeToFixed() {
-        finalGradeToFixed = (finalGradeToFixed == 1 ? 2 : 1)
+        // Cycle 1 -> 2 -> 3 -> 1
+        switch finalGradeTapState {
+        case 0:
+            finalGradeToFixed = 2
+            finalGradeTapState = 1
+        case 1:
+            finalGradeToFixed = 3
+            finalGradeTapState = 2
+        default:
+            finalGradeToFixed = 1
+            finalGradeTapState = 0
+        }
     }
 
     // MARK: - Actions

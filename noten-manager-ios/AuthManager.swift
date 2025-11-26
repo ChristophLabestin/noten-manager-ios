@@ -1,6 +1,8 @@
 import Foundation
 import Combine
 import FirebaseAuth
+import FirebaseCore
+import GoogleSignIn
 
 enum SignInResult {
     case success
@@ -104,6 +106,51 @@ final class AuthManager: ObservableObject {
                 self.errorMessage = self.mapAuthError(error)
                 self.isLoading = false
             }
+        }
+    }
+
+    @MainActor
+    func signInWithGoogle(presenting viewController: UIViewController?) async -> SignInResult {
+        guard !isLoading else { return .failure }
+        guard let viewController else {
+            errorMessage = "Kein aktives Fenster für Google Login gefunden."
+            return .failure
+        }
+        await MainActor.run { self.isLoading = true; self.errorMessage = nil }
+        do {
+            guard let clientID = FirebaseApp.app()?.options.clientID else {
+                await MainActor.run {
+                    self.errorMessage = "Google Client ID fehlt."
+                    self.isLoading = false
+                }
+                return .failure
+            }
+
+            let config = GIDConfiguration(clientID: clientID)
+            GIDSignIn.sharedInstance.configuration = config
+            let result = try await GIDSignIn.sharedInstance.signIn(withPresenting: viewController)
+            guard let idToken = result.user.idToken?.tokenString else {
+                await MainActor.run {
+                    self.errorMessage = "Kein Google Token erhalten."
+                    self.isLoading = false
+                }
+                return .failure
+            }
+            let accessToken = result.user.accessToken.tokenString
+            let credential = GoogleAuthProvider.credential(withIDToken: idToken, accessToken: accessToken)
+            let authResult = try await Auth.auth().signIn(with: credential)
+            OfflineModeManager.shared.recordOnlineLogin(uid: authResult.user.uid)
+            await MainActor.run {
+                self.isLoading = false
+                self.isAuthenticated = true
+            }
+            return .success
+        } catch {
+            await MainActor.run {
+                self.errorMessage = self.mapAuthError(error)
+                self.isLoading = false
+            }
+            return .failure
         }
     }
 

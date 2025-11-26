@@ -1,7 +1,46 @@
 import SwiftUI
 import FirebaseAuth
 
+enum HelpCenterSection: String {
+    case intro
+    case steps
+    case calc
+    case exams
+    case pass
+    case special
+    case faq
+    case contact
+
+    var scrollId: String {
+        switch self {
+        case .intro: return "help_intro"
+        case .steps: return "help_steps"
+        case .calc: return "help_calc"
+        case .exams: return "help_exams"
+        case .pass: return "help_pass"
+        case .special: return "help_special"
+        case .faq: return "help_faq"
+        case .contact: return "help_contact"
+        }
+    }
+}
+
+private struct HelpSearchEntry: Identifiable {
+    let id: String
+    let section: HelpCenterSection
+    let title: String
+    let summary: String
+    let keywords: [String]
+    let icon: String
+
+    var searchText: String {
+        (title + " " + summary + " " + keywords.joined(separator: " ")).lowercased()
+    }
+}
+
 struct HelpCenterView: View {
+    let initialSection: HelpCenterSection?
+
     @EnvironmentObject private var store: GradesStore
 
     @State private var contactSubject: String = ""
@@ -12,11 +51,134 @@ struct HelpCenterView: View {
     @State private var ticketError: String?
     @State private var searchQuery: String = ""
     @FocusState private var searchFocused: Bool
+    @State private var didScrollToInitialSection: Bool = false
+
+    private let searchIndex: [HelpSearchEntry] = [
+        HelpSearchEntry(
+            id: "setup",
+            section: .steps,
+            title: "Erste Schritte & Setup",
+            summary: "Schulart und Jahrgang festlegen, Fächer und Prüfungsfächer einrichten und die Übersicht anpassen.",
+            keywords: ["onboarding", "start", "schulart", "jahrgangsstufe", "fächer", "prüfungsfächer", "setup", "sortieren", "darstellung", "übersicht", "fos", "bos"],
+            icon: "hands.clap.fill"
+        ),
+        HelpSearchEntry(
+            id: "grades",
+            section: .steps,
+            title: "Noten erfassen & verknüpfen",
+            summary: "Leistungen mit Art und Halbjahr anlegen, mit Prüfungen verknüpfen und die Darstellung steuern.",
+            keywords: ["noten", "leistungen", "kurzarbeit", "schulaufgabe", "mündlich", "prüfung", "verknüpfen", "halbjahr", "tabelle", "anzeige"],
+            icon: "square.and.pencil"
+        ),
+        HelpSearchEntry(
+            id: "homework",
+            section: .steps,
+            title: "Hausaufgaben & Erinnerungen",
+            summary: "Aufgabenlisten nutzen, Erinnerungszeit ändern und Mitteilungen snoozen oder erledigen.",
+            keywords: ["hausaufgaben", "erinnerung", "benachrichtigung", "snooze", "uhrzeit", "fällig", "toolbar"],
+            icon: "bell.badge.fill"
+        ),
+        HelpSearchEntry(
+            id: "calc",
+            section: .calc,
+            title: "Gewichtungen & Durchschnitte",
+            summary: "Berechnung von Fach- und Gesamtschnitt, Wahlfächer und Halbjahresfilter.",
+            keywords: ["gewichtung", "durchschnitt", "wahlfach", "kurzarbeit", "schulaufgabe", "halbjahr", "filter", "gesamtschnitt", "insights", "abschlussnote", "fos", "bos", "bayfoboso"],
+            icon: "function"
+        ),
+        HelpSearchEntry(
+            id: "exams",
+            section: .exams,
+            title: "Prüfungen nach BayFOBOSO",
+            summary: "Gewichtungen von schriftlich/mündlich, Prüfungsdurchschnitt und Schwächenregel.",
+            keywords: ["prüfung", "bayfoboso", "schwach", "prüfungsschnitt", "profilfach", "zulassung", "abschlussnote", "fos", "bos", "fachabitur", "abitur"],
+            icon: "graduationcap.fill"
+        ),
+        HelpSearchEntry(
+            id: "pass",
+            section: .pass,
+            title: "Bestehensregeln & Punkte",
+            summary: "Grenzwerte für FOS/BOS 12/13, 0-Punkte-Regel und Abschlussnote richtig lesen.",
+            keywords: ["bestehen", "punkte", "punktesumme", "0 punkte", "zulassung", "abschluss", "schwellen", "foboso", "abschlussnote", "fos", "bos", "fachabitur", "abitur"],
+            icon: "checkmark.seal.fill"
+        ),
+        HelpSearchEntry(
+            id: "offline",
+            section: .special,
+            title: "Offline, Sync & Schuljahreswechsel",
+            summary: "Offline-Modus verwenden, Synchronisation verstehen und ein neues Schuljahr anlegen.",
+            keywords: ["offline", "synchronisieren", "sync", "schuljahr", "wechsel", "pfingstferien", "letzter stand", "fos", "bos"],
+            icon: "wifi.slash"
+        ),
+        HelpSearchEntry(
+            id: "insights",
+            section: .special,
+            title: "Insights & Darstellung",
+            summary: "Trends lesen, nach Halbjahr oder Fachtyp filtern und Animationen steuern.",
+            keywords: ["insights", "filter", "halbjahr", "fachtypen", "darstellung", "animationen", "ferien hinweis", "fos", "bos"],
+            icon: "chart.line.uptrend.xyaxis"
+        ),
+        HelpSearchEntry(
+            id: "groups",
+            section: .special,
+            title: "Gruppen & Teilen",
+            summary: "Gruppe erstellen oder per Code beitreten und erfahren, was synchronisiert wird.",
+            keywords: ["gruppen", "teilen", "code", "einladen", "synchronisation", "hausaufgaben", "prüfungen", "erinnerungen", "fos", "bos"],
+            icon: "person.2.wave.2.fill"
+        ),
+        HelpSearchEntry(
+            id: "faq",
+            section: .faq,
+            title: "FAQ & schnelle Antworten",
+            summary: "Kurzantworten zu Durchschnitt, Offline-Modus, Sortierung und Erinnerungen.",
+            keywords: ["faq", "durchschnitt", "offline", "sortieren", "erinnerung", "hausaufgabe", "filter", "frage", "fos", "bos"],
+            icon: "lightbulb.fill"
+        ),
+        HelpSearchEntry(
+            id: "contact",
+            section: .contact,
+            title: "Support kontaktieren",
+            summary: "Ticket direkt aus der App mit Betreff, Nachricht und E-Mail senden.",
+            keywords: ["kontakt", "support", "ticket", "hilfe", "email", "fehler", "meldung", "fos", "bos"],
+            icon: "envelope.fill"
+        )
+    ]
 
     private let helperFont: Font = .subheadline
     private var animationsOn: Bool { store.animationsEnabled }
     private var normalizedQuery: String {
-        searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        normalizedText(searchQuery.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private var hasQuery: Bool { !normalizedQuery.isEmpty }
+    private var queryTokens: [String] {
+        normalizedQuery
+            .split(whereSeparator: { $0.isWhitespace || $0.isPunctuation })
+            .map { String($0) }
+            .filter { !$0.isEmpty }
+    }
+
+    private var searchResults: [HelpSearchEntry] {
+        guard !queryTokens.isEmpty else { return [] }
+
+        let scored = searchIndex.compactMap { entry -> (HelpSearchEntry, Int)? in
+            let score = searchScore(for: entry)
+            return score > 0 ? (entry, score) : nil
+        }
+
+        return scored
+            .sorted { lhs, rhs in
+                if lhs.1 == rhs.1 {
+                    return lhs.0.title < rhs.0.title
+                }
+                return lhs.1 > rhs.1
+            }
+            .map { $0.0 }
+    }
+
+    private var quickSuggestions: [HelpSearchEntry] {
+        let ids: Set<String> = ["setup", "calc", "exams", "pass", "faq", "contact"]
+        return searchIndex.filter { ids.contains($0.id) }
     }
 
     private var contactFormValid: Bool {
@@ -24,11 +186,16 @@ struct HelpCenterView: View {
         contactMessage.trimmingCharacters(in: .whitespacesAndNewlines).count >= 10
     }
 
+    init(initialSection: HelpCenterSection? = nil) {
+        self.initialSection = initialSection
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 16) {
                     headerCard
+                    searchCard(proxy: proxy)
                     stepsCard
                     calcCard
                     examsCard
@@ -48,13 +215,9 @@ struct HelpCenterView: View {
                 if contactEmail.isEmpty {
                     contactEmail = Auth.auth().currentUser?.email ?? ""
                 }
+                scrollToInitialSection(using: proxy)
             }
             .hideKeyboardOnTap()
-            .safeAreaInset(edge: .bottom) {
-                searchBar(proxy: proxy)
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 14)
-            }
         }
     }
 
@@ -231,6 +394,8 @@ struct HelpCenterView: View {
                 }
             }
         }
+        .softFadeIn(enabled: animationsOn, delay: 0.16, offset: 12)
+        .id("help_exams")
     }
 
     private var passCard: some View {
@@ -277,6 +442,10 @@ struct HelpCenterView: View {
                     infoRow(
                         title: "Offline-Modus",
                         text: "Wenn du zuletzt vor max. 3 Tagen online warst, kannst du mit dem letzten Stand weiterarbeiten. Aktivieren über Einstellungen ▸ Offline-Modus oder den Hinweis bei fehlender Verbindung. Änderungen werden beim nächsten Online-Start synchronisiert."
+                    )
+                    infoRow(
+                        title: "Erinnerungen",
+                        text: "Standard-Erinnerung: Ein Tag vor Fälligkeit zur Uhrzeit in Einstellungen ▸ Erinnerung (abschaltbar). Eigene Erinnerungen pro Hausaufgabe/Klausur bleiben aktiv. In den Mitteilungen kannst du snoozen oder Hausaufgaben direkt als erledigt markieren."
                     )
                     infoRow(
                         title: "Ferien-Hinweis",
@@ -426,19 +595,35 @@ struct HelpCenterView: View {
 
     // MARK: - Suche
 
-    private func searchBar(proxy: ScrollViewProxy) -> some View {
-        HStack(spacing: 10) {
+    private func searchCard(proxy: ScrollViewProxy) -> some View {
+        SettingsCard(
+            title: "Schnell finden",
+            subtitle: "Suche nach Themen oder springe direkt zu einem Abschnitt",
+            systemImage: "magnifyingglass.circle.fill",
+            accent: .indigo
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                searchField(proxy: proxy)
+                searchResultsView(proxy: proxy)
+            }
+        }
+        .softFadeIn(enabled: animationsOn, delay: 0.01, offset: 10)
+        .id("help_search")
+    }
+
+    private func searchField(proxy: ScrollViewProxy) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
 
-                TextField("Suchen", text: $searchQuery)
+                TextField("Thema eingeben, z. B. „Prüfungen“ oder „Offline“", text: $searchQuery)
                     .textContentType(.none)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.none)
                     .focused($searchFocused)
                     .submitLabel(.search)
-                    .onSubmit { scrollToFirstMatch(using: proxy) }
+                    .onSubmit { scrollToFirstResult(using: proxy) }
 
                 if !searchQuery.isEmpty {
                     Button {
@@ -451,41 +636,185 @@ struct HelpCenterView: View {
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 14)
             .padding(.vertical, 12)
-            .frame(maxWidth: 320)
             .background(
-                Capsule(style: .continuous)
-                    .fill(.thinMaterial)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(.systemBackground).opacity(store.darkMode ? 0.6 : 0.9))
             )
             .overlay(
-                Capsule(style: .continuous)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(Color.primary.opacity(0.08), lineWidth: 1)
             )
-            .shadow(color: Color.black.opacity(0.2), radius: 12, x: 0, y: 6)
 
-            if searchFocused || !searchQuery.isEmpty {
-                Button {
-                    searchQuery = ""
-                    searchFocused = false
-                    hideKeyboard()
-                    scrollToFirstMatch(using: proxy)
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(8)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .transition(.scale.combined(with: .opacity))
+            if !hasQuery {
+                searchQuickActions(proxy: proxy)
             }
         }
-        .animation(.easeInOut(duration: 0.18), value: searchFocused || !searchQuery.isEmpty)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            searchFocused = true
+    }
+
+    private func searchQuickActions(proxy: ScrollViewProxy) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Schnellzugriff")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(quickSuggestions) { entry in
+                        Button {
+                            searchQuery = entry.title
+                            searchFocused = false
+                            hideKeyboard()
+                            scrollToSection(entry.section, using: proxy)
+                        } label: {
+                            HStack(alignment: .center, spacing: 8) {
+                                Image(systemName: entry.icon)
+                                    .font(.subheadline.weight(.semibold))
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(entry.title)
+                                        .font(.caption.weight(.semibold))
+                                    Text(sectionTitle(for: entry.section))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(Color(.secondarySystemBackground))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func searchResultsView(proxy: ScrollViewProxy) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if hasQuery {
+                if searchResults.isEmpty {
+                    noResultsView(proxy: proxy)
+                } else {
+                    Text("\(searchResults.count) Treffer")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(searchResults) { entry in
+                        searchResultRow(entry, proxy: proxy)
+                    }
+                }
+            } else {
+                Text("Gib einen Begriff ein oder nutze die Schnellzugriffe oben.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func searchResultRow(_ entry: HelpSearchEntry, proxy: ScrollViewProxy) -> some View {
+        Button {
+            scrollToSection(entry.section, using: proxy)
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color(.secondarySystemBackground))
+                        .frame(width: 42, height: 42)
+                    Image(systemName: entry.icon)
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(highlighted(entry.title))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text(highlighted(entry.summary))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Text(sectionTitle(for: entry.section))
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(Color.primary.opacity(0.06))
+                        )
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "arrow.up.forward.circle.fill")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.indigo)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(.tertiarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func noResultsView(proxy: ScrollViewProxy) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Keine Treffer gefunden.")
+                .font(.subheadline.weight(.semibold))
+            Text("Probiere andere Begriffe oder öffne FAQ und Support.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Button {
+                    scrollToSection(.faq, using: proxy)
+                } label: {
+                    Label("FAQ öffnen", systemImage: "lightbulb.fill")
+                        .font(.footnote.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+
+                Button {
+                    scrollToSection(.contact, using: proxy)
+                } label: {
+                    Label("Support", systemImage: "envelope.fill")
+                        .font(.footnote.weight(.semibold))
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.indigo)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+        )
+    }
+
+    private func scrollToFirstResult(using proxy: ScrollViewProxy) {
+        if hasQuery, let first = searchResults.first {
+            scrollToSection(first.section, using: proxy)
+        }
+    }
+
+    private func scrollToSection(_ section: HelpCenterSection, using proxy: ScrollViewProxy) {
+        hideKeyboard()
+        withAnimation(.easeInOut(duration: 0.25)) {
+            proxy.scrollTo(section.scrollId, anchor: .top)
         }
     }
 
@@ -516,56 +845,62 @@ struct HelpCenterView: View {
 
     private func highlighted(_ text: String) -> AttributedString {
         var attr = AttributedString(text)
-        let q = normalizedQuery
-        guard !q.isEmpty else { return attr }
+        let tokens = queryTokens
+        guard !tokens.isEmpty else { return attr }
 
-        let lower = text.lowercased()
-        let needle = q.lowercased()
-        var startIndex = lower.startIndex
-        while startIndex < lower.endIndex,
-              let found = lower[startIndex...].range(of: needle) {
-            let distanceStart = lower.distance(from: lower.startIndex, to: found.lowerBound)
-            let distanceEnd = lower.distance(from: lower.startIndex, to: found.upperBound)
-            if distanceEnd <= attr.characters.count {
-                let attrStart = attr.index(attr.startIndex, offsetByCharacters: distanceStart)
-                let attrEnd = attr.index(attr.startIndex, offsetByCharacters: distanceEnd)
-                attr[attrStart..<attrEnd].backgroundColor = Color.yellow.opacity(0.35)
-                attr[attrStart..<attrEnd].foregroundColor = Color.primary
+        let lower = normalizedText(text)
+        for token in tokens {
+            var startIndex = lower.startIndex
+            while startIndex < lower.endIndex,
+                  let found = lower[startIndex...].range(of: token) {
+                let distanceStart = lower.distance(from: lower.startIndex, to: found.lowerBound)
+                let distanceEnd = lower.distance(from: lower.startIndex, to: found.upperBound)
+                if distanceEnd <= attr.characters.count {
+                    let attrStart = attr.index(attr.startIndex, offsetByCharacters: distanceStart)
+                    let attrEnd = attr.index(attr.startIndex, offsetByCharacters: distanceEnd)
+                    attr[attrStart..<attrEnd].backgroundColor = Color.yellow.opacity(0.35)
+                    attr[attrStart..<attrEnd].foregroundColor = Color.primary
+                }
+                startIndex = found.upperBound
             }
-            startIndex = found.upperBound
         }
         return attr
     }
 
-    private func scrollToFirstMatch(using proxy: ScrollViewProxy) {
-        guard let id = firstMatchId() else { return }
-        withAnimation(.easeInOut(duration: 0.25)) {
-            proxy.scrollTo(id, anchor: .top)
+    private func normalizedText(_ text: String) -> String {
+        text
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .lowercased()
+    }
+
+    private func sectionTitle(for section: HelpCenterSection) -> String {
+        switch section {
+        case .intro: return "Einführung"
+        case .steps: return "Erste Schritte"
+        case .calc: return "Berechnungen"
+        case .exams: return "Prüfungen"
+        case .pass: return "Bestehen"
+        case .special: return "Spezielle Funktionen"
+        case .faq: return "FAQ"
+        case .contact: return "Kontakt & Support"
         }
     }
 
-    private func firstMatchId() -> String? {
-        let q = normalizedQuery
-        guard !q.isEmpty else { return nil }
-        for target in searchTargets {
-            if target.text.lowercased().contains(q) {
-                return target.id
-            }
-        }
-        return nil
-    }
+    private func searchScore(for entry: HelpSearchEntry) -> Int {
+        guard !queryTokens.isEmpty else { return 0 }
+        var score = 0
+        let lowerTitle = normalizedText(entry.title)
+        let lowerSummary = normalizedText(entry.summary)
+        let searchText = normalizedText(entry.searchText)
 
-    private var searchTargets: [(id: String, text: String)] {
-        [
-            ("help_intro", "Help Center Antworten Regeln Support FOS BOS Berechnung Workflows"),
-            ("help_steps", "Erste Schritte Schulart Jahrgang Fächer Noten Hausaufgaben Prüfungen Darstellung Sortierung"),
-            ("help_calc", "Berechnungen Fach-Durchschnitt Gesamtdurchschnitt Insight Praktikum Halbjahres Filter"),
-            ("help_pass", "Abschluss Prüfungen BayFOBOSO Abschlussnote Punkte Fremdsprache Seminarfach"),
-            ("help_pass", "Bestehen Kriterien Prüfungen Punkte Durchschnitt"),
-            ("help_special", "Offline Modus Ferien Hinweis Schuljahres Wechsel Insights Animationen Gruppen Teilen"),
-            ("help_faq", "FAQ Tipps Durchschnitt Offline Halbjahre Sortieren Erinnerung Hausaufgaben Gruppen Ferien"),
-            ("help_contact", "Kontakt Support Ticket Email Nachricht")
-        ]
+        for token in queryTokens {
+            if lowerTitle.contains(token) { score += 6 }
+            if lowerTitle.hasPrefix(token) { score += 2 }
+            if lowerSummary.contains(token) { score += 2 }
+            if searchText.contains(token) { score += 3 }
+        }
+
+        return score
     }
 
     // MARK: - Ticket
@@ -599,5 +934,15 @@ struct HelpCenterView: View {
             ticketError = "Ticket konnte nicht angelegt werden: \(error.localizedDescription)"
         }
         isSendingTicket = false
+    }
+
+    private func scrollToInitialSection(using proxy: ScrollViewProxy) {
+        guard !didScrollToInitialSection, let target = initialSection?.scrollId else { return }
+        didScrollToInitialSection = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                proxy.scrollTo(target, anchor: .top)
+            }
+        }
     }
 }

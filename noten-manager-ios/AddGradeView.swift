@@ -287,11 +287,18 @@ struct AddGradeView: View {
                                             .padding(12)
                                             .background(Color.formInputBackground)
                                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                    }
                                 }
                             }
                         }
+
+                        HelpCenterLink(
+                            title: "Hilfe zur Berechnung",
+                            subtitle: "Gewichtungen & Notendurchschnitt im Help Center",
+                            section: .calc,
+                            accent: .indigo
+                        )
                     }
+                }
 
                     SettingsCard(
                         title: "Prüfung verknüpfen",

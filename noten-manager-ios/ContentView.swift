@@ -39,8 +39,11 @@ struct ContentView: View {
                         .environmentObject(biometricManager)
                     }
                 } else {
-                    AuthView(authManager: authManager)
-                        .environmentObject(biometricManager)
+                    NavigationStack {
+                        AuthView(authManager: authManager)
+                            .navigationBarHidden(true)
+                    }
+                    .environmentObject(biometricManager)
                 }
             }
         }

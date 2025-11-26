@@ -1,6 +1,6 @@
 import Foundation
 
-struct Exam: Codable, Identifiable, Hashable {
+struct Exam: Codable, Identifiable, Hashable, Sendable {
     let id: String
     let groupId: String?
     let subjectName: String

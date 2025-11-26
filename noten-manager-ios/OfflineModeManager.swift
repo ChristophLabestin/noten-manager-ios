@@ -37,6 +37,7 @@ struct OfflineSnapshot: Codable {
     let darkModeMode: String
     let homeworkReminderHour: Int
     let homeworkReminderMinute: Int
+    let standardRemindersEnabled: Bool?
     let pendingGrades: [PendingGrade]
     let pendingFachreferat: PendingFachreferat?
 }

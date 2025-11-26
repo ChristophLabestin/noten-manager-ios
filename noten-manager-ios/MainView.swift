@@ -91,6 +91,20 @@ struct MainView: View {
                 scrollToAccountOnOpen = false
             }
         }
+        .sheet(isPresented: legacyMigrationSheetBinding) {
+            if let summary = gradesStore.legacyMigrationSummary {
+                LegacyMigrationPromptView(
+                    summary: summary,
+                    onImport: {
+                        Task { await gradesStore.handleLegacyMigrationChoice(keepWebData: true) }
+                    },
+                    onStartFresh: {
+                        Task { await gradesStore.handleLegacyMigrationChoice(keepWebData: false) }
+                    }
+                )
+                .environmentObject(gradesStore)
+            }
+        }
         .overlay(alignment: .center) {
             if gradesStore.isLoading {
                 loadingOverlay
@@ -346,27 +360,26 @@ struct MainView: View {
                 .imageScale(.medium)
         }
         .buttonStyle(.plain)
-        .foregroundStyle(Color.red)
+        .foregroundStyle(Color.orange.opacity(0.85))
     }
 
     private func showEmailBannerTemporarily() {
         emailBannerDismissTask?.cancel()
-        // Toggle: wenn bereits sichtbar, dann schließen
-        if emailBannerVisible {
-            hideEmailBanner()
-            return
+        withAnimation(.easeInOut(duration: 0.15)) {
+            emailBannerVisible = true
         }
-        emailBannerVisible = true
         emailBannerDismissTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 15_000_000_000)
-            emailBannerVisible = false
+            hideEmailBanner()
         }
     }
 
     private func hideEmailBanner() {
         emailBannerDismissTask?.cancel()
         emailBannerDismissTask = nil
-        emailBannerVisible = false
+        withAnimation(.easeInOut(duration: 0.15)) {
+            emailBannerVisible = false
+        }
     }
 
     @MainActor
@@ -472,6 +485,13 @@ struct MainView: View {
             gradesStore.isLoading = false
             reconnectTask = nil
         }
+    }
+
+    private var legacyMigrationSheetBinding: Binding<Bool> {
+        Binding(
+            get: { gradesStore.legacyMigrationSummary != nil },
+            set: { _ in }
+        )
     }
 
     private var loadingOverlayLabel: String {
@@ -600,5 +620,203 @@ struct MainView: View {
             }
         }
         .ignoresSafeArea()
+    }
+}
+
+struct LegacyMigrationPromptView: View {
+    let summary: LegacyMigrationSummary
+    let onImport: () -> Void
+    let onStartFresh: () -> Void
+    @EnvironmentObject private var store: GradesStore
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine")
+                    .ignoresSafeArea()
+
+                ScrollView {
+                    VStack(spacing: 18) {
+                        header
+                        statsCard
+
+                        Text("Daten, die du in dieser App anlegst, sind nicht mit der Web-Version kompatibel.")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(secondaryText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 4)
+
+                        VStack(spacing: 12) {
+                            optionButton(
+                                icon: "arrow.down.doc.fill",
+                                title: "Daten übernehmen",
+                                subtitle: "Importiert deine Web-Fächer und Noten in dieses Schuljahr.",
+                                accent: accentPrimary,
+                                action: onImport
+                            )
+                            optionButton(
+                                icon: "sparkles",
+                                title: "Neu anfangen ohne Web-Daten",
+                                subtitle: "Beginnt frisch in der App. Deine Web-Daten bleiben dort erhalten.",
+                                accent: Color.orange,
+                                action: onStartFresh
+                            )
+                        }
+                        .padding(.top, 4)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 28)
+                }
+            }
+        }
+        #if os(iOS)
+        .presentationDetents([.fraction(0.75), .large])
+        .interactiveDismissDisabled()
+        #endif
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(accentPrimary.opacity(store.darkMode ? 0.22 : 0.16))
+                        .frame(width: 48, height: 48)
+                    Image(systemName: "exclamationmark.bubble.fill")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(accentPrimary)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Daten aus der Web-App erkannt")
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(primaryText)
+                    Text("Wir haben Inhalte aus der Web-Version gefunden. Wie möchtest du fortfahren?")
+                        .font(.subheadline)
+                        .foregroundStyle(secondaryText)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 24)
+    }
+
+    private var statsCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "shippingbox.fill")
+                    .foregroundStyle(accentPrimary)
+                Text("Gefundene Web-Daten")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(primaryText)
+            }
+            statRow(icon: "text.book.closed", title: formattedCount(summary.subjectCount, singular: "Fach", plural: "Fächer"), subtitle: "aus der Web-App")
+            statRow(icon: "number.square", title: formattedCount(summary.gradeCount, singular: "Note", plural: "Noten"), subtitle: "bestehende Bewertungen")
+            if let gradeYear = summary.gradeYear {
+                statRow(icon: "graduationcap", title: "Klassenstufe \(gradeYear)", subtitle: "aus Web-Einstellungen")
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(tileBackground)
+                .shadow(color: shadowColor, radius: 14, x: 0, y: 10)
+        )
+    }
+
+    private func optionButton(icon: String, title: String, subtitle: String, accent: Color, action: @escaping () -> Void) -> some View {
+        Button {
+            action()
+        } label: {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(accent.opacity(store.darkMode ? 0.22 : 0.14))
+                        .frame(width: 46, height: 46)
+                    Image(systemName: icon)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(accent)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title)
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(primaryText)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Image(systemName: "chevron.forward")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(secondaryText)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(optionGradient(accent: accent))
+                    .shadow(color: shadowColor, radius: 16, x: 0, y: 10)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func statRow(icon: String, title: String, subtitle: String) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(accentPrimary.opacity(store.darkMode ? 0.18 : 0.12))
+                    .frame(width: 36, height: 36)
+                Image(systemName: icon)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(primaryText)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(primaryText)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(secondaryText)
+            }
+            Spacer()
+        }
+    }
+
+    private func formattedCount(_ value: Int, singular: String, plural: String) -> String {
+        if value == 1 { return "1 \(singular)" }
+        return "\(value) \(plural)"
+    }
+
+    private var accentPrimary: Color {
+        if store.theme == "feminine" {
+            return Color(hex: store.darkMode ? "#f472b6" : "#ec4899")
+        }
+        return .indigo
+    }
+
+    private var primaryText: Color {
+        store.darkMode ? Color.white : Color(hex: "#0f172a")
+    }
+
+    private var secondaryText: Color {
+        store.darkMode ? Color.white.opacity(0.78) : Color.secondary
+    }
+
+    private var tileBackground: LinearGradient {
+        let top = accentPrimary.opacity(store.darkMode ? 0.16 : 0.08)
+        let bottom = Color(.secondarySystemBackground)
+        return LinearGradient(colors: [top, bottom], startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+
+    private func optionGradient(accent: Color) -> LinearGradient {
+        let top = accent.opacity(store.darkMode ? 0.22 : 0.15)
+        let bottom = Color(.secondarySystemBackground)
+        return LinearGradient(colors: [top, bottom], startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+
+    private var shadowColor: Color {
+        Color.black.opacity(colorScheme == .dark ? 0.38 : 0.16)
     }
 }

@@ -19,6 +19,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         UNUserNotificationCenter.current().delegate = self
         HomeworkNotificationManager.configureCategories()
         ExamNotificationManager.configureCategories()
+        DailyReminderNotificationManager.configureCategories()
         return true
     }
 }
@@ -39,6 +40,7 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
     ) {
         HomeworkNotificationManager.handleNotificationResponse(response)
         ExamNotificationManager.handleNotificationResponse(response)
+        DailyReminderNotificationManager.handleNotificationResponse(response)
         completionHandler()
     }
 }

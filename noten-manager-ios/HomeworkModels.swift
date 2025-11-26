@@ -1,6 +1,6 @@
 import Foundation
 
-struct Homework: Codable, Identifiable, Hashable {
+struct Homework: Codable, Identifiable, Hashable, Sendable {
     let id: String
     let groupId: String?
     let subjectName: String

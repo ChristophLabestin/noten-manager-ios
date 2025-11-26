@@ -28,7 +28,7 @@ enum HomeworkNotificationManager {
         )
         let sharedCategory = UNNotificationCategory(
             identifier: sharedCategoryIdentifier,
-            actions: [snooze],
+            actions: [done, snooze],
             intentIdentifiers: [],
             options: []
         )
@@ -55,17 +55,27 @@ enum HomeworkNotificationManager {
     static func syncNotifications(
         for homeworks: [Homework],
         reminderHour: Int = 19,
-        reminderMinute: Int = 0
+        reminderMinute: Int = 0,
+        standardReminderEnabled: Bool = true
     ) {
+        // Ensure categories (actions) are registered before scheduling
+        configureCategories()
         requestAuthorizationIfNeeded()
 
         let center = UNUserNotificationCenter.current()
         center.getPendingNotificationRequests { existing in
             let homeworkIds = existing
-                .filter { $0.identifier.hasPrefix("homework_") }
-                .map { $0.identifier }
+                .map(\.identifier)
+                .filter { $0.hasPrefix("homework_") && !$0.contains("_snooze_") }
             if !homeworkIds.isEmpty {
                 center.removePendingNotificationRequests(withIdentifiers: homeworkIds)
+            }
+
+            let inactiveSnoozes = homeworks
+                .filter { !$0.isActive }
+                .map { "homework_snooze_\($0.id)" }
+            if !inactiveSnoozes.isEmpty {
+                center.removePendingNotificationRequests(withIdentifiers: inactiveSnoozes)
             }
 
             let now = Date()
@@ -84,7 +94,11 @@ enum HomeworkNotificationManager {
                         }
                         content.sound = .default
                         content.categoryIdentifier = sharedCategoryIdentifier
-                        content.userInfo = ["homeworkId": hw.id]
+                        var info: [AnyHashable: Any] = ["homeworkId": hw.id]
+                        if let gid = hw.groupId, !gid.isEmpty {
+                            info["groupId"] = gid
+                        }
+                        content.userInfo = info
 
                         let comps = Calendar.current.dateComponents(
                             [.year, .month, .day, .hour, .minute],
@@ -98,7 +112,8 @@ enum HomeworkNotificationManager {
                 } else {
                     // Original logic for non-shared homeworks
 
-                    if let dueDate = hw.dueDate,
+                    if standardReminderEnabled,
+                       let dueDate = hw.dueDate,
                        let reminder = reminderDate(before: dueDate, hour: reminderHour, minute: reminderMinute),
                        reminder > now {
                         let content = UNMutableNotificationContent()
@@ -110,7 +125,11 @@ enum HomeworkNotificationManager {
                         }
                         content.sound = .default
                         content.categoryIdentifier = categoryIdentifier
-                        content.userInfo = ["homeworkId": hw.id]
+                        var info: [AnyHashable: Any] = ["homeworkId": hw.id]
+                        if let gid = hw.groupId, !gid.isEmpty {
+                            info["groupId"] = gid
+                        }
+                        content.userInfo = info
 
                         let comps = Calendar.current.dateComponents(
                             [.year, .month, .day, .hour, .minute],
@@ -133,7 +152,11 @@ enum HomeworkNotificationManager {
                         }
                         content.sound = .default
                         content.categoryIdentifier = categoryIdentifier
-                        content.userInfo = ["homeworkId": hw.id]
+                        var info: [AnyHashable: Any] = ["homeworkId": hw.id]
+                        if let gid = hw.groupId, !gid.isEmpty {
+                            info["groupId"] = gid
+                        }
+                        content.userInfo = info
 
                         let comps = Calendar.current.dateComponents(
                             [.year, .month, .day, .hour, .minute],
@@ -161,11 +184,12 @@ enum HomeworkNotificationManager {
 
         let userInfo = content.userInfo
         let homeworkId: String? = (userInfo["homeworkId"] as? String) ?? extractHomeworkId(from: identifier)
+        let groupId: String? = userInfo["groupId"] as? String
         guard let homeworkId else { return }
 
         switch actionId {
         case actionMarkDoneIdentifier:
-            markHomeworkCompleted(homeworkId)
+            markHomeworkCompleted(homeworkId, groupId: groupId)
         case actionSnoozeIdentifier:
             scheduleSnooze(for: homeworkId, originalContent: content)
         default:
@@ -181,20 +205,30 @@ enum HomeworkNotificationManager {
         return String(components[2])
     }
 
-    private static func markHomeworkCompleted(_ id: String) {
+    static func markHomeworkCompleted(_ id: String, groupId: String? = nil) {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         Task {
             let db = Firestore.firestore()
             do {
                 let schoolYearId = try await SchoolYearService.ensureActiveSchoolYear(uid: uid, db: db)
-                let docRef = db
+                let yearRef = db
                     .collection("users")
                     .document(uid)
                     .collection("schoolYears")
                     .document(schoolYearId)
-                    .collection("homeworks")
-                    .document(id)
-                try await docRef.updateData(["isCompleted": true])
+
+                if let gid = groupId, !gid.isEmpty {
+                    let key = compoundId(gid: gid, docId: id)
+                    let docRef = yearRef
+                        .collection("homeworkGroupCompleted")
+                        .document(key)
+                    try await docRef.setData(["isCompleted": true])
+                } else {
+                    let docRef = yearRef
+                        .collection("homeworks")
+                        .document(id)
+                    try await docRef.updateData(["isCompleted": true])
+                }
             } catch {
                 // optional: Fehler ignorieren, Notification trotzdem entfernen
             }
@@ -214,7 +248,7 @@ enum HomeworkNotificationManager {
         newContent.title = originalContent.title
         newContent.body = originalContent.body
         newContent.sound = originalContent.sound
-        newContent.categoryIdentifier = categoryIdentifier
+        newContent.categoryIdentifier = originalContent.categoryIdentifier
 
         var info = originalContent.userInfo
         info["homeworkId"] = id
@@ -236,5 +270,10 @@ enum HomeworkNotificationManager {
         comps.hour = max(0, min(23, hour))
         comps.minute = max(0, min(59, minute))
         return calendar.date(from: comps)
+    }
+
+    private static func compoundId(gid: String?, docId: String) -> String {
+        guard let gid, !gid.isEmpty else { return docId }
+        return "\(gid)|\(docId)"
     }
 }

@@ -145,7 +145,7 @@ struct KeyboardToolbarInset: ViewModifier {
     }
 }
 
-private enum KeyboardToolbarAppearance {
+enum KeyboardToolbarAppearance {
     static var isConfigured = false
 
     static func configure() {

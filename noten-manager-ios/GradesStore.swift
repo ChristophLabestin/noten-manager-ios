@@ -36,7 +36,8 @@ enum SchoolYearService {
         uid: String,
         userData: [String: Any]? = nil,
         preferredId: String? = nil,
-        db: Firestore = Firestore.firestore()
+        db: Firestore = Firestore.firestore(),
+        skipLegacyMigration: Bool = false
     ) async throws -> String {
         let userRef = db.collection("users").document(uid)
         let existingData: [String: Any]
@@ -47,6 +48,7 @@ enum SchoolYearService {
             existingData = snap.data() ?? [:]
         }
         let migrated = (existingData["migratedToSchoolYears"] as? Bool) ?? false
+        let allowLegacyMigration = !migrated && !skipLegacyMigration
 
         let preferredTrimmed = preferredId?.trimmingCharacters(in: .whitespacesAndNewlines)
         let activeId = (existingData["activeSchoolYearId"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -61,7 +63,7 @@ enum SchoolYearService {
             "name": targetId,
             "createdAt": Date()
         ]
-        if !migrated {
+        if allowLegacyMigration {
             if let g = existingData["groupIds"] { yearPayload["groupIds"] = g }
             if let g = existingData["examGroupIds"] { yearPayload["examGroupIds"] = g }
             if let g = existingData["homeworkGroupIds"] { yearPayload["homeworkGroupIds"] = g }
@@ -79,24 +81,24 @@ enum SchoolYearService {
                 guard let arr = value as? [Any] else { return true }
                 return arr.isEmpty
             }
-            if currentYearData["groupIds"] == nil || emptyOrMissingArray(currentYearData["groupIds"]) {
+            if allowLegacyMigration && (currentYearData["groupIds"] == nil || emptyOrMissingArray(currentYearData["groupIds"])) {
                 if let g = existingData["groupIds"] { missingPayload["groupIds"] = g }
             }
-            if currentYearData["examGroupIds"] == nil || emptyOrMissingArray(currentYearData["examGroupIds"]) {
+            if allowLegacyMigration && (currentYearData["examGroupIds"] == nil || emptyOrMissingArray(currentYearData["examGroupIds"])) {
                 if let g = existingData["examGroupIds"] { missingPayload["examGroupIds"] = g }
             }
-            if currentYearData["homeworkGroupIds"] == nil || emptyOrMissingArray(currentYearData["homeworkGroupIds"]) {
+            if allowLegacyMigration && (currentYearData["homeworkGroupIds"] == nil || emptyOrMissingArray(currentYearData["homeworkGroupIds"])) {
                 if let g = existingData["homeworkGroupIds"] { missingPayload["homeworkGroupIds"] = g }
             }
-            if currentYearData["examGroupId"] == nil, let g = existingData["examGroupId"] { missingPayload["examGroupId"] = g }
-            if currentYearData["homeworkGroupId"] == nil, let g = existingData["homeworkGroupId"] { missingPayload["homeworkGroupId"] = g }
-            if currentYearData["gradeYear"] == nil, let gy = existingData["gradeYear"] { missingPayload["gradeYear"] = gy }
+            if allowLegacyMigration && currentYearData["examGroupId"] == nil, let g = existingData["examGroupId"] { missingPayload["examGroupId"] = g }
+            if allowLegacyMigration && currentYearData["homeworkGroupId"] == nil, let g = existingData["homeworkGroupId"] { missingPayload["homeworkGroupId"] = g }
+            if allowLegacyMigration && currentYearData["gradeYear"] == nil, let gy = existingData["gradeYear"] { missingPayload["gradeYear"] = gy }
             if !missingPayload.isEmpty {
                 try await yearRef.setData(missingPayload, merge: true)
             }
         }
 
-        if !migrated {
+        if allowLegacyMigration {
             try await migrateLegacyDataIfNeeded(userRef: userRef, yearRef: yearRef)
         }
 
@@ -194,6 +196,14 @@ struct PendingFachreferat: Codable {
     let createdAt: Date
 }
 
+struct LegacyMigrationSummary {
+    let subjectCount: Int
+    let gradeCount: Int
+    let homeworkCount: Int
+    let examCount: Int
+    let gradeYear: Int?
+}
+
 @MainActor
 final class GradesStore: ObservableObject {
     @Published var subjects: [Subject] = []
@@ -248,6 +258,7 @@ final class GradesStore: ObservableObject {
     @Published var darkModeMode: String = "system" // "system" | "light" | "dark"
     @Published var homeworkReminderHour: Int = 19
     @Published var homeworkReminderMinute: Int = 0
+    @Published var standardRemindersEnabled: Bool = true
     @Published var encryptionSalt: String? = nil
     @Published var showHolidayHints: Bool = true
 
@@ -263,6 +274,7 @@ final class GradesStore: ObservableObject {
     @Published var activeSchoolYearId: String? = nil // z. B. "2025-26"
     @Published var onboardingRequired: Bool = false
     @Published var isOfflineMode: Bool = false
+    @Published var legacyMigrationSummary: LegacyMigrationSummary? = nil
 
     // New published properties for group subjects and mappings
     @Published var examGroupSubjects: [GroupSubject] = []
@@ -324,6 +336,10 @@ final class GradesStore: ObservableObject {
     private var isListening: Bool = false
     private var isSettingUp: Bool = false
     private var hasBootstrappedYearData: Bool = false
+    private var legacyMigrationCheckDone: Bool = false
+    private var pendingLegacyUserData: [String: Any]? = nil
+    private var waitingForLegacyDecision: Bool = false
+    private var forceSkipLegacyMigration: Bool = false
 
     private var schoolYearsCollectionListener: ListenerRegistration?
 
@@ -392,6 +408,9 @@ final class GradesStore: ObservableObject {
                     self.applyUserSettings(from: data)
                     await self.deriveKeyIfNeeded(from: data, uid: uid)
                     self.startSchoolYearsListener(uid: uid)
+                    if await self.prepareLegacyMigrationIfNeeded(uid: uid, userData: data) {
+                        return
+                    }
                     // Nach dem Key-Setup ggf. weitere Listener starten
                     await self.ensureSecondaryListeners(uid: uid, userData: data)
                 } else {
@@ -489,6 +508,7 @@ final class GradesStore: ObservableObject {
         isOfflineMode = false
         homeworkReminderHour = 19
         homeworkReminderMinute = 0
+        standardRemindersEnabled = true
         isLoading = false
         loadingLabel = ""
         progress = 0
@@ -512,6 +532,11 @@ final class GradesStore: ObservableObject {
 
         offlinePendingGrades = []
         offlinePendingFachreferat = nil
+        legacyMigrationSummary = nil
+        legacyMigrationCheckDone = false
+        pendingLegacyUserData = nil
+        waitingForLegacyDecision = false
+        forceSkipLegacyMigration = false
     }
 
     private func resetSchoolYearScopedData() {
@@ -600,16 +625,139 @@ final class GradesStore: ObservableObject {
         schoolYearSnapshotCache = [:]
     }
 
+    // MARK: - Legacy Web Migration Approval
+
+    private func prepareLegacyMigrationIfNeeded(uid: String, userData: [String: Any]) async -> Bool {
+        if waitingForLegacyDecision || legacyMigrationSummary != nil {
+            return true
+        }
+        if legacyMigrationCheckDone {
+            return false
+        }
+        let alreadyMigrated = (userData["migratedToSchoolYears"] as? Bool) ?? false
+        if alreadyMigrated {
+            legacyMigrationCheckDone = true
+            return false
+        }
+        guard let summary = await fetchLegacyMigrationSummary(uid: uid, userData: userData) else {
+            legacyMigrationCheckDone = true
+            return false
+        }
+        pendingLegacyUserData = userData
+        waitingForLegacyDecision = true
+        forceSkipLegacyMigration = false
+        legacyMigrationSummary = summary
+        isLoading = false
+        loadingLabel = ""
+        progress = 0
+        return true
+    }
+
+    private func fetchLegacyMigrationSummary(uid: String, userData: [String: Any]) async -> LegacyMigrationSummary? {
+        let userRef = db.collection("users").document(uid)
+        let hasLegacyFields = userData["gradeYear"] != nil
+            || userData["groupIds"] != nil
+            || userData["examGroupId"] != nil
+            || userData["homeworkGroupId"] != nil
+            || userData["examGroupIds"] != nil
+            || userData["homeworkGroupIds"] != nil
+        do {
+            let subjectsSnap = try await userRef.collection("subjects").getDocuments()
+            let homeworksSnap = try await userRef.collection("homeworks").getDocuments()
+            let examsSnap = try await userRef.collection("exams").getDocuments()
+            var gradeCount = 0
+            for subject in subjectsSnap.documents {
+                let gradesSnap = try await subject.reference.collection("grades").getDocuments()
+                gradeCount += gradesSnap.documents.count
+            }
+
+            if subjectsSnap.isEmpty && homeworksSnap.isEmpty && examsSnap.isEmpty && !hasLegacyFields {
+                return nil
+            }
+
+            return LegacyMigrationSummary(
+                subjectCount: subjectsSnap.documents.count,
+                gradeCount: gradeCount,
+                homeworkCount: homeworksSnap.documents.count,
+                examCount: examsSnap.documents.count,
+                gradeYear: userData["gradeYear"] as? Int
+            )
+        } catch {
+            if hasLegacyFields {
+                return LegacyMigrationSummary(
+                    subjectCount: 0,
+                    gradeCount: 0,
+                    homeworkCount: 0,
+                    examCount: 0,
+                    gradeYear: userData["gradeYear"] as? Int
+                )
+            }
+            return nil
+        }
+    }
+
+    func handleLegacyMigrationChoice(keepWebData: Bool) async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        let userRef = db.collection("users").document(uid)
+        let cachedUserData: [String: Any]?
+        if let pending = pendingLegacyUserData {
+            cachedUserData = pending
+        } else {
+            cachedUserData = try? await userRef.getDocument().data()
+        }
+        let currentSummary = legacyMigrationSummary
+
+        pendingLegacyUserData = nil
+        waitingForLegacyDecision = false
+        legacyMigrationCheckDone = true
+        legacyMigrationSummary = nil
+        forceSkipLegacyMigration = false
+
+        if keepWebData {
+            isLoading = true
+            loadingLabel = "Daten aus der Web-App übernehmen …"
+            progress = 10
+            await ensureSecondaryListeners(uid: uid, userData: cachedUserData)
+            return
+        }
+
+        do {
+            forceSkipLegacyMigration = true
+            let schoolYearId = try await SchoolYearService.ensureActiveSchoolYear(
+                uid: uid,
+                userData: cachedUserData,
+                preferredId: activeSchoolYearId,
+                db: db,
+                skipLegacyMigration: true
+            )
+            activeSchoolYearId = schoolYearId
+            isLoading = true
+            loadingLabel = "Starte ohne Web-Daten …"
+            progress = 15
+            let refreshedData = try await userRef.getDocument().data()
+            await ensureSecondaryListeners(uid: uid, userData: refreshedData, skipLegacyMigration: true)
+        } catch {
+            isLoading = false
+            loadingLabel = "Übernahme abgebrochen"
+            pendingLegacyUserData = cachedUserData
+            waitingForLegacyDecision = true
+            legacyMigrationCheckDone = false
+            legacyMigrationSummary = currentSummary
+            forceSkipLegacyMigration = true
+        }
+    }
+
     private func schoolYearRef(uid: String, id: String) -> DocumentReference {
         db.collection("users").document(uid).collection("schoolYears").document(id)
     }
 
-    private func ensureYearContext(uid: String, userData: [String: Any]? = nil) async throws -> (id: String, ref: DocumentReference) {
+    private func ensureYearContext(uid: String, userData: [String: Any]? = nil, skipLegacyMigration: Bool = false) async throws -> (id: String, ref: DocumentReference) {
         let id = try await SchoolYearService.ensureActiveSchoolYear(
             uid: uid,
             userData: userData,
             preferredId: activeSchoolYearId,
-            db: db
+            db: db,
+            skipLegacyMigration: skipLegacyMigration
         )
         if id != activeSchoolYearId {
             resetSchoolYearScopedData()
@@ -799,14 +947,18 @@ final class GradesStore: ObservableObject {
 
     // MARK: - Setup der weiteren Listener (Subjects, Grades, Fachreferat)
 
-    private func ensureSecondaryListeners(uid: String, userData: [String: Any]? = nil) async {
+    private func ensureSecondaryListeners(uid: String, userData: [String: Any]? = nil, skipLegacyMigration: Bool = false) async {
         // Verhindere gleichzeitiges Setup
         if isSettingUp { return }
         isSettingUp = true
         defer { isSettingUp = false }
 
-        guard let context = try? await ensureYearContext(uid: uid, userData: userData) else {
+        let effectiveSkip = skipLegacyMigration || forceSkipLegacyMigration
+        guard let context = try? await ensureYearContext(uid: uid, userData: userData, skipLegacyMigration: effectiveSkip) else {
             return
+        }
+        if forceSkipLegacyMigration && effectiveSkip {
+            forceSkipLegacyMigration = false
         }
         let schoolYearId = context.id
         let yearRef = context.ref
@@ -991,11 +1143,7 @@ final class GradesStore: ObservableObject {
                             )
                         }
                         self.homeworks = list
-            HomeworkNotificationManager.syncNotifications(
-                for: self.allHomeworks,
-                reminderHour: self.homeworkReminderHour,
-                reminderMinute: self.homeworkReminderMinute
-            )
+                        self.rescheduleLocalNotifications()
                         self.persistOfflineSnapshotIfPossible()
                     }
                 }
@@ -1043,7 +1191,7 @@ final class GradesStore: ObservableObject {
                             )
                         }
                         self.exams = list
-                        ExamNotificationManager.syncNotifications(for: self.allExams)
+                        self.rescheduleLocalNotifications()
                         self.persistOfflineSnapshotIfPossible()
                     }
                 }
@@ -1072,7 +1220,7 @@ final class GradesStore: ObservableObject {
                         }
                         self.sharedExamUserReminders = map
                         self.applySharedExamUserReminders()
-                        ExamNotificationManager.syncNotifications(for: self.allExams)
+                        self.rescheduleLocalNotifications()
                     }
                 }
         }
@@ -1093,7 +1241,7 @@ final class GradesStore: ObservableObject {
                     })
                     self.sharedExamUserCompleted = set
                     self.applySharedExamUserCompletion()
-                    ExamNotificationManager.syncNotifications(for: self.allExams)
+                    self.rescheduleLocalNotifications()
                 }
             }
         }
@@ -1112,11 +1260,7 @@ final class GradesStore: ObservableObject {
                     }
                     self.sharedHomeworkUserReminders = map
                     self.applySharedHomeworkUserReminders()
-            HomeworkNotificationManager.syncNotifications(
-                for: self.allHomeworks,
-                reminderHour: self.homeworkReminderHour,
-                reminderMinute: self.homeworkReminderMinute
-            )
+                    self.rescheduleLocalNotifications()
                 }
             }
         }
@@ -1137,11 +1281,7 @@ final class GradesStore: ObservableObject {
                     })
                     self.sharedHomeworkUserCompleted = set
                     self.applySharedHomeworkUserCompletion()
-            HomeworkNotificationManager.syncNotifications(
-                for: self.allHomeworks,
-                reminderHour: self.homeworkReminderHour,
-                reminderMinute: self.homeworkReminderMinute
-            )
+                    self.rescheduleLocalNotifications()
                 }
             }
         }
@@ -1238,12 +1378,7 @@ final class GradesStore: ObservableObject {
         }
 
         if success {
-            HomeworkNotificationManager.syncNotifications(
-                for: allHomeworks,
-                reminderHour: homeworkReminderHour,
-                reminderMinute: homeworkReminderMinute
-            )
-            ExamNotificationManager.syncNotifications(for: allExams)
+            rescheduleLocalNotifications()
         } else {
             hasBootstrappedYearData = false
         }
@@ -1691,6 +1826,14 @@ final class GradesStore: ObservableObject {
         } else {
             homeworkReminderMinute = 0
         }
+        if let std = data["standardRemindersEnabled"] as? Bool {
+            standardRemindersEnabled = std
+        } else if UserDefaults.standard.object(forKey: "grades_standardRemindersEnabled") != nil {
+            standardRemindersEnabled = UserDefaults.standard.bool(forKey: "grades_standardRemindersEnabled")
+        } else {
+            standardRemindersEnabled = true
+        }
+        UserDefaults.standard.set(standardRemindersEnabled, forKey: "grades_standardRemindersEnabled")
         if let mode = data["darkModeMode"] as? String, ["system","light","dark"].contains(mode) {
             darkModeMode = mode
         } else if let dm = data["darkMode"] as? Bool {
@@ -1706,11 +1849,7 @@ final class GradesStore: ObservableObject {
         } else {
             onboardingRequired = false
         }
-        HomeworkNotificationManager.syncNotifications(
-            for: allHomeworks,
-            reminderHour: homeworkReminderHour,
-            reminderMinute: homeworkReminderMinute
-        )
+        rescheduleLocalNotifications()
 
         // Preload potentielles Vorjahres-Snapshot im Hintergrund (z. B. FOS 11 -> 12)
         Task { [weak self] in
@@ -1883,6 +2022,9 @@ final class GradesStore: ObservableObject {
             darkModeMode = "system"
         }
         darkMode = effectiveDarkMode(for: darkModeMode)
+        if defaults.object(forKey: "grades_standardRemindersEnabled") != nil {
+            standardRemindersEnabled = defaults.bool(forKey: "grades_standardRemindersEnabled")
+        }
         if defaults.object(forKey: "grades_compactView") != nil {
             compactView = defaults.bool(forKey: "grades_compactView")
         }
@@ -2015,6 +2157,7 @@ final class GradesStore: ObservableObject {
             darkModeMode: darkModeMode,
             homeworkReminderHour: homeworkReminderHour,
             homeworkReminderMinute: homeworkReminderMinute,
+            standardRemindersEnabled: standardRemindersEnabled,
             pendingGrades: offlinePendingGrades,
             pendingFachreferat: offlinePendingFachreferat
         )
@@ -2057,6 +2200,7 @@ final class GradesStore: ObservableObject {
         darkModeMode = snapshot.darkModeMode
         homeworkReminderHour = snapshot.homeworkReminderHour
         homeworkReminderMinute = snapshot.homeworkReminderMinute
+        standardRemindersEnabled = snapshot.standardRemindersEnabled ?? true
         encryptionSalt = snapshot.encryptionSalt
         offlinePendingGrades = snapshot.pendingGrades
         offlinePendingFachreferat = snapshot.pendingFachreferat
@@ -2073,11 +2217,7 @@ final class GradesStore: ObservableObject {
         loadingLabel = ""
         progress = 0
 
-        HomeworkNotificationManager.syncNotifications(
-            for: allHomeworks,
-            reminderHour: homeworkReminderHour,
-            reminderMinute: homeworkReminderMinute
-        )
+        rescheduleLocalNotifications()
 
         Task { await self.applyAppIconSelectionIfNeeded() }
 
@@ -2582,12 +2722,7 @@ final class GradesStore: ObservableObject {
 
         updateGroupObservers(uid: uid, schoolYearId: activeSchoolYearId)
 
-        ExamNotificationManager.syncNotifications(for: allExams)
-        HomeworkNotificationManager.syncNotifications(
-            for: allHomeworks,
-            reminderHour: homeworkReminderHour,
-            reminderMinute: homeworkReminderMinute
-        )
+        rescheduleLocalNotifications()
     }
 
     func setActiveHomeworkGroup(_ code: String) async {
@@ -3327,7 +3462,7 @@ final class GradesStore: ObservableObject {
                 sharedExamUserCompleted.remove(compoundId(gid: gid, docId: examId))
             }
             applySharedExamUserCompletion()
-            ExamNotificationManager.syncNotifications(for: allExams)
+            rescheduleLocalNotifications()
         } catch {
             // optional loggen
         }
@@ -3377,11 +3512,7 @@ final class GradesStore: ObservableObject {
                 sharedHomeworkUserCompleted.remove(compoundId(gid: gid, docId: homeworkId))
             }
             applySharedHomeworkUserCompletion()
-            HomeworkNotificationManager.syncNotifications(
-                for: allHomeworks,
-                reminderHour: homeworkReminderHour,
-                reminderMinute: homeworkReminderMinute
-            )
+            rescheduleLocalNotifications()
         } catch {
             // optional loggen
         }
@@ -4020,13 +4151,48 @@ final class GradesStore: ObservableObject {
             }
         }
 
-        HomeworkNotificationManager.syncNotifications(
-            for: allHomeworks,
-            reminderHour: hr,
-            reminderMinute: mn
-        )
+        rescheduleLocalNotifications()
 
         persistOfflineSnapshotIfPossible()
+    }
+
+    func updateStandardReminderEnabled(_ enabled: Bool) async {
+        standardRemindersEnabled = enabled
+        let defaults = UserDefaults.standard
+        defaults.set(enabled, forKey: "grades_standardRemindersEnabled")
+
+        if let uid = Auth.auth().currentUser?.uid {
+            do {
+                try await db.collection("users").document(uid).setData([
+                    "standardRemindersEnabled": enabled
+                ], merge: true)
+            } catch {
+                // optional loggen
+            }
+        }
+
+        rescheduleLocalNotifications()
+        persistOfflineSnapshotIfPossible()
+    }
+
+    private func rescheduleLocalNotifications() {
+        HomeworkNotificationManager.syncNotifications(
+            for: allHomeworks,
+            reminderHour: homeworkReminderHour,
+            reminderMinute: homeworkReminderMinute,
+            standardReminderEnabled: standardRemindersEnabled
+        )
+        ExamNotificationManager.syncNotifications(
+            for: allExams,
+            standardReminderEnabled: standardRemindersEnabled
+        )
+        DailyReminderNotificationManager.syncDailyReminder(
+            homeworks: allHomeworks,
+            exams: allExams,
+            hour: homeworkReminderHour,
+            minute: homeworkReminderMinute,
+            enabled: standardRemindersEnabled
+        )
     }
 
     /// Wird aufgerufen, wenn die App im System-Modus läuft und sich das ColorScheme des Geräts ändert.
@@ -4550,12 +4716,7 @@ final class GradesStore: ObservableObject {
         applySharedHomeworkUserCompletion()
         applySharedHomeworkUserReminders()
 
-        HomeworkNotificationManager.syncNotifications(
-            for: allHomeworks,
-            reminderHour: homeworkReminderHour,
-            reminderMinute: homeworkReminderMinute
-        )
-        ExamNotificationManager.syncNotifications(for: allExams)
+        rescheduleLocalNotifications()
         persistOfflineSnapshotIfPossible()
     }
 

@@ -1,5 +1,6 @@
 import SwiftUI
 import FirebaseAuth
+import FirebaseFirestore
 import UIKit
 
 struct AppSettingsView: View {
@@ -56,6 +57,22 @@ struct AppSettingsView: View {
     @State private var isSendingVerification: Bool = false
     @State private var verificationMessage: String?
     @State private var hasScrolledToAccount: Bool = false
+
+    @State private var showChangeEmailSheet: Bool = false
+    @State private var showChangePasswordSheet: Bool = false
+    @State private var changeEmailCurrentPassword: String = ""
+    @State private var changeEmailNewEmail: String = ""
+    @State private var changeEmailConfirmEmail: String = ""
+    @State private var changeEmailMessage: String?
+    @State private var changeEmailError: String?
+    @State private var isUpdatingEmail: Bool = false
+
+    @State private var changePasswordCurrent: String = ""
+    @State private var changePasswordNew: String = ""
+    @State private var changePasswordConfirm: String = ""
+    @State private var changePasswordMessage: String?
+    @State private var changePasswordError: String?
+    @State private var isUpdatingPassword: Bool = false
 
     init(scrollToAccount: Bool = false) {
         self.scrollToAccount = scrollToAccount
@@ -159,6 +176,11 @@ struct AppSettingsView: View {
         return ((start + 1) % 100) == suffix
     }
 
+    private func isValidEmail(_ value: String) -> Bool {
+        let pattern = "^[A-Z0-9a-z._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"
+        return value.range(of: pattern, options: .regularExpression) != nil
+    }
+
     private var headerCard: some View {
         SettingsCard(
             title: "Einstellungen",
@@ -174,29 +196,47 @@ struct AppSettingsView: View {
                 )
             }
         ) {
-            VStack(spacing: 12) {
-                HStack(spacing: 12) {
-                    HeaderTile(
+            let metricColumns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 2)
+            let statusItems: [(text: String, icon: String, color: Color)] = {
+                var items: [(String, String, Color)] = [
+                    (store.theme == "feminine" ? "Soft/Pink" : "Klassisch", "paintpalette.fill", .orange)
+                ]
+                if overdueHomeworksCount > 0 {
+                    items.append(("HW fällig: \(overdueHomeworksCount)", "exclamationmark.triangle.fill", .orange))
+                }
+                if homeworkDueTomorrowCount > 0 {
+                    items.append(("HW morgen: \(homeworkDueTomorrowCount)", "clock.badge.exclamationmark", .yellow))
+                }
+                if overdueExamsCount > 0 {
+                    items.append(("Prüfungen fällig: \(overdueExamsCount)", "calendar.badge.exclamationmark", .red))
+                }
+                if items.count == 1 && overdueHomeworksCount == 0 && homeworkDueTomorrowCount == 0 && overdueExamsCount == 0 {
+                    items.append(("Alles im Plan", "checkmark.circle.fill", .green))
+                }
+                return items
+            }()
+
+            VStack(alignment: .leading, spacing: 12) {
+                LazyVGrid(columns: metricColumns, spacing: 12) {
+                    CompactMetric(
                         title: "Schuljahr",
                         value: store.activeSchoolYearId ?? "—",
                         icon: "calendar",
                         accent: .cyan
                     )
-                    HeaderTile(
+                    CompactMetric(
                         title: "Jahrgang",
                         value: store.gradeYear.map { "\($0)." } ?? "—",
                         icon: "graduationcap.fill",
                         accent: .mint
                     )
-                }
-                HStack(spacing: 12) {
-                    HeaderTile(
+                    CompactMetric(
                         title: "Erinnerung",
                         value: reminderTimeText,
                         icon: "bell.fill",
                         accent: .orange
                     )
-                    HeaderTile(
+                    CompactMetric(
                         title: "Prüfungsfächer",
                         value: "\(currentExamSubjectsCount)/\(maxExamSubjects)",
                         icon: "checkmark.seal.fill",
@@ -204,49 +244,14 @@ struct AppSettingsView: View {
                     )
                 }
 
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
-                        PillBadge(
-                            text: store.theme == "feminine" ? "Soft/Pink" : "Klassisch",
-                            systemImage: "paintpalette.fill",
-                            foreground: Color.orange,
-                            background: Color.orange.opacity(0.15)
-                        )
-                        if overdueHomeworksCount > 0 {
-                            PillBadge(
-                                text: "HW fällig: \(overdueHomeworksCount)",
-                                systemImage: "exclamationmark.triangle.fill",
-                                foreground: .orange,
-                                background: Color.orange.opacity(0.16)
-                            )
-                        }
-                        if homeworkDueTomorrowCount > 0 {
-                            PillBadge(
-                                text: "HW morgen: \(homeworkDueTomorrowCount)",
-                                systemImage: "clock.badge.exclamationmark",
-                                foreground: .yellow,
-                                background: Color.yellow.opacity(0.16)
-                            )
-                        }
-                        if overdueExamsCount > 0 {
-                            PillBadge(
-                                text: "Prüfungen fällig: \(overdueExamsCount)",
-                                systemImage: "calendar.badge.exclamationmark",
-                                foreground: .red,
-                                background: Color.red.opacity(0.16)
-                            )
-                        }
-                        if overdueHomeworksCount == 0 && homeworkDueTomorrowCount == 0 && overdueExamsCount == 0 {
-                            PillBadge(
-                                text: "Alles im Plan",
-                                systemImage: "checkmark.circle.fill",
-                                foreground: .green,
-                                background: Color.green.opacity(0.15)
-                            )
+                if !statusItems.isEmpty {
+                    Divider()
+                        .opacity(0.25)
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 8)], spacing: 8) {
+                        ForEach(Array(statusItems.enumerated()), id: \.offset) { _, item in
+                            CompactStatusChip(text: item.text, icon: item.icon, color: item.color)
                         }
                     }
-                    .padding(.vertical, 2)
-                    .padding(.leading, 2)
                 }
             }
         }
@@ -387,6 +392,31 @@ struct AppSettingsView: View {
                     confirmAction: confirmResetYear
                 )
             }
+            .sheet(isPresented: $showChangeEmailSheet) {
+                ChangeEmailSheet(
+                    currentEmail: Auth.auth().currentUser?.email ?? "Unbekannt",
+                    currentPassword: $changeEmailCurrentPassword,
+                    newEmail: $changeEmailNewEmail,
+                    confirmEmail: $changeEmailConfirmEmail,
+                    message: $changeEmailMessage,
+                    errorMessage: $changeEmailError,
+                    isProcessing: isUpdatingEmail,
+                    submit: { Task { await updateEmail() } },
+                    cancel: { showChangeEmailSheet = false }
+                )
+            }
+            .sheet(isPresented: $showChangePasswordSheet) {
+                ChangePasswordSheet(
+                    currentPassword: $changePasswordCurrent,
+                    newPassword: $changePasswordNew,
+                    confirmPassword: $changePasswordConfirm,
+                    message: $changePasswordMessage,
+                    errorMessage: $changePasswordError,
+                    isProcessing: isUpdatingPassword,
+                    submit: { Task { await updatePassword() } },
+                    cancel: { showChangePasswordSheet = false }
+                )
+            }
             .alert("Gruppe verlassen?", isPresented: Binding(
                 get: { groupPendingLeave != nil },
                 set: { if !$0 { groupPendingLeave = nil } }
@@ -435,6 +465,7 @@ struct AppSettingsView: View {
                             }
                             .buttonStyle(.borderedProminent)
                             .tint(.cyan)
+                            .frame(maxWidth: .infinity)
                             .disabled(isSavingName || newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         }
                         if nameSavedSuccess {
@@ -566,8 +597,17 @@ struct AppSettingsView: View {
 
                 SettingsSectionBox {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Hausaufgaben-Erinnerung")
+                        Text("Erinnerung")
                             .font(sectionHeaderFont)
+
+                        Toggle(
+                            isOn: Binding(
+                                get: { store.standardRemindersEnabled },
+                                set: { val in Task { await store.updateStandardReminderEnabled(val) } }
+                            )
+                        ) {
+                            Text(store.standardRemindersEnabled ? "Standard-Erinnerung aktiv" : "Standard-Erinnerung aus")
+                        }
 
                         DatePicker(
                             "1 Tag vor Fälligkeit erinnern",
@@ -583,9 +623,23 @@ struct AppSettingsView: View {
                             displayedComponents: .hourAndMinute
                         )
                         .datePickerStyle(.compact)
-                        Text("Standard ist 19:00 Uhr. Wir erinnern am Vortag, falls die Hausaufgabe dann noch offen ist.")
+                        .disabled(!store.standardRemindersEnabled)
+
+                        NavigationLink {
+                            HelpCenterView(initialSection: .special)
+                                .environmentObject(store)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "info.circle")
+                                Text("Details zu Erinnerungen")
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .foregroundStyle(.secondary)
+                            }
                             .font(helperFont)
                             .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -1192,6 +1246,13 @@ struct AppSettingsView: View {
                         .disabled(!offlineManager.isOfflineModeActive)
                     }
 
+                    HelpCenterLink(
+                        title: "Hilfe zum Offline-Modus",
+                        subtitle: "Cache, Grenzen & Sync-Verhalten im Help Center",
+                        section: .special,
+                        accent: .purple
+                    )
+
                     if let message = offlineStatusMessage, !message.isEmpty {
                         Text(message)
                             .font(.footnote)
@@ -1224,12 +1285,44 @@ struct AppSettingsView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.orange)
+                        .frame(maxWidth: .infinity)
                         .disabled(isSendingVerification)
                         if let info = verificationMessage {
                             Text(info)
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
+                    }
+                }
+            }
+
+            SettingsSectionBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Account-Daten")
+                        .font(sectionHeaderFont)
+                    Text("Passe deine Anmeldedaten an. Zur Sicherheit wird dein aktuelles Passwort benötigt.")
+                        .font(helperFont)
+                        .foregroundStyle(.secondary)
+                    VStack(spacing: 8) {
+                        Button {
+                            resetChangeEmailForm()
+                            showChangeEmailSheet = true
+                        } label: {
+                            Label("E-Mail ändern", systemImage: "envelope.badge")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.blue)
+
+                        Button {
+                            resetChangePasswordForm()
+                            showChangePasswordSheet = true
+                        } label: {
+                            Label("Passwort ändern", systemImage: "key.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.indigo)
                     }
                 }
             }
@@ -1383,6 +1476,22 @@ struct AppSettingsView: View {
         }
     }
 
+    private func resetChangeEmailForm() {
+        changeEmailCurrentPassword = ""
+        changeEmailNewEmail = ""
+        changeEmailConfirmEmail = ""
+        changeEmailMessage = nil
+        changeEmailError = nil
+    }
+
+    private func resetChangePasswordForm() {
+        changePasswordCurrent = ""
+        changePasswordNew = ""
+        changePasswordConfirm = ""
+        changePasswordMessage = nil
+        changePasswordError = nil
+    }
+
     private func refreshEmailVerification() async {
         guard let user = Auth.auth().currentUser else {
             await MainActor.run { isEmailVerified = nil }
@@ -1410,6 +1519,26 @@ struct AppSettingsView: View {
         await MainActor.run {
             isSendingVerification = false
             verificationMessage = message ?? "Bestätigungs-E-Mail wurde gesendet."
+        }
+    }
+
+    private func mapAuthErrorMessage(_ error: Error) -> String {
+        guard let authError = AuthErrorCode(_bridgedNSError: error as NSError) else {
+            return error.localizedDescription
+        }
+        switch authError.code {
+        case .invalidEmail:
+            return "Ungültige E-Mail-Adresse."
+        case .emailAlreadyInUse:
+            return "Diese E-Mail wird bereits verwendet."
+        case .wrongPassword:
+            return "Falsches aktuelles Passwort."
+        case .requiresRecentLogin:
+            return "Bitte melde dich neu an und versuche es erneut."
+        case .weakPassword:
+            return "Passwort ist zu schwach (mindestens 6 Zeichen)."
+        default:
+            return error.localizedDescription
         }
     }
 
@@ -1511,8 +1640,413 @@ struct AppSettingsView: View {
             }
         }
     }
+
+    private func updateEmail() async {
+        let trimmedEmail = changeEmailNewEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedConfirm = changeEmailConfirmEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPassword = changeEmailCurrentPassword.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !trimmedPassword.isEmpty else {
+            changeEmailError = "Bitte aktuelles Passwort eingeben."
+            changeEmailMessage = nil
+            return
+        }
+        guard !trimmedEmail.isEmpty, !trimmedConfirm.isEmpty else {
+            changeEmailError = "Bitte neue E-Mail eingeben."
+            changeEmailMessage = nil
+            return
+        }
+        guard trimmedEmail == trimmedConfirm else {
+            changeEmailError = "E-Mail und Bestätigung stimmen nicht überein."
+            changeEmailMessage = nil
+            return
+        }
+        guard isValidEmail(trimmedEmail) else {
+            changeEmailError = "Bitte eine gültige E-Mail-Adresse eingeben."
+            changeEmailMessage = nil
+            return
+        }
+        guard let user = Auth.auth().currentUser, let currentEmail = user.email else {
+            changeEmailError = "Kein angemeldeter Nutzer gefunden."
+            changeEmailMessage = nil
+            return
+        }
+
+        await MainActor.run {
+            isUpdatingEmail = true
+            changeEmailError = nil
+            changeEmailMessage = nil
+        }
+
+        do {
+            let credential = EmailAuthProvider.credential(withEmail: currentEmail, password: trimmedPassword)
+            try await user.reauthenticate(with: credential)
+            try await user.updateEmail(to: trimmedEmail)
+            try await Firestore.firestore()
+                .collection("users")
+                .document(user.uid)
+                .setData(["email": trimmedEmail], merge: true)
+            try? await user.sendEmailVerification()
+            await refreshEmailVerification()
+            await MainActor.run {
+                isUpdatingEmail = false
+                changeEmailMessage = "E-Mail aktualisiert. Bitte bestätige die neue Adresse."
+                changeEmailCurrentPassword = ""
+                changeEmailNewEmail = ""
+                changeEmailConfirmEmail = ""
+                changeEmailError = nil
+            }
+        } catch {
+            await MainActor.run {
+                isUpdatingEmail = false
+                changeEmailError = mapAuthErrorMessage(error)
+            }
+        }
+    }
+
+    private func updatePassword() async {
+        let current = changePasswordCurrent.trimmingCharacters(in: .whitespacesAndNewlines)
+        let newPass = changePasswordNew.trimmingCharacters(in: .whitespacesAndNewlines)
+        let confirm = changePasswordConfirm.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !current.isEmpty else {
+            changePasswordError = "Bitte aktuelles Passwort eingeben."
+            changePasswordMessage = nil
+            return
+        }
+        guard !newPass.isEmpty, !confirm.isEmpty else {
+            changePasswordError = "Bitte neues Passwort eingeben."
+            changePasswordMessage = nil
+            return
+        }
+        guard newPass == confirm else {
+            changePasswordError = "Neues Passwort und Bestätigung stimmen nicht überein."
+            changePasswordMessage = nil
+            return
+        }
+        guard newPass.count >= 6 else {
+            changePasswordError = "Neues Passwort muss mindestens 6 Zeichen lang sein."
+            changePasswordMessage = nil
+            return
+        }
+        guard let user = Auth.auth().currentUser, let email = user.email else {
+            changePasswordError = "Kein angemeldeter Nutzer gefunden."
+            changePasswordMessage = nil
+            return
+        }
+
+        await MainActor.run {
+            isUpdatingPassword = true
+            changePasswordError = nil
+            changePasswordMessage = nil
+        }
+
+        do {
+            let credential = EmailAuthProvider.credential(withEmail: email, password: current)
+            try await user.reauthenticate(with: credential)
+            try await user.updatePassword(to: newPass)
+            await MainActor.run {
+                isUpdatingPassword = false
+                changePasswordMessage = "Passwort erfolgreich aktualisiert."
+                changePasswordCurrent = ""
+                changePasswordNew = ""
+                changePasswordConfirm = ""
+                changePasswordError = nil
+            }
+        } catch {
+            await MainActor.run {
+                isUpdatingPassword = false
+                changePasswordError = mapAuthErrorMessage(error)
+            }
+        }
+    }
 }
 
+
+private struct ChangeEmailSheet: View {
+    let currentEmail: String
+    @Binding var currentPassword: String
+    @Binding var newEmail: String
+    @Binding var confirmEmail: String
+    @Binding var message: String?
+    @Binding var errorMessage: String?
+    let isProcessing: Bool
+    let submit: () -> Void
+    let cancel: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    private var canSubmit: Bool {
+        !currentPassword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        && !newEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        && newEmail.trimmingCharacters(in: .whitespacesAndNewlines) == confirmEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 14) {
+                SettingsSectionBox {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("E-Mail aktualisieren")
+                            .font(.headline.weight(.semibold))
+                        Text("Aktuell: \(currentEmail)")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Text("Zur Sicherheit musst du dein aktuelles Passwort eingeben.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                SettingsSectionBox {
+                    VStack(alignment: .leading, spacing: 10) {
+                        SecureField("Aktuelles Passwort", text: $currentPassword)
+                            .textContentType(.password)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .padding(12)
+                            .background(Color.formInputBackground)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                        TextField("Neue E-Mail", text: $newEmail)
+                            .textContentType(.emailAddress)
+                            .keyboardType(.emailAddress)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .padding(12)
+                            .background(Color.formInputBackground)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                        TextField("Neue E-Mail bestätigen", text: $confirmEmail)
+                            .textContentType(.emailAddress)
+                            .keyboardType(.emailAddress)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .padding(12)
+                            .background(Color.formInputBackground)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                }
+
+                if let msg = message {
+                    Text(msg)
+                        .font(.footnote)
+                        .foregroundStyle(.green)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if let err = errorMessage {
+                    Text(err)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                Button {
+                    submit()
+                } label: {
+                    HStack {
+                        if isProcessing {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "envelope.fill")
+                            Text("E-Mail speichern")
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.blue)
+                .disabled(!canSubmit || isProcessing)
+            }
+            .padding(18)
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("E-Mail ändern")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") {
+                        cancel()
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .interactiveDismissDisabled(isProcessing)
+    }
+}
+
+private struct ChangePasswordSheet: View {
+    @Binding var currentPassword: String
+    @Binding var newPassword: String
+    @Binding var confirmPassword: String
+    @Binding var message: String?
+    @Binding var errorMessage: String?
+    let isProcessing: Bool
+    let submit: () -> Void
+    let cancel: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    private var canSubmit: Bool {
+        !currentPassword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        && !newPassword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        && newPassword == confirmPassword
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 14) {
+                SettingsSectionBox {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Passwort ändern")
+                            .font(.headline.weight(.semibold))
+                        Text("Gib dein aktuelles Passwort ein und bestätige das neue zweimal.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                SettingsSectionBox {
+                    VStack(alignment: .leading, spacing: 10) {
+                        SecureField("Aktuelles Passwort", text: $currentPassword)
+                            .textContentType(.password)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .padding(12)
+                            .background(Color.formInputBackground)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                        SecureField("Neues Passwort (min. 6 Zeichen)", text: $newPassword)
+                            .textContentType(.newPassword)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .padding(12)
+                            .background(Color.formInputBackground)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                        SecureField("Neues Passwort bestätigen", text: $confirmPassword)
+                            .textContentType(.newPassword)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .padding(12)
+                            .background(Color.formInputBackground)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                }
+
+                if let msg = message {
+                    Text(msg)
+                        .font(.footnote)
+                        .foregroundStyle(.green)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if let err = errorMessage {
+                    Text(err)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                Button {
+                    submit()
+                } label: {
+                    HStack {
+                        if isProcessing {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "key.fill")
+                            Text("Passwort speichern")
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.indigo)
+                .disabled(!canSubmit || isProcessing)
+            }
+            .padding(18)
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("Passwort ändern")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") {
+                        cancel()
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .interactiveDismissDisabled(isProcessing)
+    }
+}
+
+private struct CompactMetric: View {
+    let title: String
+    let value: String
+    let icon: String
+    let accent: Color
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(accent.opacity(0.16))
+                    .frame(width: 32, height: 32)
+                Image(systemName: icon)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(accent)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(value)
+                    .font(.headline.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .monospacedDigit()
+                Text(title)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(accent.opacity(0.16), lineWidth: 1)
+        )
+    }
+}
+
+private struct CompactStatusChip: View {
+    let text: String
+    let icon: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.caption2.weight(.bold))
+            Text(text)
+                .font(.caption.weight(.semibold))
+        }
+        .padding(.vertical, 5)
+        .padding(.horizontal, 9)
+        .foregroundStyle(color)
+        .background(color.opacity(0.14))
+        .clipShape(Capsule(style: .continuous))
+        .overlay(
+            Capsule(style: .continuous)
+                .stroke(color.opacity(0.25), lineWidth: 1)
+        )
+        .lineLimit(1)
+    }
+}
 
 private struct ExamSubjectRow: View {
     let subject: Subject
@@ -1554,6 +2088,7 @@ private struct ResetConfirmSheet: View {
     let confirmAction: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
@@ -1665,6 +2200,14 @@ private struct ResetConfirmSheet: View {
             }
             .padding(18)
             .background(Color(.systemGroupedBackground))
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") {
+                        isPresented = false
+                        dismiss()
+                    }
+                }
+            }
         }
     }
 }
