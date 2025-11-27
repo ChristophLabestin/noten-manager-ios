@@ -67,12 +67,18 @@ struct MainView: View {
         }
         .onChange(of: gradesStore.isLoading) { loading in
             spinnerAnimating = loading
+            if !loading {
+                showOnboardingFunnel = gradesStore.onboardingRequired
+            } else if gradesStore.onboardingRequired {
+                showOnboardingFunnel = true
+            }
         }
         .fullScreenCover(isPresented: $showOnboardingFunnel) {
             OnboardingFunnelView {
                 showOnboardingFunnel = false
             }
             .environmentObject(gradesStore)
+            .environmentObject(authManager)
         }
         .task {
             await handleDataLoading()
@@ -91,18 +97,9 @@ struct MainView: View {
                 scrollToAccountOnOpen = false
             }
         }
-        .sheet(isPresented: legacyMigrationSheetBinding) {
-            if let summary = gradesStore.legacyMigrationSummary {
-                LegacyMigrationPromptView(
-                    summary: summary,
-                    onImport: {
-                        Task { await gradesStore.handleLegacyMigrationChoice(keepWebData: true) }
-                    },
-                    onStartFresh: {
-                        Task { await gradesStore.handleLegacyMigrationChoice(keepWebData: false) }
-                    }
-                )
-                .environmentObject(gradesStore)
+        .onChange(of: gradesStore.legacyMigrationSummary) { summary in
+            if summary != nil {
+                showOnboardingFunnel = true
             }
         }
         .overlay(alignment: .center) {
@@ -154,6 +151,9 @@ struct MainView: View {
             showOfflineBannerTemporarily()
             await refreshEmailVerification()
             await evaluatePfingstferienPrompt()
+            if gradesStore.onboardingRequired {
+                showOnboardingFunnel = true
+            }
             return
         }
 
@@ -165,6 +165,9 @@ struct MainView: View {
                 showOfflineBannerTemporarily()
                 await refreshEmailVerification()
                 await evaluatePfingstferienPrompt()
+                if gradesStore.onboardingRequired {
+                    showOnboardingFunnel = true
+                }
                 return
             }
         }
@@ -176,6 +179,9 @@ struct MainView: View {
         await gradesStore.startListening()
         hideOfflineBanner()
         await evaluatePfingstferienPrompt()
+        if gradesStore.onboardingRequired {
+            showOnboardingFunnel = true
+        }
     }
 
     @MainActor
@@ -192,6 +198,9 @@ struct MainView: View {
                 gradesStore.leaveOfflineModePreservingState()
                 await gradesStore.startListening()
                 hideOfflineBanner()
+                if gradesStore.onboardingRequired {
+                    showOnboardingFunnel = true
+                }
             } else {
                 await attemptReconnectOrFallback()
             }
@@ -423,12 +432,6 @@ struct MainView: View {
                         .environmentObject(biometricManager)
                 }
             }
-            NavigationLink(
-                destination: AbiturExamView().environmentObject(gradesStore),
-                isActive: $navigateToAbiturExam
-            ) {
-                EmptyView()
-            }
         }
         .navigationDestination(for: Subject.self) { subject in
             if subject.name == "Fachreferat" {
@@ -438,6 +441,9 @@ struct MainView: View {
                 SubjectDetailView(subject: subject)
                     .environmentObject(gradesStore)
             }
+        }
+        .navigationDestination(isPresented: $navigateToAbiturExam) {
+            AbiturExamView().environmentObject(gradesStore)
         }
         .safeAreaInset(edge: .bottom) {
             Color.clear.frame(height: 100)
@@ -471,6 +477,9 @@ struct MainView: View {
                     await gradesStore.syncOfflinePendingChanges(forceLocalOverride: true)
                     gradesStore.leaveOfflineModePreservingState()
                     await gradesStore.startListening()
+                    if gradesStore.onboardingRequired || gradesStore.activeSchoolYearId == nil {
+                        showOnboardingFunnel = true
+                    }
                     hideOfflineBanner()
                     gradesStore.isLoading = false
                     reconnectTask = nil
@@ -485,13 +494,6 @@ struct MainView: View {
             gradesStore.isLoading = false
             reconnectTask = nil
         }
-    }
-
-    private var legacyMigrationSheetBinding: Binding<Bool> {
-        Binding(
-            get: { gradesStore.legacyMigrationSummary != nil },
-            set: { _ in }
-        )
     }
 
     private var loadingOverlayLabel: String {

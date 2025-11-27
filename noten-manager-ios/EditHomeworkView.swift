@@ -1,4 +1,5 @@
 import SwiftUI
+import FirebaseAuth
 
 struct EditHomeworkView: View {
     @Environment(\.dismiss) private var dismiss
@@ -17,6 +18,11 @@ struct EditHomeworkView: View {
     @State private var isDeleting: Bool = false
     @State private var showDeleteConfirm: Bool = false
     @State private var error: String?
+    @State private var showPersonalNoteEditor: Bool = false
+    @State private var isSharing: Bool = false
+    @State private var isUnsharing: Bool = false
+    @State private var shareInfo: String?
+    @State private var shareError: String?
 
     @State private var isShared: Bool = false
     @State private var sharedId: String? = nil
@@ -24,6 +30,14 @@ struct EditHomeworkView: View {
 
     private enum Field: Hashable {
         case title
+    }
+
+    private var currentUserId: String? {
+        Auth.auth().currentUser?.uid
+    }
+
+    private var isSharedOwner: Bool {
+        homework.isShared && homework.creatorId == currentUserId
     }
 
     init(homework: Homework) {
@@ -154,6 +168,104 @@ struct EditHomeworkView: View {
                         }
                     }
 
+                    if homework.isShared {
+                        SettingsCard(
+                            title: "Eigene Notiz",
+                            subtitle: "Nur für dich sichtbar",
+                            systemImage: "note.text",
+                            accent: .teal
+                        ) {
+                            let currentNote = store.userNoteForHomework(homework) ?? ""
+                            VStack(alignment: .leading, spacing: 10) {
+                                if currentNote.isEmpty {
+                                    Text("Keine Notiz gespeichert.")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    Text(currentNote)
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(4)
+                                }
+                                Button("Eigene Notiz bearbeiten") {
+                                    showPersonalNoteEditor = true
+                                }
+                                .buttonStyle(.borderedProminent)
+                            }
+                        }
+                    }
+
+                    if !homework.isShared && !store.groupIds.isEmpty {
+                        SettingsCard(
+                            title: "Mit Gruppe teilen",
+                            subtitle: "Aufgabe nachträglich veröffentlichen",
+                            systemImage: "person.3.fill",
+                            accent: .blue
+                        ) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Button {
+                                    Task { await shareToGroups() }
+                                } label: {
+                                    if isSharing {
+                                        ProgressView()
+                                    } else {
+                                        Text("In Gruppe teilen")
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(isSharing)
+
+                                if let shareInfo {
+                                    Text(shareInfo)
+                                        .font(.footnote)
+                                        .foregroundStyle(.green)
+                                }
+                                if let shareError {
+                                    Text(shareError)
+                                        .font(.footnote)
+                                        .foregroundStyle(.red)
+                                }
+                            }
+                        }
+                    }
+
+                    if homework.isShared, isSharedOwner, let gid = homework.groupId {
+                        SettingsCard(
+                            title: "Teilen beenden",
+                            subtitle: "Nur der Ersteller kann das Teilen stoppen",
+                            systemImage: "xmark.circle",
+                            accent: .red
+                        ) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Button(role: .destructive) {
+                                    Task { await stopSharing(groupId: gid) }
+                                } label: {
+                                    if isUnsharing {
+                                        ProgressView()
+                                    } else {
+                                        Text("Aus Gruppe entfernen")
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(.red)
+                                .disabled(isUnsharing)
+
+                                if let shareInfo {
+                                    Text(shareInfo)
+                                        .font(.footnote)
+                                        .foregroundStyle(.green)
+                                }
+                                if let shareError {
+                                    Text(shareError)
+                                        .font(.footnote)
+                                        .foregroundStyle(.red)
+                                }
+                            }
+                        }
+                    }
+
                     if let error {
                         Text(error)
                             .font(.footnote)
@@ -192,17 +304,24 @@ struct EditHomeworkView: View {
                     }
                     .disabled(!canSave || isSaving || subjects.isEmpty)
                 }
-                ToolbarItemGroup(placement: .keyboard) {
-                    KeyboardNavigationAccessory(
-                        focus: $focusedField,
-                        fields: [.title],
-                        label: nil,
-                        onDone: { hideKeyboard() }
-                    )
-                }
             }
             .scrollDismissesKeyboard(.interactively)
             .hideKeyboardOnTap()
+            .keyboardNavigationToolbar(
+                focus: $focusedField,
+                fields: [.title],
+                label: nil,
+                onDone: { hideKeyboard() }
+            )
+            .sheet(isPresented: $showPersonalNoteEditor) {
+                PersonalNoteEditor(
+                    title: "Eigene Notiz",
+                    initialText: store.userNoteForHomework(homework) ?? "",
+                    onSave: { text in
+                        Task { await store.setUserNoteForSharedHomework(homeworkId: homework.id, note: text, groupId: homework.groupId) }
+                    }
+                )
+            }
             .alert(
                 "Hausaufgabe löschen?",
                 isPresented: $showDeleteConfirm
@@ -215,7 +334,6 @@ struct EditHomeworkView: View {
                 Text("Diese Hausaufgabe wird dauerhaft gelöscht.")
             }
         }
-        .modifier(KeyboardToolbarInset(height: 64))
     }
 
     private func save() async {
@@ -257,6 +375,40 @@ struct EditHomeworkView: View {
             self.error = error.localizedDescription
         }
         isSaving = false
+    }
+
+    private func shareToGroups() async {
+        guard !isSharing else { return }
+        shareError = nil
+        shareInfo = nil
+        isSharing = true
+        let success = await store.shareHomeworkToGroups(homeworkId: homework.id)
+        await MainActor.run {
+            isSharing = false
+            if success {
+                shareInfo = "In Gruppe geteilt."
+                dismiss()
+            } else {
+                shareError = "Teilen fehlgeschlagen. Prüfe Gruppen und versuche es erneut."
+            }
+        }
+    }
+
+    private func stopSharing(groupId: String) async {
+        guard !isUnsharing else { return }
+        shareError = nil
+        shareInfo = nil
+        isUnsharing = true
+        let success = await store.stopSharingHomework(groupId: groupId, homeworkId: homework.id)
+        await MainActor.run {
+            isUnsharing = false
+            if success {
+                shareInfo = "Teilen beendet."
+                dismiss()
+            } else {
+                shareError = "Konnte Teilen nicht beenden."
+            }
+        }
     }
 
     private func deleteHomework() async {

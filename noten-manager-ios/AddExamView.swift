@@ -180,17 +180,15 @@ struct AddExamView: View {
                     }
                     .disabled(!canSave || isSaving || subjects.isEmpty)
                 }
-                ToolbarItemGroup(placement: .keyboard) {
-                    KeyboardNavigationAccessory(
-                        focus: $focusedField,
-                        fields: [.title, .notes],
-                        label: nil,
-                        onDone: { hideKeyboard() }
-                    )
-                }
             }
             .scrollDismissesKeyboard(.interactively)
             .hideKeyboardOnTap()
+            .keyboardNavigationToolbar(
+                focus: $focusedField,
+                fields: [.title, .notes],
+                label: nil,
+                onDone: { hideKeyboard() }
+            )
             .onAppear {
                 if subjectName.isEmpty {
                     if let pre = preselectedSubjectName,
@@ -203,7 +201,6 @@ struct AddExamView: View {
                 shareWithGroup = !store.groupIds.isEmpty
             }
         }
-        .modifier(KeyboardToolbarInset(height: 64))
     }
 
     private func save() async {

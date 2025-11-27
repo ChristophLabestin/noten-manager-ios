@@ -310,7 +310,7 @@ struct AddGradeView: View {
                             VStack(alignment: .leading, spacing: 12) {
                                 Toggle("Mit Prüfung verknüpfen", isOn: $linkToExam)
                                     .tint(.orange)
-                                    .onChange(of: linkToExam) { enabled in
+                                    .onChange(of: linkToExam) { _, enabled in
                                         if enabled {
                                             ensureLinkedExamSelection()
                                         } else {
@@ -389,17 +389,15 @@ struct AddGradeView: View {
                     }
                     .disabled(!canSave || isSaving)
                 }
-                ToolbarItemGroup(placement: .keyboard) {
-                    KeyboardNavigationAccessory(
-                        focus: $focusedField,
-                        fields: [.grade, .note],
-                        label: nil,
-                        onDone: { hideKeyboard() }
-                    )
-                }
             }
             .scrollDismissesKeyboard(.interactively)
             .hideKeyboardOnTap()
+            .keyboardNavigationToolbar(
+                focus: $focusedField,
+                fields: [.grade, .note],
+                label: nil,
+                onDone: { hideKeyboard() }
+            )
             .onAppear {
                 if subjectName.isEmpty {
                     if let pre = preselectedSubjectName,
@@ -439,19 +437,18 @@ struct AddGradeView: View {
                 ensureLinkedExamSelection()
                 applyExamWeightIfAvailable(examId: selectedLinkedExamId)
             }
-            .onChange(of: subjectName) { _ in
+            .onChange(of: subjectName) { _, _ in
                 if linkToExam {
                     ensureLinkedExamSelection()
                 }
             }
-            .onChange(of: selectedLinkedExamId) { newValue in
+            .onChange(of: selectedLinkedExamId) { _, newValue in
                 if let date = examDate(for: newValue) {
                     halfYearSelection = AddGradeView.defaultHalfYear(referenceDate: date)
                 }
                 applyExamWeightIfAvailable(examId: newValue)
             }
         }
-        .modifier(KeyboardToolbarInset(height: 64))
     }
 
     private func save() async {
@@ -495,7 +492,7 @@ struct AddGradeView: View {
                 return base
             }()
             let linkedExamId = linkToExam ? selectedLinkedExamId : nil
-            let gradeId = try await store.addGradeToFirestore(
+            _ = try await store.addGradeToFirestore(
                 subjectId: subjectName,
                 grade: grade,
                 weight: weight,

@@ -276,28 +276,6 @@ struct HomeView: View {
         subjectLinkActive = true
     }
 
-    private var hiddenSubjectLink: some View {
-        NavigationLink(
-            destination: Group {
-                if let subject = selectedSubject {
-                    if subject.name == "Fachreferat" {
-                        FachreferatDetailView(subject: subject)
-                            .environmentObject(store)
-                    } else {
-                        SubjectDetailView(subject: subject)
-                            .environmentObject(store)
-                    }
-                } else {
-                    EmptyView()
-                }
-            },
-            isActive: $subjectLinkActive
-        ) {
-            EmptyView()
-        }
-        .hidden()
-    }
-
     @ViewBuilder
     private func subjectRowAny(subject: Subject,
                                subjectGrades: [String: [Grade]],
@@ -603,7 +581,7 @@ struct HomeView: View {
                     .opacity((greetingVisible || !animationsOn) ? 1 : 0)
                     .offset(y: (greetingVisible || !animationsOn) ? 0 : 12)
                     .onAppear { startGreetingAnimation() }
-                    .onChange(of: greetingAnimationSeed) { _ in startGreetingAnimation() }
+                    .onChange(of: greetingAnimationSeed) { _, _ in startGreetingAnimation() }
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -661,15 +639,6 @@ struct HomeView: View {
         .listRowSeparator(.hidden)
         .listSectionSpacing(0)
         .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine"))
-        .background(hiddenSubjectLink)
-
-        // Unsichtbare NavigationLinks (NavigationStack-Ziele)
-        .background(
-            NavigationLinksBackground(
-                navigateToSettings: $navigateToSettings,
-                navigateToFinalGrade: $navigateToFinalGrade
-            ).environmentObject(store)
-        )
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -693,6 +662,25 @@ struct HomeView: View {
                 }
             }
         }
+        .navigationDestination(isPresented: $subjectLinkActive) {
+            if let subject = selectedSubject {
+                if subject.name == "Fachreferat" {
+                    FachreferatDetailView(subject: subject)
+                        .environmentObject(store)
+                } else {
+                    SubjectDetailView(subject: subject)
+                        .environmentObject(store)
+                }
+            } else {
+                EmptyView()
+            }
+        }
+        .navigationDestination(isPresented: $navigateToSettings) {
+            AppSettingsView().environmentObject(store)
+        }
+        .navigationDestination(isPresented: $navigateToFinalGrade) {
+            AbiturExamView().environmentObject(store)
+        }
         .sheet(isPresented: $showHomeworkSheet) {
             HomeworkListView()
                 .environmentObject(store)
@@ -707,17 +695,17 @@ struct HomeView: View {
             Task { await loadUserDisplayName() }
             Task { await loadUpcomingHolidayNotice() }
         }
-        .onChange(of: displayName) { _ in
+        .onChange(of: displayName) { _, _ in
             greetingAnimationSeed = UUID()
         }
-        .onChange(of: store.showHolidayHints) { enabled in
+        .onChange(of: store.showHolidayHints) { _, enabled in
             if enabled {
                 Task { await loadUpcomingHolidayNotice() }
             } else {
                 upcomingHoliday = nil
             }
         }
-        .onChange(of: subjectLinkActive) { active in
+        .onChange(of: subjectLinkActive) { _, active in
             if !active {
                 selectedSubject = nil
             }
@@ -1230,24 +1218,5 @@ private struct ToolbarTitleView: View {
         .frame(maxWidth: .infinity)
         .multilineTextAlignment(.center)
         .allowsHitTesting(false)
-    }
-}
-
-private struct NavigationLinksBackground: View {
-    @EnvironmentObject var store: GradesStore
-    @Binding var navigateToSettings: Bool
-    @Binding var navigateToFinalGrade: Bool
-
-    var body: some View {
-        Group {
-            NavigationLink(
-                destination: AppSettingsView().environmentObject(store),
-                isActive: $navigateToSettings
-            ) { EmptyView() }
-            NavigationLink(
-                destination: AbiturExamView().environmentObject(store),
-                isActive: $navigateToFinalGrade
-            ) { EmptyView() }
-        }
     }
 }

@@ -115,6 +115,18 @@ struct Fachreferat: Codable, Identifiable {
     let note: String?
 }
 
+struct SeminarPerformance: Codable, Identifiable, Equatable {
+    let id: String
+    let topic: String?
+    let individualPoints: Double?
+    let paperPoints: Double?
+    let presentationPoints: Double?
+    let submissionDate: Date?
+    let presentationDate: Date?
+    let note: String?
+    let updatedAt: Date?
+}
+
 struct PracticalGradeEntry: Codable, Identifiable, Equatable {
     let id: String
     let grade: Double

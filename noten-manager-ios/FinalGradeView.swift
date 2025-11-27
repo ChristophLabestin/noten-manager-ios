@@ -32,6 +32,7 @@ struct FinalGradeView: View {
     @State private var finalGradeTapState: Int = 0 // 0 -> 1 Nachkommastelle, 1 -> 2, 2 -> 3
     @State private var showHomeworkSheet: Bool = false
     @State private var showExamSheet: Bool = false
+    @State private var showSeminarSheet: Bool = false
     @State private var showStatusDetails: Bool = false
     @State private var previousYearSnapshot: SchoolYearSnapshot?
     @State private var isLoadingPreviousYear: Bool = false
@@ -181,6 +182,42 @@ struct FinalGradeView: View {
         return store.practicalPerformance
     }
 
+    private var seminarPerformanceForDisplay: SeminarPerformance? {
+        store.seminarPerformance
+    }
+
+    private var hasSeminarRequirement: Bool { gradeYear >= 13 }
+
+    private var seminarFinalPoints: Double? {
+        guard let sem = seminarPerformanceForDisplay else { return nil }
+        let hasZero = [sem.individualPoints, sem.paperPoints, sem.presentationPoints].contains { $0 == 0 }
+        if hasZero { return 0 }
+        guard let individual = sem.individualPoints,
+              let paper = sem.paperPoints,
+              let presentation = sem.presentationPoints else { return nil }
+        let raw = (individual + presentation + (2 * paper)) / 4.0
+        let rounded = raw.rounded(.toNearestOrAwayFromZero)
+        return max(0, min(15, rounded))
+    }
+
+    private var seminarMissingComponents: [String] {
+        guard let sem = seminarPerformanceForDisplay else { return ["Teilnoten fehlen"] }
+        var missing: [String] = []
+        if sem.individualPoints == nil { missing.append("individuelle Leistung") }
+        if sem.paperPoints == nil { missing.append("Seminararbeit") }
+        if sem.presentationPoints == nil { missing.append("Präsentation") }
+        return missing
+    }
+
+    private var seminarTopic: String? { seminarPerformanceForDisplay?.topic }
+    private var seminarSubmissionDate: Date? { seminarPerformanceForDisplay?.submissionDate }
+    private var seminarPresentationDate: Date? { seminarPerformanceForDisplay?.presentationDate }
+
+    private var seminarPointsDouble: Double {
+        guard let value = seminarFinalPoints, hasSeminarRequirement else { return 0 }
+        return value * 2
+    }
+
     private var examWeightFactor: Double {
         if schoolType == .fos {
             return gradeYear >= 13 ? 2 : 3
@@ -197,8 +234,8 @@ struct FinalGradeView: View {
             if let lh = lhs.halfYear, let rh = rhs.halfYear, lh != rh {
                 return lh < rh
             }
-            if let lh = lhs.halfYear, rhs.halfYear == nil { return true }
-            if lhs.halfYear == nil, let rh = rhs.halfYear { return false }
+            if let _ = lhs.halfYear, rhs.halfYear == nil { return true }
+            if lhs.halfYear == nil, let _ = rhs.halfYear { return false }
             return lhs.date < rhs.date
         }
     }
@@ -219,6 +256,10 @@ struct FinalGradeView: View {
             ExamListView()
                 .environmentObject(store)
         }
+        .sheet(isPresented: $showSeminarSheet) {
+            SeminarPerformanceView()
+                .environmentObject(store)
+        }
         .sheet(isPresented: $showStatusDetails) {
             statusDetailSheet
         }
@@ -228,33 +269,33 @@ struct FinalGradeView: View {
             Task { await loadExamPoints() }
             Task { await loadPreviousYearSnapshotIfNeeded() }
         }
-        .onChange(of: store.subjects) { _ in
+        .onChange(of: store.subjects) { _, _ in
             syncDropSelectionsFromData()
             recomputeMaxDroppedHalfYears()
             Task { await loadExamPoints() }
         }
-        .onChange(of: store.gradeYear) { _ in
+        .onChange(of: store.gradeYear) { _, _ in
             recomputeMaxDroppedHalfYears()
             Task { await loadPreviousYearSnapshotIfNeeded() }
         }
-        .onChange(of: store.schoolType) { _ in
+        .onChange(of: store.schoolType) { _, _ in
             recomputeMaxDroppedHalfYears()
             Task { await loadPreviousYearSnapshotIfNeeded() }
         }
-        .onChange(of: store.schoolYears) { _ in
+        .onChange(of: store.schoolYears) { _, _ in
             Task { await loadPreviousYearSnapshotIfNeeded() }
         }
-        .onChange(of: store.activeSchoolYearId) { _ in
+        .onChange(of: store.activeSchoolYearId) { _, _ in
             syncDropSelectionsFromData()
             recomputeMaxDroppedHalfYears()
             Task { await loadExamPoints() }
             Task { await loadPreviousYearSnapshotIfNeeded() }
         }
-        .onChange(of: previousYearSnapshot?.id) { _ in
+        .onChange(of: previousYearSnapshot?.id) { _, _ in
             syncDropSelectionsFromData()
             recomputeMaxDroppedHalfYears()
         }
-        .onChange(of: store.encryptionKey == nil) { _ in
+        .onChange(of: store.encryptionKey == nil) { _, _ in
             Task {
                 await loadExamPoints()
                 await loadPreviousYearSnapshotIfNeeded()
@@ -313,7 +354,12 @@ struct FinalGradeView: View {
             abiturOverviewCard
                 .padding(.horizontal, 16)
                 .softFadeIn(enabled: animationsOn, delay: 0.12, offset: 12)
-            if schoolType == .fos {
+            if hasSeminarRequirement || seminarPerformanceForDisplay != nil {
+                seminarCard
+                    .padding(.horizontal, 16)
+                    .softFadeIn(enabled: animationsOn, delay: 0.14, offset: 12)
+            }
+            if schoolType == .fos && gradeYear <= 12 {
                 practicalPerformanceCard
                     .padding(.horizontal, 16)
                     .softFadeIn(enabled: animationsOn, delay: 0.16, offset: 12)
@@ -471,6 +517,12 @@ struct FinalGradeView: View {
                         if failedByMissingPracticalPerformance {
                             failureReasonRow("Praktikums-Jahresleistung fehlt")
                         }
+                        if failedByMissingSeminar {
+                            failureReasonRow("Seminarfach fehlt")
+                        }
+                        if failedBySeminarZero {
+                            failureReasonRow("Seminarfach mit 0 Punkten")
+                        }
                         if failedBySubjectPoints {
                             failureReasonRow("benötigte Punktzahl nicht erreicht")
                         }
@@ -548,6 +600,76 @@ struct FinalGradeView: View {
     }
 
     @ViewBuilder
+    private var seminarCard: some View {
+        SettingsCard(
+            title: "Seminarfach",
+            subtitle: "Seminararbeit zählt doppelt.",
+            systemImage: "doc.text.magnifyingglass",
+            accent: .indigo
+        ) {
+            SettingsSectionBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("Gesamt (2×)")
+                            .font(.headline)
+                        Spacer()
+                        Text(seminarFinalPoints != nil ? formatAverage(seminarFinalPoints) : "-")
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(gradeColor(seminarFinalPoints).opacity(0.15))
+                            .foregroundStyle(gradeColor(seminarFinalPoints))
+                            .clipShape(Capsule())
+                    }
+
+                    if let topic = seminarTopic, !topic.isEmpty {
+                        Text("Thema: \(topic)")
+                            .font(.subheadline)
+                    }
+
+                    VStack(spacing: 8) {
+                        seminarComponentRow(title: "Individuelle Leistung", value: seminarPerformanceForDisplay?.individualPoints)
+                        seminarComponentRow(title: "Seminararbeit (2×)", value: seminarPerformanceForDisplay?.paperPoints)
+                        seminarComponentRow(title: "Präsentation & Diskussion", value: seminarPerformanceForDisplay?.presentationPoints)
+                    }
+
+                    if let sub = seminarSubmissionDate {
+                        Text("Abgabe: \(formatDateShort(sub)) (Dienstag der 2. Unterrichtswoche).")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let pres = seminarPresentationDate {
+                        Text("Präsentation/Diskussion: \(formatDateShort(pres)).")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if hasSeminarRequirement {
+                        Text("0 Punkte in einem Teil ⇒ Seminar gesamt 0 Punkte (FOBOSO 3.1) und keine Zulassung zur Abschlussprüfung; zählt in 13. doppelt ins Abitur.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Trage hier schon während der Blockphase deine Teilnoten und Termine ein.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Button {
+                        showSeminarSheet = true
+                    } label: {
+                        Text(seminarPerformanceForDisplay == nil ? "Seminarfach pflegen" : "Seminarfach bearbeiten")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.primary.opacity(0.06))
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
     private var pointsCard: some View {
         SettingsCard(
             title: "Erreichte Punkte",
@@ -567,6 +689,12 @@ struct FinalGradeView: View {
                         .foregroundStyle(.secondary)
                     if practicalYearSummary.count > 0 {
                         Text("Praktikum 11.: \(Int(round(practicalYearSummary.totalPoints))) Punkte (\(practicalYearSummary.count) HJL).")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if hasSeminarRequirement {
+                        let pointsText = seminarFinalPoints != nil ? "\(Int(round(seminarPointsDouble))) Punkte" : "noch offen"
+                        Text("Seminarfach (2×): \(pointsText).")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -894,6 +1022,28 @@ struct FinalGradeView: View {
         return String(format: "%.2f", v)
     }
 
+    private func formatDateShort(_ date: Date?) -> String {
+        guard let date else { return "-" }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        return formatter.string(from: date)
+    }
+
+    @ViewBuilder
+    private func seminarComponentRow(title: String, value: Double?) -> some View {
+        HStack {
+            Text(title)
+                .font(.subheadline)
+            Spacer()
+            Text(value != nil ? "\(Int(value!)) Punkte" : "fehlt")
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(gradeColor(value).opacity(0.15))
+                .foregroundStyle(gradeColor(value))
+                .clipShape(Capsule())
+        }
+    }
+
     private var finalGradeValueForColor: Double? {
         fobosoSummary.grade ?? finalAverage
     }
@@ -1164,6 +1314,12 @@ struct FinalGradeView: View {
         if failedByMissingPracticalPerformance {
             reasons.append("Die beiden Praktikumsnoten (11.) fehlen für die FOS.")
         }
+        if failedByMissingSeminar {
+            reasons.append("Seminarfach-Teilnoten fehlen.")
+        }
+        if failedBySeminarZero {
+            reasons.append("Seminarfach aktuell 0 Punkte (0 Punkte in einer Teilleistung).")
+        }
         if failedBySubjectPoints {
             let weak = weakExamCounts
             if weak.weighted > 2 {
@@ -1199,6 +1355,12 @@ struct FinalGradeView: View {
         }
         if failedByMissingPracticalPerformance {
             tips.append("Beide Praktikumsnoten (11.) eintragen.")
+        }
+        if failedByMissingSeminar {
+            tips.append("Seminarfach eintragen (individuelle Leistung, Seminararbeit, Präsentation).")
+        }
+        if failedBySeminarZero {
+            tips.append("0 Punkte im Seminar vermeiden – Teilleistungen nachbessern.")
         }
         if failedBySubjectPoints {
             if weakExamCounts.weighted > 2 {
@@ -1259,6 +1421,7 @@ struct FinalGradeView: View {
                                 halfYearCount: Int,
                                 examPointsDouble: Double,
                                 halfYearPoints: Double,
+                                seminarPointsDouble: Double,
                                 totalPoints: Double,
                                 maxPoints: Int,
                                 grade: Double?,
@@ -1279,20 +1442,22 @@ struct FinalGradeView: View {
         let fachreferatPoints = includeFachreferat ? fachreferatHalfYearSummary.totalPoints : 0
         let practicalCount = practicalYearSummary.count
         let practicalPoints = practicalYearSummary.totalPoints
+        let seminarCount = (hasSeminarRequirement && seminarFinalPoints != nil) ? 2 : 0
+        let seminarPoints = hasSeminarRequirement ? seminarPointsDouble : 0
 
         let examWeightInt = Int(examWeightDouble.rounded())
-        let units = examCount * examWeightInt + halfYearCount + fachreferatCount + practicalCount
+        let units = examCount * examWeightInt + halfYearCount + fachreferatCount + practicalCount + seminarCount
         if units == 0 {
-            return (examCount, halfYearCount, 0, 0, 0, 0, nil, nil)
+            return (examCount, halfYearCount, 0, 0, 0, 0, 0, nil, nil)
         }
         let maxPoints = units * 15
-        let totalPoints = examPointsDouble + halfYearPoints + fachreferatPoints + practicalPoints
+        let totalPoints = examPointsDouble + halfYearPoints + fachreferatPoints + practicalPoints + seminarPoints
         let gradeRaw = 17.0 / 3.0 - (5.0 * totalPoints) / Double(maxPoints)
 
         let gradeRounded = (gradeRaw * 10.0).rounded(.toNearestOrAwayFromZero) / 10.0
         let grade = max(1, gradeRounded)
 
-        return (examCount, halfYearCount, examPointsDouble, halfYearPoints, totalPoints, maxPoints, grade, gradeRaw)
+        return (examCount, halfYearCount, examPointsDouble, halfYearPoints, seminarPoints, totalPoints, maxPoints, grade, gradeRaw)
     }
 
     private var subjectFinalResults: [(handle: SubjectHandle, finalPoints: Double?)] {
@@ -1403,10 +1568,16 @@ struct FinalGradeView: View {
         failedByHalfYearTooFew || failedByHalfYearTooMany
     }
     private var failedByMissingFachreferat: Bool {
-        gradeYear <= 12 && !hasFachreferat
+        gradeYear == 12 && !hasFachreferat
     }
     private var failedByMissingPracticalPerformance: Bool {
         schoolType == .fos && gradeYear <= 12 && practicalYearSummary.count < 2
+    }
+    private var failedByMissingSeminar: Bool {
+        hasSeminarRequirement && seminarFinalPoints == nil
+    }
+    private var failedBySeminarZero: Bool {
+        hasSeminarRequirement && seminarFinalPoints == 0
     }
     private var failedBySubjectPoints: Bool {
         guard hasAllExamPoints else { return false }
@@ -1428,8 +1599,8 @@ struct FinalGradeView: View {
 
     private enum PassFailStatus { case open, passed, failed }
     private var passFailStatus: PassFailStatus {
-        let isFailed = failedByHalfYearCount || failedByMissingFachreferat || failedByMissingPracticalPerformance || failedBySubjectPoints || failedByExamGrade || failedByFinalGrade || failedByForbiddenZeroExam
-        let isPassed = !isFailed && hasAllExamPoints && halfYearSummary.count == requiredHalfYearCount && examResultAtLeastFour == true && finalGradeAtLeastFour == true && !failedByMissingPracticalPerformance
+        let isFailed = failedByHalfYearCount || failedByMissingFachreferat || failedByMissingPracticalPerformance || failedByMissingSeminar || failedBySeminarZero || failedBySubjectPoints || failedByExamGrade || failedByFinalGrade || failedByForbiddenZeroExam
+        let isPassed = !isFailed && hasAllExamPoints && halfYearSummary.count == requiredHalfYearCount && examResultAtLeastFour == true && finalGradeAtLeastFour == true && !failedByMissingPracticalPerformance && !failedByMissingSeminar && !failedBySeminarZero
         if isFailed { return .failed }
         if isPassed { return .passed }
         return .open

@@ -95,6 +95,14 @@ struct HelpCenterView: View {
             icon: "graduationcap.fill"
         ),
         HelpSearchEntry(
+            id: "seminar",
+            section: .exams,
+            title: "Seminarfach nach FOBOSO",
+            summary: "Aufbau, Termine und Bewertung (2× Seminararbeit, 0-Punkte-Regel) mit App-Unterstützung.",
+            keywords: ["seminar", "seminararbeit", "präsentation", "blockphase", "zwischenpräsentation", "exposé", "0 punkte", "abgabe", "zweite woche", "fos", "bos"],
+            icon: "doc.text.magnifyingglass"
+        ),
+        HelpSearchEntry(
             id: "pass",
             section: .pass,
             title: "Bestehensregeln & Punkte",
@@ -389,7 +397,33 @@ struct HelpCenterView: View {
                     )
                     infoRow(
                         title: "Noch nicht automatisiert",
-                        text: "Seminarfach und zweite Fremdsprache sind noch nicht vollautomatisch abgebildet – bitte in der Planung selbst mitrechnen."
+                        text: "Seminarfach kannst du in der App erfassen (Thema, Teilnoten, Abgabe). Die zweite Fremdsprache musst du weiterhin selbst mitdenken."
+                    )
+                }
+            }
+            SettingsSectionBox {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(highlighted("Seminarfach nach FOBOSO"))
+                        .font(.headline)
+                    infoRow(
+                        title: "Aufbau",
+                        text: "Blockphase nach der Fachabiturprüfung (mind. 60 betreute Stunden), Themenfestlegung bis zum Ende der Blockphase, Seminarphase mit mindestens einer Zwischenpräsentation oder einem Exposé."
+                    )
+                    infoRow(
+                        title: "Bewertung",
+                        text: "Individuelle Leistung und Präsentation je einfach, Seminararbeit doppelt. 0 Punkte in einer Teilleistung ⇒ Seminar gesamt 0 Punkte und keine Zulassung zur Abschlussprüfung. Rückgabe der Arbeit spätestens 4 Wochen vor der schriftlichen Prüfung."
+                    )
+                    infoRow(
+                        title: "Gruppenbildung",
+                        text: "Bis zu 15 Personen pro Seminargruppe; FOS- und BOS-Schülerinnen und -Schüler können gemeinsam teilnehmen."
+                    )
+                    infoRow(
+                        title: "Termine & Pflichten",
+                        text: "Abgabe der Seminararbeit am Dienstag der zweiten Unterrichtswoche des Schuljahres; Präsentation mit Diskussion danach. Seminare sind Pflichtveranstaltungen (Unfallversicherung), bei externen Partnern gelten Hausordnung, keine Vergütung und Verschwiegenheit."
+                    )
+                    infoRow(
+                        title: "In der App",
+                        text: "Im Bereich Abschluss ▸ Seminarfach kannst du Thema, Termine und Teilnoten erfassen. Die Abschlussberechnung berücksichtigt die doppelte Wertung und die 0-Punkte-Regel."
                     )
                 }
             }
@@ -421,7 +455,7 @@ struct HelpCenterView: View {
                     )
                     infoRow(
                         title: "App-Prüfung aktuell",
-                        text: "Die App prüft Punktesumme, Prüfungsdurchschnitt (≥ 4,0) sowie Fachreferat und Praxisnoten. Doppelwertung bei 0-Punkte-Prüfungen, Seminarfach und zweiter Fremdsprache bitte selbst mitdenken."
+                        text: "Die App prüft Punktesumme, Prüfungsdurchschnitt (≥ 4,0) sowie Fachreferat, Praxisnoten und Seminarfach (doppelte Wertung inkl. 0-Punkte-Regel). Zweite Fremdsprache bitte weiterhin manuell berücksichtigen."
                     )
                 }
             }

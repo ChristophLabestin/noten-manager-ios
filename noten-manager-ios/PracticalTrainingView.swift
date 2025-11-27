@@ -31,8 +31,8 @@ struct PracticalTrainingView: View {
             if let lh = lhs.halfYear, let rh = rhs.halfYear, lh != rh {
                 return lh < rh
             }
-            if let lh = lhs.halfYear, rhs.halfYear == nil { return true }
-            if lhs.halfYear == nil, let rh = rhs.halfYear { return false }
+            if let _ = lhs.halfYear, rhs.halfYear == nil { return true }
+            if lhs.halfYear == nil, let _ = rhs.halfYear { return false }
             return lhs.date < rhs.date
         }
     }
@@ -151,23 +151,20 @@ struct PracticalTrainingView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Schließen") { dismiss() }
                 }
-                ToolbarItemGroup(placement: .keyboard) {
-                    KeyboardNavigationAccessory(
-                        focus: $focusedField,
-                        fields: [.grade, .company, .note],
-                        label: nil,
-                        onDone: { hideKeyboard() }
-                    )
-                }
             }
+            .keyboardNavigationToolbar(
+                focus: $focusedField,
+                fields: [.grade, .company, .note],
+                label: nil,
+                onDone: { hideKeyboard() }
+            )
             .onAppear {
                 syncFromStore()
             }
-            .onChange(of: store.practicalPerformance) { _ in
+            .onChange(of: store.practicalPerformance) { _, _ in
                 syncFromStore()
             }
         }
-        .modifier(KeyboardToolbarInset(height: 64))
     }
 
     private func label(for entry: PracticalGradeEntry) -> String {

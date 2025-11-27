@@ -11,6 +11,7 @@ struct OfflineSnapshot: Codable {
     let subjects: [Subject]
     let gradesBySubject: [String: [GradeWithId]]
     let fachreferat: Fachreferat?
+    let seminarPerformance: SeminarPerformance?
     let practicalPerformance: PracticalPerformance?
     let homeworks: [Homework]
     let exams: [Exam]
@@ -40,6 +41,7 @@ struct OfflineSnapshot: Codable {
     let standardRemindersEnabled: Bool?
     let pendingGrades: [PendingGrade]
     let pendingFachreferat: PendingFachreferat?
+    let pendingSeminar: PendingSeminarPerformance?
 }
 
 @MainActor
@@ -141,7 +143,7 @@ final class OfflineModeManager: ObservableObject {
     }
 
     func saveSnapshot(from store: GradesStore, userId: String) async {
-        let snapshot = await store.makeOfflineSnapshot(userId: userId)
+        let snapshot = store.makeOfflineSnapshot(userId: userId)
         await persist(snapshot: snapshot)
     }
 

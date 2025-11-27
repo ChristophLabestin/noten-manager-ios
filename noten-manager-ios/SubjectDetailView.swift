@@ -187,7 +187,8 @@ struct SubjectDetailView: View {
     private var animationsOn: Bool { store.animationsEnabled }
 
     private var subjectExams: [Exam] {
-        store.allExams.filter { matchesSubject(name: $0.subjectName) }
+        store.allExams
+            .filter { matchesSubject(name: $0.subjectName) && !$0.isCompleted }
             .sorted { $0.date < $1.date }
     }
 
@@ -620,18 +621,12 @@ struct SubjectDetailView: View {
                 .environmentObject(store)
         }
         .keyboardDismissToolbar()
-        .background(
-            Group {
-                NavigationLink(
-                    destination: AppSettingsView().environmentObject(store),
-                    isActive: $navigateToSettings
-                ) { EmptyView() }
-                NavigationLink(
-                    destination: AbiturExamView().environmentObject(store),
-                    isActive: $navigateToFinal
-                ) { EmptyView() }
-            }
-        )
+        .navigationDestination(isPresented: $navigateToSettings) {
+            AppSettingsView().environmentObject(store)
+        }
+        .navigationDestination(isPresented: $navigateToFinal) {
+            AbiturExamView().environmentObject(store)
+        }
         // Nur den aktuellen Fachnamen an den Container melden
         .preference(key: QuickAddSubjectPreferenceKey.self, value: currentSubjectName)
     }
@@ -664,6 +659,8 @@ struct SubjectDetailView: View {
     @ViewBuilder
     private func examRow(_ exam: Exam, onAddGrade: @escaping () -> Void) -> some View {
         let now = Date()
+        let canMarkCompleted = !exam.isCompleted && exam.date <= now
+        let checkmarkSize: CGFloat = 18
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(exam.title.isEmpty ? "Klausur" : exam.title)
@@ -681,6 +678,18 @@ struct SubjectDetailView: View {
             }
             Spacer()
             HStack(spacing: 8) {
+                if canMarkCompleted {
+                    Button {
+                        Task { await markExamCompleted(exam) }
+                    } label: {
+                        Image(systemName: "checkmark.circle")
+                            .foregroundStyle(.primary)
+                            .font(.system(size: checkmarkSize, weight: .semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Als erledigt markieren")
+                }
+
                 Button {
                     onAddGrade()
                 } label: {
@@ -957,6 +966,14 @@ private func statusBadge(_ text: String, color: Color) -> some View {
             await store.setUserCompletedForSharedHomework(homeworkId: homework.id, completed: !homework.isCompleted, groupId: homework.groupId)
         } else {
             await store.setHomeworkCompleted(id: homework.id, completed: !homework.isCompleted)
+        }
+    }
+
+    private func markExamCompleted(_ exam: Exam) async {
+        if exam.isShared {
+            await store.setUserCompletedForSharedExam(examId: exam.id, completed: true, groupId: exam.groupId)
+        } else {
+            await store.setExamCompleted(id: exam.id, completed: true)
         }
     }
 

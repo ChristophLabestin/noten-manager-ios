@@ -135,17 +135,15 @@ struct AddFachreferatView: View {
                     }
                     .disabled(!canSave || isSaving)
                 }
-                ToolbarItemGroup(placement: .keyboard) {
-                    KeyboardNavigationAccessory(
-                        focus: $focusedField,
-                        fields: [.grade, .note],
-                        label: nil,
-                        onDone: { hideKeyboard() }
-                    )
-                }
             }
             .scrollDismissesKeyboard(.interactively)
                 .hideKeyboardOnTap()
+                .keyboardNavigationToolbar(
+                    focus: $focusedField,
+                    fields: [.grade, .note],
+                    label: nil,
+                    onDone: { hideKeyboard() }
+                )
                 .onAppear {
                     if subjectName.isEmpty {
                         if let pre = preselectedSubjectName,
@@ -172,7 +170,6 @@ struct AddFachreferatView: View {
                 Text("Diese Fachreferat-Note wird dauerhaft gelöscht.")
             }
         }
-        .modifier(KeyboardToolbarInset(height: 64))
     }
 
     private func save() async {

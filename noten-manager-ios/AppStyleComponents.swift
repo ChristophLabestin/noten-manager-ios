@@ -53,8 +53,8 @@ extension Color {
         Color(
             uiColor: UIColor { trait in
                 trait.userInterfaceStyle == .dark
-                ? .systemGray4
-                : .systemGray5
+                ? .secondarySystemFill
+                : .systemGray6
             }
         )
     }

@@ -1,5 +1,5 @@
 import Foundation
-import UserNotifications
+@preconcurrency import UserNotifications
 import FirebaseAuth
 import FirebaseFirestore
 
@@ -10,30 +10,31 @@ enum ExamNotificationManager {
     static let actionSnoozeIdentifier = "EXAM_SNOOZE_1H"
 
     static func configureCategories() {
-        let done = UNNotificationAction(
-            identifier: actionMarkDoneIdentifier,
-            title: "Als erledigt markieren",
-            options: [.authenticationRequired]
-        )
-        let snooze = UNNotificationAction(
-            identifier: actionSnoozeIdentifier,
-            title: "In 1 Stunde erinnern",
-            options: []
-        )
-        let category = UNNotificationCategory(
-            identifier: categoryIdentifier,
-            actions: [done, snooze],
-            intentIdentifiers: [],
-            options: []
-        )
-        let sharedCategory = UNNotificationCategory(
-            identifier: sharedCategoryIdentifier,
-            actions: [snooze],
-            intentIdentifiers: [],
-            options: []
-        )
-        let center = UNUserNotificationCenter.current()
-        center.getNotificationCategories { existing in
+        Task {
+            let done = UNNotificationAction(
+                identifier: actionMarkDoneIdentifier,
+                title: "Als erledigt markieren",
+                options: [.authenticationRequired]
+            )
+            let snooze = UNNotificationAction(
+                identifier: actionSnoozeIdentifier,
+                title: "In 1 Stunde erinnern",
+                options: []
+            )
+            let category = UNNotificationCategory(
+                identifier: categoryIdentifier,
+                actions: [done, snooze],
+                intentIdentifiers: [],
+                options: []
+            )
+            let sharedCategory = UNNotificationCategory(
+                identifier: sharedCategoryIdentifier,
+                actions: [snooze],
+                intentIdentifiers: [],
+                options: []
+            )
+            let center = UNUserNotificationCenter.current()
+            let existing = await center.notificationCategories()
             var all = existing
             all.insert(category)
             all.insert(sharedCategory)
@@ -42,12 +43,11 @@ enum ExamNotificationManager {
     }
 
     static func requestAuthorizationIfNeeded() {
-        let center = UNUserNotificationCenter.current()
-        center.getNotificationSettings { settings in
+        Task {
+            let center = UNUserNotificationCenter.current()
+            let settings = await center.notificationSettings()
             if settings.authorizationStatus == .notDetermined {
-                center.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in
-                    // Ergebnis wird still ignoriert
-                }
+                _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
             }
         }
     }
@@ -60,8 +60,9 @@ enum ExamNotificationManager {
         configureCategories()
         requestAuthorizationIfNeeded()
 
-        let center = UNUserNotificationCenter.current()
-        center.getPendingNotificationRequests { existing in
+        Task {
+            let center = UNUserNotificationCenter.current()
+            let existing = await center.pendingNotificationRequests()
             let examIds = existing
                 .map(\.identifier)
                 .filter { $0.hasPrefix("exam_") && !$0.contains("_snooze_") }
@@ -100,7 +101,7 @@ enum ExamNotificationManager {
                         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
                         let identifier = "exam_custom_\(exam.id)"
                         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
-                        center.add(request, withCompletionHandler: nil)
+                        try? await center.add(request)
                     }
                 } else {
                     // Eigene Klausuren: Standardlogik (Tag vorher + zusätzliche Erinnerung)
@@ -125,7 +126,7 @@ enum ExamNotificationManager {
                         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
                         let identifier = "exam_due_\(exam.id)"
                         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
-                        center.add(request, withCompletionHandler: nil)
+                        try? await center.add(request)
                     }
 
                     if let reminderAt = exam.reminderAt,
@@ -148,7 +149,7 @@ enum ExamNotificationManager {
                         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
                         let identifier = "exam_custom_\(exam.id)"
                         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
-                        center.add(request, withCompletionHandler: nil)
+                        try? await center.add(request)
                     }
                 }
             }
@@ -229,7 +230,9 @@ enum ExamNotificationManager {
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 3600, repeats: false)
         let requestId = "exam_snooze_\(id)"
         let request = UNNotificationRequest(identifier: requestId, content: newContent, trigger: trigger)
-        UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
+        Task {
+            try? await UNUserNotificationCenter.current().add(request)
+        }
     }
 
     private static func reminderDate(before date: Date) -> Date? {

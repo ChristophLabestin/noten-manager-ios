@@ -158,7 +158,7 @@ struct AuthView: View {
         .sheet(isPresented: $showResetSheet) {
             resetSheet
         }
-        .onChange(of: isLoginTab) { _ in
+        .onChange(of: isLoginTab) { _, _ in
             authManager.errorMessage = nil
             loginFailedAttempts = 0
             activeField = nil
@@ -170,7 +170,7 @@ struct AuthView: View {
             let lastId = offlineManager.lastLoginUserId ?? offlineManager.cachedSnapshot?.userId
             enableBiometricLogin = biometricManager.isEnabled(for: lastId)
         }
-        .onChange(of: authManager.isAuthenticated) { isAuth in
+        .onChange(of: authManager.isAuthenticated) { _, isAuth in
             if isAuth && applyBiometricAfterLogin {
                 let uid = authManager.currentUser?.uid ?? offlineManager.lastLoginUserId ?? offlineManager.cachedSnapshot?.userId
                 biometricManager.setActiveUser(id: uid)
@@ -425,7 +425,8 @@ struct AuthView: View {
                 accent: accentPrimary,
                 field: .registerPassword,
                 focus: $activeField,
-                allowsReveal: true
+                allowsReveal: true,
+                textContentType: .newPassword
             )
 
             InputField(
@@ -440,7 +441,8 @@ struct AuthView: View {
                 accent: accentPrimary,
                 field: .registerConfirm,
                 focus: $activeField,
-                allowsReveal: true
+                allowsReveal: true,
+                textContentType: .newPassword
             )
 
             PrimaryButton(
@@ -708,6 +710,7 @@ private struct InputField: View {
     let field: AuthField
     let focus: FocusState<AuthField?>.Binding
     let allowsReveal: Bool
+    let textContentType: UITextContentType?
 
     @State private var isRevealed: Bool = false
 
@@ -732,10 +735,10 @@ private struct InputField: View {
                 Group {
                     if isSecure && !isRevealed {
                         SecureField(placeholder, text: $text)
-                            .textContentType(.password)
+                            .textContentType(resolvedContentType ?? .password)
                     } else {
                         TextField(placeholder, text: $text)
-                            .textContentType(.emailAddress)
+                            .textContentType(resolvedContentType)
                             .keyboardType(title.lowercased().contains("mail") ? .emailAddress : .default)
                     }
                 }
@@ -787,6 +790,16 @@ private struct InputField: View {
         isFocused ? accent : labelColor.opacity(0.7)
     }
 
+    private var resolvedContentType: UITextContentType? {
+        if let explicit = textContentType {
+            return explicit
+        }
+        if title.lowercased().contains("mail") {
+            return .emailAddress
+        }
+        return nil
+    }
+
     init(
         title: String,
         placeholder: String,
@@ -799,7 +812,8 @@ private struct InputField: View {
         accent: Color,
         field: AuthField,
         focus: FocusState<AuthField?>.Binding,
-        allowsReveal: Bool = false
+        allowsReveal: Bool = false,
+        textContentType: UITextContentType? = nil
     ) {
         self.title = title
         self.placeholder = placeholder
@@ -813,6 +827,7 @@ private struct InputField: View {
         self.field = field
         self.focus = focus
         self.allowsReveal = allowsReveal
+        self.textContentType = textContentType
     }
 }
 

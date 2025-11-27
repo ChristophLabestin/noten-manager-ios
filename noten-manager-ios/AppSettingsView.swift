@@ -181,6 +181,19 @@ struct AppSettingsView: View {
         return value.range(of: pattern, options: .regularExpression) != nil
     }
 
+    private var externalAuthProvider: String? {
+        guard let user = Auth.auth().currentUser else { return nil }
+        if user.providerData.contains(where: { $0.providerID == "apple.com" }) {
+            return "Apple"
+        }
+        if user.providerData.contains(where: { $0.providerID == "google.com" }) {
+            return "Google"
+        }
+        return nil
+    }
+
+    private var isExternalAuthAccount: Bool { externalAuthProvider != nil }
+
     private var headerCard: some View {
         SettingsCard(
             title: "Einstellungen",
@@ -284,12 +297,6 @@ struct AppSettingsView: View {
                         infoCard
                             .softFadeIn(enabled: animationsOn, delay: 0.38, offset: 12)
 
-                        NavigationLink(
-                            destination: AbiturExamView().environmentObject(store),
-                            isActive: $navigateToFinal
-                        ) { EmptyView() }
-                        .frame(width: 0, height: 0)
-                        .hidden()
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
@@ -297,7 +304,7 @@ struct AppSettingsView: View {
                 .onAppear {
                     maybeScrollToAccount(proxy: proxy)
                 }
-                .onChange(of: scrollToAccount) { _ in
+                .onChange(of: scrollToAccount) { _, _ in
                     maybeScrollToAccount(proxy: proxy)
                 }
             }
@@ -308,6 +315,9 @@ struct AppSettingsView: View {
             .hideKeyboardOnTap()
             .navigationTitle("Einstellungen")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(isPresented: $navigateToFinal) {
+                AbiturExamView().environmentObject(store)
+            }
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     VStack(spacing: 2) {
@@ -461,7 +471,13 @@ struct AppSettingsView: View {
                             Button {
                                 Task { await saveName() }
                             } label: {
-                                if isSavingName { ProgressView() } else { Text("Name speichern") }
+                                if isSavingName {
+                                    ProgressView()
+                                        .frame(maxWidth: .infinity)
+                                } else {
+                                    Text("Name speichern")
+                                        .frame(maxWidth: .infinity)
+                                }
                             }
                             .buttonStyle(.borderedProminent)
                             .tint(.cyan)
@@ -1270,7 +1286,7 @@ struct AppSettingsView: View {
             systemImage: "person.crop.circle.badge.xmark",
             accent: .gray
         ) {
-            if let verified = isEmailVerified, verified == false {
+            if !isExternalAuthAccount, let verified = isEmailVerified, verified == false {
                 SettingsSectionBox {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("E-Mail nicht bestätigt")
@@ -1281,7 +1297,13 @@ struct AppSettingsView: View {
                         Button {
                             Task { await resendVerificationEmail() }
                         } label: {
-                            if isSendingVerification { ProgressView() } else { Text("Bestätigungs-E-Mail erneut senden") }
+                            if isSendingVerification {
+                                ProgressView()
+                                    .frame(maxWidth: .infinity)
+                            } else {
+                                Text("Bestätigungs-E-Mail erneut senden")
+                                    .frame(maxWidth: .infinity)
+                            }
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.orange)
@@ -1300,9 +1322,15 @@ struct AppSettingsView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Account-Daten")
                         .font(sectionHeaderFont)
-                    Text("Passe deine Anmeldedaten an. Zur Sicherheit wird dein aktuelles Passwort benötigt.")
-                        .font(helperFont)
-                        .foregroundStyle(.secondary)
+                    if isExternalAuthAccount, let provider = externalAuthProvider {
+                        Text("Dein Konto wird über \(provider) verwaltet. E-Mail und Passwort können hier nicht geändert werden.")
+                            .font(helperFont)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Passe deine Anmeldedaten an. Zur Sicherheit wird dein aktuelles Passwort benötigt.")
+                            .font(helperFont)
+                            .foregroundStyle(.secondary)
+                    }
                     VStack(spacing: 8) {
                         Button {
                             resetChangeEmailForm()
@@ -1313,6 +1341,8 @@ struct AppSettingsView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.blue)
+                        .disabled(isExternalAuthAccount)
+                        .opacity(isExternalAuthAccount ? 0.5 : 1)
 
                         Button {
                             resetChangePasswordForm()
@@ -1323,6 +1353,8 @@ struct AppSettingsView: View {
                         }
                         .buttonStyle(.bordered)
                         .tint(.indigo)
+                        .disabled(isExternalAuthAccount)
+                        .opacity(isExternalAuthAccount ? 0.5 : 1)
                     }
                 }
             }
@@ -1442,8 +1474,11 @@ struct AppSettingsView: View {
                     Text("Starte den Einrichtungs-Assistenten erneut, um Schuljahr, Gruppen und Fächer neu zu setzen. Bestehende Daten bleiben erhalten.")
                         .font(helperFont)
                         .foregroundStyle(.secondary)
-                    Button("Onboarding neu starten") {
+                    Button {
                         Task { await store.restartOnboarding() }
+                    } label: {
+                        Text("Onboarding neu starten")
+                            .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.teal)
@@ -1493,6 +1528,13 @@ struct AppSettingsView: View {
     }
 
     private func refreshEmailVerification() async {
+        if isExternalAuthAccount {
+            await MainActor.run {
+                isEmailVerified = true
+                verificationMessage = nil
+            }
+            return
+        }
         guard let user = Auth.auth().currentUser else {
             await MainActor.run { isEmailVerified = nil }
             return
@@ -1681,16 +1723,15 @@ struct AppSettingsView: View {
         do {
             let credential = EmailAuthProvider.credential(withEmail: currentEmail, password: trimmedPassword)
             try await user.reauthenticate(with: credential)
-            try await user.updateEmail(to: trimmedEmail)
+            try await user.sendEmailVerification(beforeUpdatingEmail: trimmedEmail)
             try await Firestore.firestore()
                 .collection("users")
                 .document(user.uid)
                 .setData(["email": trimmedEmail], merge: true)
-            try? await user.sendEmailVerification()
             await refreshEmailVerification()
             await MainActor.run {
                 isUpdatingEmail = false
-                changeEmailMessage = "E-Mail aktualisiert. Bitte bestätige die neue Adresse."
+                changeEmailMessage = "Bestätigungslink gesendet. Bitte bestätige die neue E-Mail-Adresse."
                 changeEmailCurrentPassword = ""
                 changeEmailNewEmail = ""
                 changeEmailConfirmEmail = ""
@@ -2352,7 +2393,7 @@ private struct SlideToConfirmView: View {
             .onAppear {
                 hintPhase = true
             }
-            .onChange(of: isConfirmed) { newValue in
+            .onChange(of: isConfirmed) { _, newValue in
                 if !newValue {
                     dragOffset = 0
                     isDragging = false

@@ -62,7 +62,7 @@ struct AddSubjectView: View {
                             SettingsSectionBox {
                                 VStack(alignment: .leading, spacing: 8) {
                                     Toggle("Wahlfach / nicht einbringbar", isOn: $isElective)
-                                        .onChange(of: isElective) { newVal in
+                                        .onChange(of: isElective) { _, newVal in
                                             if newVal { type = 0 }
                                         }
                                     Text("Wahlfächer fließen nicht in die Abschlussnote ein. Für Sport/Musik bitte als Wahlfach markieren.")
@@ -97,19 +97,16 @@ struct AddSubjectView: View {
                     }
                     .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
                 }
-                ToolbarItemGroup(placement: .keyboard) {
-                    KeyboardNavigationAccessory(
-                        focus: $focusedField,
-                        fields: [.name],
-                        label: nil,
-                        onDone: { hideKeyboard() }
-                    )
-                }
             }
             .scrollDismissesKeyboard(.interactively)
             .hideKeyboardOnTap()
+            .keyboardNavigationToolbar(
+                focus: $focusedField,
+                fields: [.name],
+                label: nil,
+                onDone: { hideKeyboard() }
+            )
         }
-        .modifier(KeyboardToolbarInset(height: 64))
     }
 
     private func save() async {

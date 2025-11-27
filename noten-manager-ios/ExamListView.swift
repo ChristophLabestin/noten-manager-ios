@@ -52,6 +52,10 @@ struct ExamListView: View {
         Auth.auth().currentUser?.uid
     }
 
+    private func resolvedSubjectName(for exam: Exam) -> String {
+        store.resolveLocalSubjectNameForExam(exam) ?? exam.subjectName
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -133,6 +137,8 @@ struct ExamListView: View {
         let attentionTag = isOverdueAttention ? "Wartet auf Note" : nil
         let attentionColor: Color = .red
         let showReminder = !exam.isCompleted && exam.date > now
+        let canMarkCompleted = !exam.isCompleted && exam.date <= now
+        let checkmarkSize: CGFloat = 18
 
         HStack {
             VStack(alignment: .leading, spacing: 4) {
@@ -144,8 +150,9 @@ struct ExamListView: View {
                         attentionBadge(tag, color: attentionColor)
                     }
                 }
-                if !exam.subjectName.isEmpty {
-                    Text(exam.subjectName)
+                let displayName = resolvedSubjectName(for: exam)
+                if !displayName.isEmpty {
+                    Text(displayName)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -201,16 +208,26 @@ struct ExamListView: View {
                     }
                 }
 
-                if !exam.isCompleted {
+                if canMarkCompleted {
                     Button {
-                        examForNewGrade = exam
+                        Task { await markExamCompleted(exam) }
                     } label: {
-                        Image(systemName: "text.badge.plus")
-                            .font(.system(size: 16, weight: .regular))
+                        Image(systemName: "checkmark.circle")
+                            .font(.system(size: checkmarkSize, weight: .semibold))
+                            .foregroundStyle(.primary)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Note hinzufügen")
+                    .accessibilityLabel("Als erledigt markieren")
                 }
+
+                Button {
+                    examForNewGrade = exam
+                } label: {
+                    Image(systemName: "text.badge.plus")
+                        .font(.system(size: 16, weight: .regular))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Note hinzufügen")
 
                 Button {
                     editingExam = exam
@@ -249,13 +266,17 @@ struct ExamListView: View {
             .font(.caption2.weight(.semibold))
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(color.opacity(0.12))
-            .foregroundStyle(color)
-            .clipShape(Capsule())
+        .background(color.opacity(0.12))
+        .foregroundStyle(color)
+        .clipShape(Capsule())
     }
 
-    private func markCompleted(_ exam: Exam) async {
-        await store.setExamCompleted(id: exam.id, completed: true)
+    private func markExamCompleted(_ exam: Exam) async {
+        if exam.isShared {
+            await store.setUserCompletedForSharedExam(examId: exam.id, completed: true, groupId: exam.groupId)
+        } else {
+            await store.setExamCompleted(id: exam.id, completed: true)
+        }
     }
 
     private func toggleReminder(_ exam: Exam) async {
@@ -372,5 +393,40 @@ struct ExamDetailSheet: View {
         case 1: return "Kurzarbeit"
         default: return "Mündlich / EX"
         }
+    }
+}
+
+struct PersonalNoteEditor: View {
+    let title: String
+    let initialText: String
+    let onSave: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var text: String = ""
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 12) {
+                TextEditor(text: $text)
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .background(Color.formInputBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .frame(maxHeight: .infinity, alignment: .topLeading)
+            }
+            .padding(16)
+            .navigationTitle(title)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Speichern") {
+                        onSave(text)
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .onAppear { text = initialText }
     }
 }

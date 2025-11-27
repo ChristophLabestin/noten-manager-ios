@@ -19,6 +19,7 @@ struct AbiturExamView: View {
     @State private var navigateToSettings: Bool = false
 
     private var hasFachreferat: Bool { store.fachreferat != nil }
+    private var hasSeminarRequirement: Bool { (store.gradeYear ?? 12) >= 13 }
 
     private var examSubjects: [Subject] {
         store.sortedSubjectsForDisplay(store.subjects.filter { $0.examSubject == true })
@@ -104,7 +105,7 @@ struct AbiturExamView: View {
     }
 
     private var totalYearPoints: Double {
-        halfYearSummary.totalPoints + (store.fachreferat?.grade ?? 0)
+        halfYearSummary.totalPoints + (store.fachreferat?.grade ?? 0) + seminarPointsDouble
     }
 
     private var oralExamCount: Int {
@@ -127,7 +128,7 @@ struct AbiturExamView: View {
     }
 
     private var maxYearPoints: Int {
-        halfYearSummary.count * 15 + (hasFachreferat ? 15 : 0)
+        halfYearSummary.count * 15 + (hasFachreferat ? 15 : 0) + (hasSeminarRequirement ? 30 : 0)
     }
     private var maxExamPoints: Int {
         Int(examWeightFactor * Double(examSubjects.count) * 15)
@@ -137,6 +138,23 @@ struct AbiturExamView: View {
     private var maxTotalPoints: Int { maxYearPoints + maxExamPoints }
 
     private var animationsOn: Bool { store.animationsEnabled }
+
+    private var seminarFinalPoints: Double? {
+        guard let sem = store.seminarPerformance else { return nil }
+        let zero = [sem.individualPoints, sem.paperPoints, sem.presentationPoints].contains { $0 == 0 }
+        if zero { return 0 }
+        guard let individual = sem.individualPoints,
+              let paper = sem.paperPoints,
+              let presentation = sem.presentationPoints else { return nil }
+        let raw = (individual + presentation + (2 * paper)) / 4.0
+        let rounded = raw.rounded(.toNearestOrAwayFromZero)
+        return max(0, min(15, rounded))
+    }
+
+    private var seminarPointsDouble: Double {
+        guard hasSeminarRequirement, let value = seminarFinalPoints else { return 0 }
+        return value * 2
+    }
 
     // MARK: - Extracted views
 
@@ -480,10 +498,10 @@ struct AbiturExamView: View {
         .onAppear {
             Task { await loadExamState() }
         }
-        .onChange(of: store.subjects) { _ in
+        .onChange(of: store.subjects) { _, _ in
             Task { await loadExamState() }
         }
-        .onChange(of: store.encryptionKey) { _ in
+        .onChange(of: store.encryptionKey) { _, _ in
             Task { await loadExamState() }
         }
         .background(
@@ -660,11 +678,9 @@ private struct NavigationLinksBackground: View {
     @Binding var navigateToSettings: Bool
 
     var body: some View {
-        Group {
-            NavigationLink(
-                destination: AppSettingsView().environmentObject(store),
-                isActive: $navigateToSettings
-            ) { EmptyView() }
-        }
+        Color.clear
+            .navigationDestination(isPresented: $navigateToSettings) {
+                AppSettingsView().environmentObject(store)
+            }
     }
 }

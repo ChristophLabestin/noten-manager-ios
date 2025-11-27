@@ -188,17 +188,15 @@ struct AddHomeworkView: View {
                     }
                     .disabled(!canSave || isSaving || subjects.isEmpty)
                 }
-                ToolbarItemGroup(placement: .keyboard) {
-                    KeyboardNavigationAccessory(
-                        focus: $focusedField,
-                        fields: [.title],
-                        label: nil,
-                        onDone: { hideKeyboard() }
-                    )
-                }
             }
             .scrollDismissesKeyboard(.interactively)
             .hideKeyboardOnTap()
+            .keyboardNavigationToolbar(
+                focus: $focusedField,
+                fields: [.title],
+                label: nil,
+                onDone: { hideKeyboard() }
+            )
             .onAppear {
                 if subjectName.isEmpty {
                     if let pre = preselectedSubjectName,
@@ -214,7 +212,6 @@ struct AddHomeworkView: View {
                 selectedGroupId = store.groupIds.first
             }
         }
-        .modifier(KeyboardToolbarInset(height: 64))
     }
 
     private func save() async {

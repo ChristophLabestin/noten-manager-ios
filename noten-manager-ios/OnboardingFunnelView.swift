@@ -2,7 +2,7 @@ import SwiftUI
 
 struct OnboardingFunnelView: View {
     enum Step: Int {
-        case schoolYear, groups, subjects
+        case legacy, schoolYear, groups, subjects
     }
 
     private struct PendingSubject: Identifiable, Hashable {
@@ -12,7 +12,22 @@ struct OnboardingFunnelView: View {
         let isElective: Bool
     }
 
+    private struct GroupSubjectSource: Hashable {
+        let groupId: String
+        let subjectId: String
+        let type: Int?
+        let alias: String?
+    }
+
+    private struct PendingGroupSubject: Identifiable, Hashable {
+        let id = UUID()
+        let name: String
+        var sources: [GroupSubjectSource]
+        var selected: Bool = true
+    }
+
     @EnvironmentObject var store: GradesStore
+    @EnvironmentObject private var authManager: AuthManager
     @Environment(\.dismiss) private var dismiss
 
     let onFinished: () -> Void
@@ -48,6 +63,7 @@ struct OnboardingFunnelView: View {
     @State private var prevYearSubjects: [Subject] = []
     @State private var selectedPrevSubjects: Set<String> = []
     @State private var isLoadingPrevSubjects: Bool = false
+    @State private var pendingGroupCodes: Set<String> = []
     @State private var pendingSchoolYearId: String?
     @State private var pendingSchoolType: SchoolType = .bos
     @State private var pendingGradeYear: Int = 0
@@ -57,16 +73,38 @@ struct OnboardingFunnelView: View {
     @State private var manualType: Int = 1
     @State private var manualIsElective: Bool = false
     @State private var manualError: String?
+    @State private var groupSubjectCandidates: [PendingGroupSubject] = []
 
     @State private var finishError: String?
     @State private var isFinishing: Bool = false
     @State private var showAddSubjectSheet: Bool = false
+    @State private var removingSubjectNames: Set<String> = []
+    @State private var isHandlingLegacyChoice: Bool = false
+
+    private var accentPrimary: Color {
+        store.theme == "feminine" ? Color(hex: "#ec4899") : .indigo
+    }
+    private var primaryText: Color {
+        store.darkMode ? .white : .primary
+    }
+    private var secondaryText: Color {
+        store.darkMode ? .white.opacity(0.75) : .secondary
+    }
+    private var tileBackground: Color {
+        store.darkMode ? Color.white.opacity(0.08) : Color.white
+    }
+    private var tileStroke: Color {
+        accentPrimary.opacity(store.darkMode ? 0.25 : 0.15)
+    }
 
     private var hasSubjects: Bool {
         if isSchoolYearChange {
             return !pendingPrevSubjectNames.isEmpty || !pendingManualSubjects.isEmpty
         }
-        return !store.subjects.isEmpty
+        if store.legacyImportSelected == true && !store.legacySelectedSubjects.isEmpty {
+            return true
+        }
+        return !store.subjects.isEmpty || stagedGroupSubjectCount > 0 || !pendingManualSubjects.isEmpty
     }
 
     private var hasJoinedGroups: Bool {
@@ -75,9 +113,14 @@ struct OnboardingFunnelView: View {
 
     private var uniqueGroupSubjectCount: Int {
         var names: Set<String> = []
+        let existing = Set(store.subjects.map { $0.name.lowercased() })
         for gid in store.groupIds {
             for subj in store.groupSubjectsByGroup[gid] ?? [] {
-                names.insert(subj.name)
+                let trimmed = subj.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { continue }
+                let lower = trimmed.lowercased()
+                guard !existing.contains(lower) else { continue }
+                names.insert(lower)
             }
         }
         return names.count
@@ -87,33 +130,387 @@ struct OnboardingFunnelView: View {
         Array(pendingPrevSubjectNames).sorted()
     }
 
+    private var stagedGroupSubjectCount: Int {
+        selectedGroupSubjectNames.count
+    }
+
+    private var selectedGroupSubjectNames: [String] {
+        groupSubjectCandidates.filter { $0.selected }.map { $0.name }
+    }
+
+    private var legacyAvailableSubjectNames: [String] {
+        let summaryNames = store.legacyMigrationSummary?.subjectNames ?? []
+        let trimmedSummary = summaryNames
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let names = Set(trimmedSummary).union(store.legacySelectedSubjects)
+        return names.sorted { lhs, rhs in
+            lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
+        }
+    }
+
+    private var stagingMode: Bool {
+        store.onboardingRequired && store.activeSchoolYearId == nil && !isSchoolYearChange
+    }
+
+    private var legacyStepRequired: Bool {
+        store.legacyMigrationSummary != nil
+    }
+
+    private var totalSteps: Int {
+        legacyStepRequired ? 4 : 3
+    }
+
+    private var currentStepNumber: Int {
+        switch currentStep {
+        case .legacy: return 1
+        case .schoolYear: return legacyStepRequired ? 2 : 1
+        case .groups: return legacyStepRequired ? 3 : 2
+        case .subjects: return legacyStepRequired ? 4 : 3
+        }
+    }
+
+    @ViewBuilder
+    private var contentForCurrentStepCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            contentForCurrentStep
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(tileBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(tileStroke, lineWidth: 1)
+                )
+        )
+    }
+
+    @ViewBuilder
+    private var contentForCurrentStepContainer: some View {
+        if currentStep == .subjects {
+            contentForCurrentStep
+        } else {
+            contentForCurrentStepCard
+        }
+    }
+
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    header
-                    stepIndicator
-                    contentForCurrentStep
+            ZStack {
+                ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine")
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        header
+                        stepIndicator
+                        if store.legacyCheckPending {
+                            VStack(spacing: 12) {
+                                ProgressView()
+                                Text("Daten werden abgerufen …")
+                                    .font(.subheadline)
+                                    .foregroundStyle(secondaryText)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 200, alignment: .center)
+                    } else if legacyStepRequired && currentStep == .legacy, let summary = store.legacyMigrationSummary {
+                        legacyDetectedSection(summary: summary)
+                    } else {
+                        contentForCurrentStepContainer
+                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 24)
                 .padding(.bottom, 40)
+                }
             }
-            .background(Color(.systemGroupedBackground).ignoresSafeArea())
             .safeAreaInset(edge: .bottom) {
-                Color.clear.frame(height: 12)
+                VStack(spacing: 10) {
+                    Color.clear.frame(height: 12)
+                    Button {
+                        authManager.signOut()
+                        dismiss()
+                    } label: {
+                        Text("Abmelden")
+                            .font(.footnote.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.red)
+                    .background(tileBackground)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(tileStroke, lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .padding(.horizontal, 20)
+                }
             }
             .scrollDismissesKeyboard(.interactively)
             .hideKeyboardOnTap()
             .navigationBarHidden(true)
-            .onAppear { bootstrapDefaults() }
+            .onAppear {
+                bootstrapDefaults()
+                currentStep = legacyStepRequired ? .legacy : .schoolYear
+            }
             .sheet(isPresented: $showAddSubjectSheet) {
                 AddSubjectView()
                     .environmentObject(store)
             }
         }
+        .onChange(of: store.legacyMigrationSummary) { summary in
+            if summary != nil {
+                currentStep = .legacy
+            }
+        }
         .keyboardDismissToolbar()
         .interactiveDismissDisabled(!isSchoolYearChange)
+        .onChange(of: store.groupSubjectsByGroup) { _ in
+            if currentStep == .subjects && !isSchoolYearChange {
+                prepareGroupSubjectCandidates()
+            }
+        }
+        .onChange(of: store.subjects) { _ in
+            if currentStep == .subjects && !isSchoolYearChange {
+                prepareGroupSubjectCandidates()
+            }
+        }
+        .onChange(of: store.groupIds) { _ in
+            if currentStep != .schoolYear && !isSchoolYearChange {
+                prepareGroupSubjectCandidates()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func legacyDetectedSection(summary: LegacyMigrationSummary) -> some View {
+        VStack(spacing: 18) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(accentPrimary.opacity(store.darkMode ? 0.22 : 0.16))
+                            .frame(width: 48, height: 48)
+                        Image(systemName: "exclamationmark.bubble.fill")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(accentPrimary)
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Daten aus der Web-App erkannt")
+                            .font(.title3.weight(.bold))
+                            .foregroundStyle(primaryText)
+                        Text("Wir haben Inhalte aus der Web-Version gefunden. Wie möchtest du fortfahren?")
+                            .font(.subheadline)
+                            .foregroundStyle(secondaryText)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 6)
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
+                    Image(systemName: "shippingbox.fill")
+                        .foregroundStyle(accentPrimary)
+                    Text("Gefundene Web-Daten")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(primaryText)
+                }
+                statRow(icon: "text.book.closed", title: formattedCount(summary.subjectCount, singular: "Fach", plural: "Fächer"), subtitle: "aus der Web-App")
+                statRow(icon: "number.square", title: formattedCount(summary.gradeCount, singular: "Note", plural: "Noten"), subtitle: "bestehende Bewertungen")
+                if let gradeYear = summary.gradeYear {
+                    statRow(icon: "graduationcap", title: "Klassenstufe \(gradeYear)", subtitle: "aus Web-Einstellungen")
+                }
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(tileBackground)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(tileStroke, lineWidth: 1)
+                    )
+            )
+
+            VStack(spacing: 12) {
+                optionButton(
+                    icon: "arrow.down.doc.fill",
+                    title: "Daten übernehmen",
+                    subtitle: "Importiert deine Web-Fächer und Noten in dieses Schuljahr.",
+                    accent: accentPrimary
+                ) { handleLegacyChoice(keep: true) }
+                optionButton(
+                    icon: "sparkles",
+                    title: "Neu anfangen ohne Web-Daten",
+                    subtitle: "Beginnt frisch in der App. Deine Web-Daten bleiben dort erhalten.",
+                    accent: Color.orange
+                ) { handleLegacyChoice(keep: false) }
+            }
+            .padding(.top, 4)
+        }
+    }
+
+    private func optionButton(icon: String, title: String, subtitle: String, accent: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(accent.opacity(0.18))
+                        .frame(width: 46, height: 46)
+                    Image(systemName: icon)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(accent)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(primaryText)
+                    Text(subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(accent)
+            }
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(tileBackground)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(accent.opacity(0.25), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func statRow(icon: String, title: String, subtitle: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .foregroundStyle(accentPrimary)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(primaryText)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(secondaryText)
+            }
+            Spacer()
+        }
+    }
+
+    private func formattedCount(_ count: Int, singular: String, plural: String) -> String {
+        "\(count) \(count == 1 ? singular : plural)"
+    }
+
+    private func sectionCard(title: String, subtitle: String? = nil, icon: String, accent: Color, badge: String? = nil, @ViewBuilder content: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(accent.opacity(0.14))
+                        .frame(width: 38, height: 38)
+                    Image(systemName: icon)
+                        .foregroundStyle(accent)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(title)
+                            .font(.subheadline.weight(.semibold))
+                        if let badge {
+                            Tag(text: badge, style: .minor)
+                        }
+                    }
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+            }
+            content()
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.formCardBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(accent.opacity(0.15), lineWidth: 1)
+                )
+        )
+    }
+
+    private func selectionRow(title: String, detail: String? = nil, isSelected: Bool, accent: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(isSelected ? accent : Color.secondary)
+                    .imageScale(.large)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .foregroundStyle(primaryText)
+                    if let detail {
+                        Text(detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func stagedSubjectRow(title: String, icon: String, tint: Color, onToggle: @escaping () -> Void) -> some View {
+        Button(action: onToggle) {
+            HStack(spacing: 12) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(tint)
+                    .imageScale(.large)
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(tint.opacity(0.14))
+                        .frame(width: 32, height: 32)
+                    Image(systemName: icon)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(tint)
+                }
+                Text(title)
+                    .foregroundStyle(primaryText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func handleLegacyChoice(keep: Bool) {
+        guard !isHandlingLegacyChoice else { return }
+        isHandlingLegacyChoice = true
+        Task {
+            await store.handleLegacyMigrationChoice(keepWebData: keep)
+            await MainActor.run {
+                isHandlingLegacyChoice = false
+                currentStep = .schoolYear
+                if !keep {
+                    store.legacySelectedSubjects = []
+                }
+            }
+        }
     }
 
     private var header: some View {
@@ -129,20 +526,22 @@ struct OnboardingFunnelView: View {
                             .background(Color(.secondarySystemBackground))
                             .clipShape(Circle())
                     }
-                    .disabled(currentStep == .schoolYear)
-                    Button {
-                        dismiss()
-                        onFinished()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.body.weight(.semibold))
-                            .padding(10)
-                            .background(Color(.secondarySystemBackground))
-                            .clipShape(Circle())
+                    .disabled((!legacyStepRequired && currentStep == .schoolYear) || currentStep == .legacy)
+                    if isSchoolYearChange {
+                        Button {
+                            dismiss()
+                            onFinished()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.body.weight(.semibold))
+                                .padding(10)
+                                .background(Color(.secondarySystemBackground))
+                                .clipShape(Circle())
+                        }
                     }
                 }
                 Spacer()
-                Text("Schritt \(currentStep.rawValue + 1)/3")
+                Text("Schritt \(currentStepNumber)/\(totalSteps)")
                     .font(.footnote.weight(.semibold))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
@@ -152,17 +551,18 @@ struct OnboardingFunnelView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(isSchoolYearChange ? "Schuljahrs-Setup" : "Account einrichten")
                     .font(.title2.weight(.semibold))
+                    .foregroundStyle(primaryText)
                 Text(stepSubtitle)
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(secondaryText)
             }
         }
     }
 
     private var stepIndicator: some View {
         HStack(spacing: 12) {
-            ForEach(0..<3) { idx in
-                let isActive = idx == currentStep.rawValue
+            ForEach(0..<totalSteps, id: \.self) { idx in
+                let isActive = idx == currentStepNumber - 1
                 Circle()
                     .fill(isActive ? Color.blue : Color.gray.opacity(0.35))
                     .frame(width: 10, height: 10)
@@ -174,6 +574,8 @@ struct OnboardingFunnelView: View {
     @ViewBuilder
     private var contentForCurrentStep: some View {
         switch currentStep {
+        case .legacy:
+            EmptyView()
         case .schoolYear:
             schoolYearStep
         case .groups:
@@ -187,11 +589,12 @@ struct OnboardingFunnelView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Schuljahr, Schulart & Jahrgang")
                 .font(.headline)
+                .foregroundStyle(primaryText)
             Text(isSchoolYearChange
                  ? "Richte dein neues Schuljahr ein. Standard ist das kommende Schuljahr."
                  : "Lege zuerst dein aktives Schuljahr fest und wähle deine Jahrgangsstufe.")
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(secondaryText)
 
             VStack(spacing: 12) {
                 TextField("z. B. 2025-26", text: $schoolYearInput)
@@ -392,43 +795,79 @@ struct OnboardingFunnelView: View {
     }
 
     private var subjectsStep: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Fächer hinzufügen")
-                .font(.headline)
-            Text("Am Ende des Setups muss mindestens ein Fach vorhanden sein.")
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Fächer auswählen")
+                .font(.title2.weight(.bold))
+            Text("Übernimm Fächer aus Web oder Gruppen, aus dem Vorjahr oder lege eigene an. Mindestens ein Fach ist nötig.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
-            if hasJoinedGroups && !isSchoolYearChange {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Fächer aus Gruppen übernehmen")
-                                .font(.subheadline.weight(.semibold))
-                            Text(uniqueGroupSubjectCount > 0
-                                 ? "\(uniqueGroupSubjectCount) hinterlegte Fächer gefunden."
-                                 : "Noch keine Fächer in den Gruppen gefunden.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                    }
-
-                    Button {
-                        importGroupSubjects()
-                    } label: {
-                        HStack {
-                            if isImporting {
-                                ProgressView()
-                            } else {
-                                Text("Gruppenfächer kopieren")
+            if store.legacyImportSelected != false,
+               !legacyAvailableSubjectNames.isEmpty {
+                sectionCard(
+                    title: "Web-Fächer",
+                    subtitle: "Gefunden in deiner Web-App",
+                    icon: "shippingbox.fill",
+                    accent: accentPrimary,
+                    badge: store.legacySelectedSubjects.isEmpty ? nil : "\(store.legacySelectedSubjects.count) gewählt"
+                ) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(legacyAvailableSubjectNames, id: \.self) { name in
+                            let isOn = store.legacySelectedSubjects.contains(name)
+                            selectionRow(title: name, isSelected: isOn, accent: accentPrimary) {
+                                toggleLegacySubject(name: name, isOn: !isOn)
                             }
                         }
-                        .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(isImporting)
+                }
+            }
 
+            if hasJoinedGroups && !isSchoolYearChange {
+                sectionCard(
+                    title: "Gruppenfächer",
+                    subtitle: "Übernimm Fächer aus deinen beigetretenen Gruppen.",
+                    icon: "person.3.fill",
+                    accent: .blue,
+                    badge: stagedGroupSubjectCount > 0 ? "\(stagedGroupSubjectCount) markiert" : nil
+                ) {
+                    if groupSubjectCandidates.isEmpty {
+                        Text(uniqueGroupSubjectCount > 0 ? "Lade Fächer aus den Gruppen ..." : "Keine Gruppenfächer gefunden.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        VStack(spacing: 10) {
+                            ForEach(groupSubjectCandidates) { candidate in
+                                selectionRow(
+                                    title: candidate.name,
+                                    detail: candidate.sources.count > 1 ? "\(candidate.sources.count) Gruppen" : nil,
+                                    isSelected: candidate.selected,
+                                    accent: .blue
+                                ) {
+                                    toggleGroupSubjectSelection(id: candidate.id, isOn: !candidate.selected)
+                                }
+                            }
+                        }
+                        if !stagingMode {
+                            Button {
+                                importGroupSubjects()
+                            } label: {
+                                HStack {
+                                    if isImporting {
+                                        ProgressView()
+                                    } else {
+                                        Text("Auswahl übernehmen")
+                                    }
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(isImporting || stagedGroupSubjectCount == 0)
+                        } else {
+                            Text("Auswahl wird beim Abschluss übernommen.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                     if let info = importInfo {
                         Text(info)
                             .font(.footnote)
@@ -443,13 +882,13 @@ struct OnboardingFunnelView: View {
             }
 
             if let prevYear = previousSchoolYearId {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Fächer aus Vorjahr übernehmen")
-                        .font(.subheadline.weight(.semibold))
-                    Text("Wähle Fächer aus \(prevYear) ohne Noten für das neue Schuljahr.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-
+                sectionCard(
+                    title: "Aus Vorjahr übernehmen",
+                    subtitle: "Wähle Fächer aus \(prevYear) ohne Noten.",
+                    icon: "clock.arrow.circlepath",
+                    accent: .orange,
+                    badge: !selectedPrevSubjects.isEmpty ? "\(selectedPrevSubjects.count) gewählt" : nil
+                ) {
                     if isLoadingPrevSubjects {
                         ProgressView().padding(.vertical, 4)
                     } else if prevYearSubjects.isEmpty {
@@ -459,18 +898,13 @@ struct OnboardingFunnelView: View {
                     } else {
                         VStack(alignment: .leading, spacing: 6) {
                             ForEach(prevYearSubjects, id: \.name) { subj in
-                                Toggle(isOn: Binding(
-                                    get: { selectedPrevSubjects.contains(subj.name) },
-                                    set: { val in
-                                        if val { selectedPrevSubjects.insert(subj.name) }
-                                        else { selectedPrevSubjects.remove(subj.name) }
-                                    }
-                                )) {
-                                    Text(subj.name)
+                                let isOn = selectedPrevSubjects.contains(subj.name)
+                                selectionRow(title: subj.name, isSelected: isOn, accent: .orange) {
+                                    if isOn { selectedPrevSubjects.remove(subj.name) }
+                                    else { selectedPrevSubjects.insert(subj.name) }
                                 }
                             }
                         }
-
                         Button {
                             importFromPreviousYear()
                         } label: {
@@ -486,7 +920,6 @@ struct OnboardingFunnelView: View {
                         .buttonStyle(.bordered)
                         .disabled(isImportingPrev || selectedPrevSubjects.isEmpty)
                     }
-
                     if let info = prevImportInfo {
                         Text(info)
                             .font(.footnote)
@@ -500,10 +933,13 @@ struct OnboardingFunnelView: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Fächer manuell anlegen")
-                    .font(.subheadline.weight(.semibold))
-                if isSchoolYearChange {
+            sectionCard(
+                title: "Eigene Fächer",
+                subtitle: isSchoolYearChange || stagingMode ? "Lege Fächer für das neue Schuljahr an." : "Weitere Fächer direkt anlegen.",
+                icon: "pencil.and.outline",
+                accent: .green
+            ) {
+                if isSchoolYearChange || stagingMode {
                     VStack(alignment: .leading, spacing: 8) {
                         TextField("Fachname", text: $manualNameInput)
                             .submitLabel(.done)
@@ -524,14 +960,10 @@ struct OnboardingFunnelView: View {
                                 if val { manualType = 0 }
                             }
 
-                        Text("Wahlfächer fließen nicht in die Abschlussnote ein. Für Sport/Musik bitte als Wahlfach markieren.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-
                         Button("Fach vormerken") {
                             addPendingManualSubject()
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.borderedProminent)
                         .disabled(manualNameInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                         if let manualError {
@@ -540,11 +972,26 @@ struct OnboardingFunnelView: View {
                                 .foregroundStyle(.red)
                         }
                     }
+
+                    if !pendingManualSubjects.isEmpty {
+                        Divider().padding(.vertical, 6)
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(pendingManualSubjects, id: \.id) { subj in
+                                selectionRow(
+                                    title: "\(subj.name)\(subj.isElective ? " (Wahlfach)" : "")",
+                                    isSelected: true,
+                                    accent: .green
+                                ) {
+                                    pendingManualSubjects.removeAll { $0.id == subj.id }
+                                }
+                            }
+                        }
+                    }
                 } else {
                     Button("Fach hinzufügen") {
                         showAddSubjectSheet = true
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.borderedProminent)
 
                     if store.subjects.isEmpty {
                         Text("Noch keine Fächer angelegt.")
@@ -553,45 +1000,57 @@ struct OnboardingFunnelView: View {
                     } else {
                         VStack(alignment: .leading, spacing: 8) {
                             ForEach(store.sortedSubjectsForDisplay(), id: \.name) { subj in
-                                Text(subj.name)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(Color(.secondarySystemBackground))
-                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                                selectionRow(
+                                    title: subj.name,
+                                    isSelected: !removingSubjectNames.contains(subj.name),
+                                    accent: .green
+                                ) {
+                                    if removingSubjectNames.contains(subj.name) { return }
+                                    removeSubject(subj.name)
+                                }
                             }
                         }
                     }
                 }
             }
 
-            if isSchoolYearChange {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Vorgemerkte Fächer")
-                        .font(.subheadline.weight(.semibold))
+            if isSchoolYearChange || stagingMode {
+                sectionCard(
+                    title: "Vorgemerkte Fächer",
+                    subtitle: "Alles, was übernommen oder angelegt wird.",
+                    icon: "checkmark.seal.fill",
+                    accent: .mint
+                ) {
                     let stagedPrev = Array(pendingPrevSubjectNames).sorted()
-                    let stagedManual = pendingManualSubjects.map { $0.name }
-                    if stagedPrev.isEmpty && stagedManual.isEmpty {
+                    let stagedManual = pendingManualSubjects
+                    let stagedLegacy = store.legacyImportSelected == true ? Array(store.legacySelectedSubjects).sorted() : []
+                    let stagedGroups = selectedGroupSubjectNames.sorted()
+                    if stagedPrev.isEmpty && stagedManual.isEmpty && stagedLegacy.isEmpty && stagedGroups.isEmpty {
                         Text("Noch keine Fächer ausgewählt.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     } else {
                         VStack(alignment: .leading, spacing: 6) {
-                            ForEach(stagedPrev, id: \.self) { name in
-                                Text(name)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(Color(.secondarySystemBackground))
-                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                            ForEach(stagedLegacy, id: \.self) { name in
+                                stagedSubjectRow(title: name, icon: "shippingbox.fill", tint: accentPrimary) {
+                                    toggleLegacySubject(name: name, isOn: false)
+                                }
                             }
-                            ForEach(stagedManual, id: \.self) { name in
-                                Text("\(name) (manuell)")
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(Color(.secondarySystemBackground))
-                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                            ForEach(stagedGroups, id: \.self) { name in
+                                stagedSubjectRow(title: name, icon: "person.3.fill", tint: .blue) {
+                                    setGroupSubjectSelection(name: name, isOn: false)
+                                }
+                            }
+                            ForEach(stagedPrev, id: \.self) { name in
+                                stagedSubjectRow(title: name, icon: "clock.arrow.circlepath", tint: .orange) {
+                                    pendingPrevSubjectNames.remove(name)
+                                }
+                            }
+                            ForEach(stagedManual, id: \.id) { subj in
+                                let label = "\(subj.name)\(subj.isElective ? " (Wahlfach)" : "")"
+                                stagedSubjectRow(title: label, icon: "pencil.and.outline", tint: .green) {
+                                    pendingManualSubjects.removeAll { $0.id == subj.id }
+                                }
                             }
                         }
                     }
@@ -619,12 +1078,30 @@ struct OnboardingFunnelView: View {
             .buttonStyle(.borderedProminent)
             .disabled(isFinishing || !hasSubjects)
         }
-        .padding(18)
-        .background(RoundedRectangle(cornerRadius: 18).fill(Color.formCardBackground))
+        .padding(20)
+        .background(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            accentPrimary.opacity(store.darkMode ? 0.25 : 0.2),
+                            tileBackground
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(accentPrimary.opacity(store.darkMode ? 0.35 : 0.25), lineWidth: 1)
+                )
+        )
     }
 
     private var stepSubtitle: String {
         switch currentStep {
+        case .legacy:
+            return "Daten aus der Web-App gefunden. Entscheide, ob du sie übernehmen möchtest."
         case .schoolYear:
             return isSchoolYearChange ? "Neues Schuljahr anlegen, Schulart und Jahrgang wählen." : "Schuljahr wählen und Jahrgang setzen."
         case .groups:
@@ -708,10 +1185,13 @@ struct OnboardingFunnelView: View {
 
         Task {
             do {
-                try await store.joinExistingSharedGroup(with: code)
+                let staging = stagingMode
+                try await store.joinExistingSharedGroup(with: code, allowYearCreation: !staging)
                 await MainActor.run {
-                    joinInfo = "Gruppe verbunden."
+                    joinInfo = staging ? "Gruppe vorgemerkt. Fächer werden beim Abschluss übernommen." : "Gruppe verbunden."
                     joinCode = ""
+                    if staging { pendingGroupCodes.insert(code) }
+                    prepareGroupSubjectCandidates()
                 }
             } catch {
                 await MainActor.run {
@@ -731,6 +1211,7 @@ struct OnboardingFunnelView: View {
         prevImportInfo = nil
         prevImportError = nil
         finishError = nil
+        prepareGroupSubjectCandidates()
         if previousSchoolYearId != nil && prevYearSubjects.isEmpty {
             Task { await loadPrevSubjects() }
         }
@@ -743,12 +1224,36 @@ struct OnboardingFunnelView: View {
         }
     }
 
+    private func removeSubject(_ name: String) {
+        guard !removingSubjectNames.contains(name) else { return }
+        removingSubjectNames.insert(name)
+        Task {
+            await store.deleteSubjectFromFirestore(subjectName: name)
+            await MainActor.run {
+                removingSubjectNames.remove(name)
+                prepareGroupSubjectCandidates()
+            }
+        }
+    }
+
     private func leaveGroup(_ gid: String) {
         guard !leavingGroupIds.contains(gid) else { return }
+        if stagingMode {
+            leavingGroupIds.insert(gid)
+            Task { @MainActor in
+                store.groupIds.removeAll { $0 == gid }
+                store.groupSubjectsByGroup.removeValue(forKey: gid)
+                store.groupNames.removeValue(forKey: gid)
+                pendingGroupCodes.remove(gid)
+                prepareGroupSubjectCandidates()
+                leavingGroupIds.remove(gid)
+            }
+            return
+        }
         leavingGroupIds.insert(gid)
         Task {
             await store.leaveSharedGroup(code: gid)
-            await MainActor.run {
+            _ = await MainActor.run {
                 leavingGroupIds.remove(gid)
             }
         }
@@ -757,6 +1262,61 @@ struct OnboardingFunnelView: View {
     private func preloadGroupNames() async {
         for gid in store.groupIds where store.groupNames[gid] == nil {
             await store.loadGroupName(gid: gid)
+        }
+    }
+
+    private func prepareGroupSubjectCandidates() {
+        guard hasJoinedGroups, !isSchoolYearChange else {
+            groupSubjectCandidates = []
+            return
+        }
+        let existing = Set(store.subjects.map { $0.name.lowercased() })
+        let previousSelection = groupSubjectCandidates.reduce(into: [String: Bool]()) { dict, item in
+            dict[item.name.lowercased()] = item.selected
+        }
+        var draft: [String: PendingGroupSubject] = [:]
+
+        for gid in store.groupIds {
+            let subjects = store.groupSubjectsByGroup[gid] ?? []
+            for subj in subjects {
+                let trimmed = subj.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { continue }
+                let lower = trimmed.lowercased()
+                guard !existing.contains(lower) else { continue }
+
+                var entry = draft[lower] ?? PendingGroupSubject(
+                    name: trimmed,
+                    sources: [],
+                    selected: previousSelection[lower] ?? true
+                )
+                let source = GroupSubjectSource(groupId: gid, subjectId: subj.id, type: subj.type, alias: subj.alias)
+                if !entry.sources.contains(source) {
+                    entry.sources.append(source)
+                }
+                draft[lower] = entry
+            }
+        }
+
+        groupSubjectCandidates = draft.values.sorted { lhs, rhs in
+            lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+    }
+
+    private func toggleGroupSubjectSelection(id: UUID, isOn: Bool) {
+        guard let idx = groupSubjectCandidates.firstIndex(where: { $0.id == id }) else { return }
+        groupSubjectCandidates[idx].selected = isOn
+    }
+
+    private func setGroupSubjectSelection(name: String, isOn: Bool) {
+        guard let idx = groupSubjectCandidates.firstIndex(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) else { return }
+        groupSubjectCandidates[idx].selected = isOn
+    }
+
+    private func toggleLegacySubject(name: String, isOn: Bool) {
+        if isOn {
+            store.legacySelectedSubjects.insert(name)
+        } else {
+            store.legacySelectedSubjects.remove(name)
         }
     }
 
@@ -778,12 +1338,22 @@ struct OnboardingFunnelView: View {
 
     private func importGroupSubjects() {
         guard !isImporting else { return }
+        let allowed = Set(selectedGroupSubjectNames.map { $0.lowercased() })
+        guard !allowed.isEmpty else {
+            importInfo = "Keine Gruppenfächer ausgewählt."
+            return
+        }
+        if stagingMode {
+            importInfo = "Auswahl wird beim Abschluss übernommen."
+            importError = nil
+            return
+        }
         importInfo = nil
         importError = nil
         isImporting = true
 
         Task {
-            let count = await store.importSubjectsFromGroups(groupIds: nil)
+            let count = await store.importSubjectsFromGroups(groupIds: nil, allowedNames: allowed)
             await MainActor.run {
                 isImporting = false
                 if count > 0 {
@@ -791,6 +1361,7 @@ struct OnboardingFunnelView: View {
                 } else {
                     importInfo = "Keine neuen Fächer gefunden."
                 }
+                prepareGroupSubjectCandidates()
             }
         }
     }
@@ -853,6 +1424,18 @@ struct OnboardingFunnelView: View {
             await store.updateSchoolType(pendingSchoolType)
             await store.updateGradeYear(pendingGradeYear)
 
+            if !pendingGroupCodes.isEmpty {
+                for code in pendingGroupCodes {
+                    try? await store.joinExistingSharedGroup(with: code, allowYearCreation: true)
+                }
+                pendingGroupCodes.removeAll()
+            }
+
+            if !isSchoolYearChange && !selectedGroupSubjectNames.isEmpty {
+                let allowed = Set(selectedGroupSubjectNames.map { $0.lowercased() })
+                _ = await store.importSubjectsFromGroups(groupIds: nil, allowedNames: allowed)
+            }
+
             if let prev = previousSchoolYearId, !pendingPrevSubjectNames.isEmpty {
                 _ = await store.importSubjectsFromSchoolYear(prev, subjectNames: Array(pendingPrevSubjectNames))
                 pendingPrevSubjectNames = []
@@ -863,6 +1446,10 @@ struct OnboardingFunnelView: View {
                     try? await store.addSubjectToFirestore(name: subj.name, type: subj.type, date: Date(), isElective: subj.isElective)
                 }
                 pendingManualSubjects = []
+            }
+
+            if store.legacyImportSelected == true {
+                await store.importLegacyDataIntoActiveYearIfNeeded()
             }
 
             await store.markOnboardingCompletedIfPossible()

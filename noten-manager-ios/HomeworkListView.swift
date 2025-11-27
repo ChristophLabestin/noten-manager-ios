@@ -43,6 +43,10 @@ struct HomeworkListView: View {
         }
     }
 
+    private func resolvedSubjectName(for hw: Homework) -> String {
+        store.resolveLocalSubjectNameForHomework(hw) ?? hw.subjectName
+    }
+
     private var hasOverdueExams: Bool {
         let now = Date()
         return store.allExams.contains { exam in
@@ -112,6 +116,7 @@ struct HomeworkListView: View {
         let autoCompleted = isAutoCompletedPastDue(hw)
         let treatedCompleted = hw.isCompleted || autoCompleted
         let badge: (text: String, color: Color, icon: String?)? = badgeState(for: hw, treatedCompleted: treatedCompleted)
+        let personalNote = store.userNoteForHomework(hw)
         HStack {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
@@ -123,7 +128,7 @@ struct HomeworkListView: View {
                     }
                 }
                 if !hw.subjectName.isEmpty {
-                    Text(hw.subjectName)
+                    Text(resolvedSubjectName(for: hw))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -135,6 +140,12 @@ struct HomeworkListView: View {
                     Text("Kein Fälligkeitsdatum")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                }
+                if let personalNote, !personalNote.isEmpty {
+                    Text(personalNote)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
                 if hw.isShared {
                     let name = hw.groupId.flatMap { store.groupNames[$0] } ?? hw.groupId ?? ""
@@ -186,7 +197,7 @@ struct HomeworkListView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Hausaufgabe bearbeiten")
-
+                
                 // Status / Aktionen
                 if hw.isShared {
                     if isSharedOwner {
@@ -384,12 +395,10 @@ struct HomeworkListView: View {
 
     private func badgeState(for hw: Homework, treatedCompleted: Bool) -> (text: String, color: Color, icon: String?)? {
         let cal = Calendar.current
-        let now = Date()
         if treatedCompleted {
             return ("Erledigt", .green, "checkmark")
         }
         guard let due = hw.dueDate else { return nil }
-        let startToday = cal.startOfDay(for: now)
         if cal.isDateInToday(due) {
             return ("Fällig", .red, nil)
         }

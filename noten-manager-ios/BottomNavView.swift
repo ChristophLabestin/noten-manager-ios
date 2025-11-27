@@ -28,10 +28,12 @@ struct BottomNavView: View {
     @State private var showAddHomework: Bool = false
     @State private var showAddExam: Bool = false
     @State private var showPractical: Bool = false
+    @State private var showSeminar: Bool = false
     @State private var fabPressed: Bool = false
 
     private var isFirstSubject: Bool { store.subjects.isEmpty }
     private var disableAddGrade: Bool { store.encryptionKey == nil || store.subjects.isEmpty }
+    private var gradeYear: Int { store.gradeYear ?? 12 }
 
     private var addGradeTitle: String {
         if store.encryptionKey == nil { return "Lade Schlüssel..." }
@@ -42,7 +44,12 @@ struct BottomNavView: View {
     private var hasFachreferat: Bool { store.fachreferat != nil }
 
     private var showPracticalTab: Bool {
-        store.schoolType == .fos && (store.gradeYear == 11 || store.gradeYear == 12)
+        store.schoolType == .fos && (gradeYear == 11 || gradeYear == 12)
+    }
+
+    private var showFachreferatAction: Bool { gradeYear == 12 }
+    private var showSeminarAction: Bool {
+        gradeYear >= 12 || store.seminarPerformance != nil
     }
 
     private let fabSize: CGFloat = 56
@@ -205,6 +212,10 @@ struct BottomNavView: View {
             }
             .sheet(isPresented: $showPractical) {
                 PracticalTrainingView()
+                    .environmentObject(store)
+            }
+            .sheet(isPresented: $showSeminar) {
+                SeminarPerformanceView()
                     .environmentObject(store)
             }
         }
@@ -466,25 +477,40 @@ struct BottomNavView: View {
                                 }
                             }
 
-                            ActionButton(
-                                iconContent: AnyView(
-                                    Group {
-                                        if hasFachreferat {
-                                            Image(systemName: "slider.horizontal.3")
-                                                .font(.system(size: 17, weight: .semibold))
-                                        } else {
-                                            Image(systemName: "doc.text.fill")
-                                                .font(.system(size: 17, weight: .semibold))
+                            if showFachreferatAction {
+                                ActionButton(
+                                    iconContent: AnyView(
+                                        Group {
+                                            if hasFachreferat {
+                                                Image(systemName: "slider.horizontal.3")
+                                                    .font(.system(size: 17, weight: .semibold))
+                                            } else {
+                                                Image(systemName: "doc.text.fill")
+                                                    .font(.system(size: 17, weight: .semibold))
+                                            }
                                         }
-                                    }
-                                ),
-                                label: hasFachreferat ? "Fachreferat bearbeiten" : "Fachreferat",
-                                description: hasFachreferat ? "Bestehendes Fachreferat" : "Fachreferatsnote anlegen",
-                                disabled: store.encryptionKey == nil || isFirstSubject,
-                                title: store.encryptionKey == nil ? "Lade Schlüssel..." : (isFirstSubject ? "Lege zuerst ein Fach an" : "")
-                            ) {
-                                isOpen = false
-                                showAddFachreferat = true
+                                    ),
+                                    label: hasFachreferat ? "Fachreferat bearbeiten" : "Fachreferat",
+                                    description: hasFachreferat ? "Bestehendes Fachreferat" : "Fachreferatsnote anlegen",
+                                    disabled: store.encryptionKey == nil || isFirstSubject,
+                                    title: store.encryptionKey == nil ? "Lade Schlüssel..." : (isFirstSubject ? "Lege zuerst ein Fach an" : "")
+                                ) {
+                                    isOpen = false
+                                    showAddFachreferat = true
+                                }
+                            }
+
+                            if showSeminarAction {
+                                ActionButton(
+                                    iconContent: AnyView(Image(systemName: "doc.text.magnifyingglass").font(.system(size: 17, weight: .semibold))),
+                                    label: "Seminarfach",
+                                    description: "Teilnoten & Termine",
+                                    disabled: store.encryptionKey == nil,
+                                    title: store.encryptionKey == nil ? "Lade Schlüssel..." : ""
+                                ) {
+                                    isOpen = false
+                                    showSeminar = true
+                                }
                             }
 
                             ActionButton(

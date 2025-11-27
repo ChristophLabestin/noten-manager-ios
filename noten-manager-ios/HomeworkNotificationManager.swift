@@ -1,5 +1,5 @@
 import Foundation
-import UserNotifications
+@preconcurrency import UserNotifications
 import FirebaseAuth
 import FirebaseFirestore
 
@@ -10,30 +10,31 @@ enum HomeworkNotificationManager {
     static let actionSnoozeIdentifier = "HOMEWORK_SNOOZE_1H"
 
     static func configureCategories() {
-        let done = UNNotificationAction(
-            identifier: actionMarkDoneIdentifier,
-            title: "Als erledigt markieren",
-            options: [.authenticationRequired]
-        )
-        let snooze = UNNotificationAction(
-            identifier: actionSnoozeIdentifier,
-            title: "In 1 Stunde erinnern",
-            options: []
-        )
-        let category = UNNotificationCategory(
-            identifier: categoryIdentifier,
-            actions: [done, snooze],
-            intentIdentifiers: [],
-            options: []
-        )
-        let sharedCategory = UNNotificationCategory(
-            identifier: sharedCategoryIdentifier,
-            actions: [done, snooze],
-            intentIdentifiers: [],
-            options: []
-        )
-        let center = UNUserNotificationCenter.current()
-        center.getNotificationCategories { existing in
+        Task {
+            let done = UNNotificationAction(
+                identifier: actionMarkDoneIdentifier,
+                title: "Als erledigt markieren",
+                options: [.authenticationRequired]
+            )
+            let snooze = UNNotificationAction(
+                identifier: actionSnoozeIdentifier,
+                title: "In 1 Stunde erinnern",
+                options: []
+            )
+            let category = UNNotificationCategory(
+                identifier: categoryIdentifier,
+                actions: [done, snooze],
+                intentIdentifiers: [],
+                options: []
+            )
+            let sharedCategory = UNNotificationCategory(
+                identifier: sharedCategoryIdentifier,
+                actions: [done, snooze],
+                intentIdentifiers: [],
+                options: []
+            )
+            let center = UNUserNotificationCenter.current()
+            let existing = await center.notificationCategories()
             var all = existing
             all.insert(category)
             all.insert(sharedCategory)
@@ -42,12 +43,11 @@ enum HomeworkNotificationManager {
     }
 
     static func requestAuthorizationIfNeeded() {
-        let center = UNUserNotificationCenter.current()
-        center.getNotificationSettings { settings in
+        Task {
+            let center = UNUserNotificationCenter.current()
+            let settings = await center.notificationSettings()
             if settings.authorizationStatus == .notDetermined {
-                center.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in
-                    // Ignoriere Ergebnis still – Nutzer kann später in Einstellungen ändern
-                }
+                _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
             }
         }
     }
@@ -62,8 +62,9 @@ enum HomeworkNotificationManager {
         configureCategories()
         requestAuthorizationIfNeeded()
 
-        let center = UNUserNotificationCenter.current()
-        center.getPendingNotificationRequests { existing in
+        Task {
+            let center = UNUserNotificationCenter.current()
+            let existing = await center.pendingNotificationRequests()
             let homeworkIds = existing
                 .map(\.identifier)
                 .filter { $0.hasPrefix("homework_") && !$0.contains("_snooze_") }
@@ -107,7 +108,7 @@ enum HomeworkNotificationManager {
                         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
                         let identifier = "homework_custom_\(hw.id)"
                         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
-                        center.add(request, withCompletionHandler: nil)
+                        try? await center.add(request)
                     }
                 } else {
                     // Original logic for non-shared homeworks
@@ -138,7 +139,7 @@ enum HomeworkNotificationManager {
                         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
                         let identifier = "homework_due_\(hw.id)"
                         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
-                        center.add(request, withCompletionHandler: nil)
+                        try? await center.add(request)
                     }
 
                     if let reminderAt = hw.reminderAt,
@@ -165,7 +166,7 @@ enum HomeworkNotificationManager {
                         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
                         let identifier = "homework_custom_\(hw.id)"
                         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
-                        center.add(request, withCompletionHandler: nil)
+                        try? await center.add(request)
                     }
                 }
             }
@@ -257,7 +258,9 @@ enum HomeworkNotificationManager {
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 3600, repeats: false)
         let requestId = "homework_snooze_\(id)"
         let request = UNNotificationRequest(identifier: requestId, content: newContent, trigger: trigger)
-        UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
+        Task {
+            try? await UNUserNotificationCenter.current().add(request)
+        }
     }
 
     private static func reminderDate(before dueDate: Date, hour: Int, minute: Int) -> Date? {

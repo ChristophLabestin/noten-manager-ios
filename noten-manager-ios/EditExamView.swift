@@ -20,6 +20,11 @@ struct EditExamView: View {
     @State private var requiresGrade: Bool
     @State private var isDeleting: Bool = false
     @State private var showDeleteConfirm: Bool = false
+    @State private var showPersonalNoteEditor: Bool = false
+    @State private var isSharing: Bool = false
+    @State private var shareInfo: String?
+    @State private var shareError: String?
+    @State private var isUnsharing: Bool = false
     @FocusState private var focusedField: Field?
 
     init(exam: Exam) {
@@ -186,6 +191,103 @@ struct EditExamView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
+                    if !exam.isShared && !store.groupIds.isEmpty {
+                        SettingsCard(
+                            title: "Mit Gruppe teilen",
+                            subtitle: "Klausur nachträglich veröffentlichen",
+                            systemImage: "person.3.fill",
+                            accent: .blue
+                        ) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Button {
+                                    Task { await shareToGroups() }
+                                } label: {
+                                    if isSharing {
+                                        ProgressView()
+                                    } else {
+                                        Text("In Gruppe teilen")
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(isSharing)
+
+                                if let shareInfo {
+                                    Text(shareInfo)
+                                        .font(.footnote)
+                                        .foregroundStyle(.green)
+                                }
+                                if let shareError {
+                                    Text(shareError)
+                                        .font(.footnote)
+                                        .foregroundStyle(.red)
+                                }
+                            }
+                        }
+                    }
+
+                    if exam.isShared {
+                        SettingsCard(
+                            title: "Eigene Notiz",
+                            subtitle: "Nur für dich sichtbar",
+                            systemImage: "note.text",
+                            accent: .teal
+                        ) {
+                            let currentNote = store.userNoteForExam(exam) ?? ""
+                            VStack(alignment: .leading, spacing: 10) {
+                                if currentNote.isEmpty {
+                                    Text("Keine Notiz gespeichert.")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    Text(currentNote)
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(4)
+                                }
+                                Button("Eigene Notiz bearbeiten") {
+                                    showPersonalNoteEditor = true
+                                }
+                                .buttonStyle(.borderedProminent)
+                            }
+                        }
+                    }
+
+                    if exam.isShared, isSharedOwner, let gid = exam.groupId {
+                        SettingsCard(
+                            title: "Teilen beenden",
+                            subtitle: "Nur der Ersteller kann das Teilen stoppen",
+                            systemImage: "xmark.circle",
+                            accent: .red
+                        ) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Button(role: .destructive) {
+                                    Task { await stopSharing(groupId: gid) }
+                                } label: {
+                                    if isUnsharing {
+                                        ProgressView()
+                                    } else {
+                                        Text("Aus Gruppe entfernen")
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(.red)
+                                .disabled(isUnsharing)
+                                if let shareInfo {
+                                    Text(shareInfo)
+                                        .font(.footnote)
+                                        .foregroundStyle(.green)
+                                }
+                                if let shareError {
+                                    Text(shareError)
+                                        .font(.footnote)
+                                        .foregroundStyle(.red)
+                                }
+                            }
+                        }
+                    }
+
                     Button(role: .destructive) {
                         showDeleteConfirm = true
                     } label: {
@@ -217,17 +319,24 @@ struct EditExamView: View {
                     }
                     .disabled(!canSave || isSaving || subjects.isEmpty)
                 }
-                ToolbarItemGroup(placement: .keyboard) {
-                    KeyboardNavigationAccessory(
-                        focus: $focusedField,
-                        fields: [.title, .notes],
-                        label: nil,
-                        onDone: { hideKeyboard() }
-                    )
-                }
             }
             .scrollDismissesKeyboard(.interactively)
             .hideKeyboardOnTap()
+            .keyboardNavigationToolbar(
+                focus: $focusedField,
+                fields: [.title, .notes],
+                label: nil,
+                onDone: { hideKeyboard() }
+            )
+            .sheet(isPresented: $showPersonalNoteEditor) {
+                PersonalNoteEditor(
+                    title: "Eigene Notiz",
+                    initialText: store.userNoteForExam(exam) ?? "",
+                    onSave: { text in
+                        Task { await store.setUserNoteForSharedExam(examId: exam.id, note: text, groupId: exam.groupId) }
+                    }
+                )
+            }
             .alert(
                 "Klausur löschen?",
                 isPresented: $showDeleteConfirm
@@ -240,7 +349,6 @@ struct EditExamView: View {
                 Text("Dieser Klausurtermin wird dauerhaft gelöscht.")
             }
         }
-        .modifier(KeyboardToolbarInset(height: 64))
     }
 
     private func save() async {
@@ -307,5 +415,39 @@ struct EditExamView: View {
             dismiss()
         }
         isDeleting = false
+    }
+
+    private func shareToGroups() async {
+        guard !isSharing else { return }
+        shareError = nil
+        shareInfo = nil
+        isSharing = true
+        let success = await store.shareExamToGroups(examId: exam.id)
+        await MainActor.run {
+            isSharing = false
+            if success {
+                shareInfo = "In Gruppe geteilt."
+                dismiss()
+            } else {
+                shareError = "Teilen fehlgeschlagen. Prüfe Gruppen und versuche es erneut."
+            }
+        }
+    }
+
+    private func stopSharing(groupId: String) async {
+        guard !isUnsharing else { return }
+        shareError = nil
+        shareInfo = nil
+        isUnsharing = true
+        let success = await store.stopSharingExam(groupId: groupId, examId: exam.id)
+        await MainActor.run {
+            isUnsharing = false
+            if success {
+                shareInfo = "Teilen beendet."
+                dismiss()
+            } else {
+                shareError = "Konnte Teilen nicht beenden."
+            }
+        }
     }
 }

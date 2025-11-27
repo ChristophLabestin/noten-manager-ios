@@ -56,28 +56,28 @@ struct ContentView: View {
                 evaluateOfflineOffer()
             }
         }
-        .onChange(of: offlineManager.isOnline) { online in
+        .onChange(of: offlineManager.isOnline) { _, online in
             if !online {
                 evaluateOfflineOffer()
             }
         }
-        .onChange(of: authManager.isAuthenticated) { isAuth in
+        .onChange(of: authManager.isAuthenticated) { _, isAuth in
             if isAuth && offlineManager.isOfflineModeActive {
                 offlineManager.deactivateOfflineMode()
             }
             refreshBiometricState(triggerUnlock: isAuth)
         }
-        .onChange(of: offlineManager.isOfflineModeActive) { _ in
+        .onChange(of: offlineManager.isOfflineModeActive) { _, _ in
             refreshBiometricState(triggerUnlock: false)
         }
-        .onChange(of: scenePhase) { phase in
+        .onChange(of: scenePhase) { _, phase in
             if phase == .background {
                 biometricUnlocked = false
             } else if phase == .active {
                 Task { await attemptBiometricUnlockIfNeeded(force: false) }
             }
         }
-        .onChange(of: biometricManager.isEnabledForActiveUser) { _ in
+        .onChange(of: biometricManager.isEnabledForActiveUser) { _, _ in
             refreshBiometricState(triggerUnlock: false)
         }
         .alert("Offline-Modus nutzen?", isPresented: $showOfflinePrompt) {
@@ -242,7 +242,14 @@ struct ContentView: View {
             }
             .multilineTextAlignment(.center)
 
-            if let message = biometricMessage, !message.isEmpty {
+            if isRequestingBiometric {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text("\(biometricManager.biometryName()) wird geprüft ...")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            } else if let message = biometricMessage, !message.isEmpty {
                 Text(message)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -260,13 +267,15 @@ struct ContentView: View {
                 .tint(.accentColor)
                 .disabled(isRequestingBiometric)
 
-                Button {
-                    disableBiometricRequirement()
-                } label: {
-                    Label("\(biometricManager.biometryName()) deaktivieren", systemImage: "xmark.circle")
-                        .frame(maxWidth: .infinity)
+                if !isRequestingBiometric && (biometricMessage?.isEmpty == false) {
+                    Button {
+                        disableBiometricRequirement()
+                    } label: {
+                        Label("\(biometricManager.biometryName()) deaktivieren", systemImage: "xmark.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
                 }
-                .buttonStyle(.bordered)
 
                 Button(role: .destructive) {
                     handleLogoutFromLock()
