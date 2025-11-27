@@ -27,6 +27,7 @@ struct AppSettingsView: View {
     @State private var groupInfoMessage: String?
     @State private var groupErrorMessage: String?
     @State private var showMappingGroupId: String? = nil
+    @State private var manageGroupId: String? = nil
     @State private var selectedSubjectsForNewGroup: Set<String> = []
     @State private var groupPendingLeave: String? = nil
     @State private var copiedGroupId: String? = nil
@@ -366,6 +367,17 @@ struct AppSettingsView: View {
             .sheet(isPresented: $showExamSheet) {
                 ExamListView()
                     .environmentObject(store)
+            }
+            .sheet(
+                isPresented: Binding(
+                    get: { manageGroupId != nil },
+                    set: { if !$0 { manageGroupId = nil } }
+                )
+            ) {
+                if let gid = manageGroupId {
+                    GroupSubjectManagementView(groupId: gid)
+                        .environmentObject(store)
+                }
             }
             .sheet(
                 isPresented: Binding(
@@ -920,6 +932,10 @@ struct AppSettingsView: View {
                                         }
 
                                         HStack {
+                                            Button("Fächer verwalten") {
+                                                manageGroupId = gid
+                                            }
+                                            Spacer()
                                             Button("Fächer abgleichen") {
                                                 showMappingGroupId = gid
                                             }

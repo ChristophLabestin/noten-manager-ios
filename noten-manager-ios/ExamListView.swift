@@ -40,11 +40,26 @@ struct ExamListView: View {
     }
 
     private var filteredExams: [Exam] {
-        guard let subjectFilter else { return store.allExams }
+        guard let subjectFilter else { return linkedExams }
         let candidates = ([subjectFilter] + alternateSubjectNames).map { $0.lowercased() }
-        return store.allExams.filter { exam in
+        return linkedExams.filter { exam in
             let name = exam.subjectName.lowercased()
+            // Nur anzeigen, wenn Fach verknüpft ist (Subject oder Mapping)
+            if let resolved = store.resolveLocalSubjectNameForExam(exam) {
+                let resolvedLower = resolved.lowercased()
+                if candidates.contains(resolvedLower) { return true }
+            }
             return candidates.contains(name)
+        }
+    }
+
+    private var linkedExams: [Exam] {
+        store.allExams.filter { exam in
+            if let resolved = store.resolveLocalSubjectNameForExam(exam),
+               store.subjects.contains(where: { $0.name == resolved }) {
+                return true
+            }
+            return store.subjects.contains(where: { $0.name == exam.subjectName })
         }
     }
 

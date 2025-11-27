@@ -272,6 +272,7 @@ final class GradesStore: ObservableObject {
     // Neue gemeinsame Gruppen-Verwaltung
     @Published var groupIds: [String] = []
     @Published var groupNames: [String: String] = [:] // gid -> name
+    @Published var groupOwners: [String: String] = [:] // gid -> ownerId
     @Published var groupSubjectsByGroup: [String: [GroupSubject]] = [:] // gid -> subjects
     @Published var groupSubjectMappings: [String: [String: String]] = [:] // gid -> subjectKey -> local name
     @Published var groupExamsByGroup: [String: [Exam]] = [:]
@@ -600,6 +601,7 @@ final class GradesStore: ObservableObject {
         progress = 0
         groupIds = []
         groupNames = [:]
+        groupOwners = [:]
         groupSubjectsByGroup = [:]
         groupSubjectMappings = [:]
         groupExamsByGroup = [:]
@@ -707,6 +709,7 @@ final class GradesStore: ObservableObject {
         groupSubjectsByGroup = [:]
         groupIds = []
         groupNames = [:]
+        groupOwners = [:]
         examGroupId = nil
         homeworkGroupId = nil
         examGroupIds = []
@@ -2397,6 +2400,7 @@ final class GradesStore: ObservableObject {
         homeworkGroupId = snapshot.homeworkGroupId
         groupIds = snapshot.groupIds
         groupNames = snapshot.groupNames
+        groupOwners = [:]
         groupSubjectMappings = snapshot.groupSubjectMappings
         groupExamsByGroup = snapshot.groupExamsByGroup
         groupHomeworksByGroup = snapshot.groupHomeworksByGroup
@@ -2805,6 +2809,7 @@ final class GradesStore: ObservableObject {
         examGroupIds = union
         homeworkGroupIds = union
         groupNames[code] = name
+        groupOwners[code] = uid
         examGroupId = code
         homeworkGroupId = code
 
@@ -3029,6 +3034,7 @@ final class GradesStore: ObservableObject {
         groupSubjectsByGroup.removeValue(forKey: target)
         groupSubjectMappings.removeValue(forKey: target)
         groupNames.removeValue(forKey: target)
+        groupOwners.removeValue(forKey: target)
 
         updateGroupObservers(uid: uid, schoolYearId: activeSchoolYearId)
 
@@ -4987,6 +4993,100 @@ final class GradesStore: ObservableObject {
         }
     }
 
+    // Füge weitere lokale Fächer zu einer bestehenden Gruppe hinzu und aktualisiere das Mapping
+    @discardableResult
+    func addSubjectsToGroup(groupId: String, subjectNames: [String]) async throws -> Int {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
+        }
+        guard let yearRef = try? await requireYearRef(uid: uid) else {
+            throw NSError(domain: "GradesStore", code: -2, userInfo: [NSLocalizedDescriptionKey: "Kein aktives Schuljahr"])
+        }
+
+        let trimmed = subjectNames
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !trimmed.isEmpty else { return 0 }
+
+        let usedElsewhere = Set(groupSubjectMappings
+            .filter { $0.key != groupId }
+            .flatMap { $0.value.values })
+        let existingKeys = Set(groupSubjectsByGroup[groupId]?.map { $0.id } ?? [])
+        var added: [GroupSubject] = []
+        var map = groupSubjectMappings[groupId] ?? [:]
+
+        for name in trimmed {
+            guard let subj = subjects.first(where: { $0.name == name }) else { continue }
+            guard !usedElsewhere.contains(subj.name) else { continue }
+            let sid = slugifySubjectName(subj.name)
+            guard !existingKeys.contains(sid) else { continue }
+
+            var payload: [String: Any] = [
+                "name": subj.name,
+                "type": subj.type,
+                "alias": subj.alias as Any
+            ]
+            if let alias = subj.alias, alias.isEmpty { payload["alias"] = FieldValue.delete() }
+
+            try await db.collection("groups").document(groupId)
+                .collection("subjects").document(sid)
+                .setData(payload, merge: true)
+
+            map[sid] = subj.name
+            added.append(GroupSubject(id: sid, name: subj.name, type: subj.type, alias: subj.alias))
+        }
+
+        guard !added.isEmpty else { return 0 }
+
+        try await yearRef.collection("groupMappings").document(groupId).setData(["map": map], merge: true)
+        await MainActor.run {
+            groupSubjectMappings[groupId] = map
+            var list = groupSubjectsByGroup[groupId] ?? []
+            for entry in added where !list.contains(entry) {
+                // Ersetze ggf. bestehendes Fach mit gleicher ID, um doppelte Anzeige zu vermeiden
+                list.removeAll { $0.id == entry.id }
+                list.append(entry)
+            }
+            groupSubjectsByGroup[groupId] = list
+        }
+
+        return added.count
+    }
+
+    func deleteGroupSubject(groupId: String, subjectId: String) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
+        }
+
+        let groupRef = db.collection("groups").document(groupId)
+        let snap = try await groupRef.getDocument()
+        let ownerId = snap.data()?["ownerId"] as? String
+        await MainActor.run {
+            if let ownerId { groupOwners[groupId] = ownerId }
+        }
+        if let ownerId, ownerId != uid {
+            throw NSError(domain: "GradesStore", code: -5, userInfo: [NSLocalizedDescriptionKey: "Nur der Ersteller der Gruppe kann Fächer löschen."])
+        }
+
+        try await groupRef.collection("subjects").document(subjectId).delete()
+
+        var map = groupSubjectMappings[groupId] ?? [:]
+        let removed = map.removeValue(forKey: subjectId)
+        if let yearRef = try? await requireYearRef(uid: uid) {
+            try? await yearRef.collection("groupMappings").document(groupId).setData(["map": map], merge: true)
+        }
+
+        await MainActor.run {
+            groupSubjectMappings[groupId] = map
+            var list = groupSubjectsByGroup[groupId] ?? []
+            list.removeAll { $0.id == subjectId }
+            groupSubjectsByGroup[groupId] = list
+            if removed != nil {
+                recomputeSharedCollections()
+            }
+        }
+    }
+
     func deleteSubjectFromFirestore(subjectName: String) async {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         guard let yearRef = try? await requireYearRef(uid: uid) else { return }
@@ -5156,6 +5256,7 @@ final class GradesStore: ObservableObject {
             l.remove()
             groupNameListeners.removeValue(forKey: gid)
             groupNames.removeValue(forKey: gid)
+            groupOwners.removeValue(forKey: gid)
         }
 
         // Starte Listener für aktuelle Gruppen
@@ -5205,10 +5306,20 @@ final class GradesStore: ObservableObject {
         groupNameListeners[gid] = db.collection("groups").document(gid).addSnapshotListener { [weak self] snap, _ in
             Task { @MainActor in
                 guard let self else { return }
-                if let data = snap?.data(), let name = data["name"] as? String {
-                    self.groupNames[gid] = name
+                if let data = snap?.data() {
+                    if let name = data["name"] as? String {
+                        self.groupNames[gid] = name
+                    } else {
+                        self.groupNames.removeValue(forKey: gid)
+                    }
+                    if let owner = data["ownerId"] as? String {
+                        self.groupOwners[gid] = owner
+                    } else {
+                        self.groupOwners.removeValue(forKey: gid)
+                    }
                 } else {
                     self.groupNames.removeValue(forKey: gid)
+                    self.groupOwners.removeValue(forKey: gid)
                 }
             }
         }
@@ -5340,6 +5451,37 @@ final class GradesStore: ObservableObject {
     func availableSubjectsForNewGroup() -> [Subject] {
         let usedLocal = Set(groupSubjectMappings.values.flatMap { $0.values })
         return subjects.filter { $0.name != "Fachreferat" && !usedLocal.contains($0.name) }
+    }
+
+    // Fächer, die noch nicht in der Gruppe liegen und nicht von anderen Gruppen gemappt werden
+    func availableSubjectsForGroupAttachment(groupId: String) -> [Subject] {
+        let usedElsewhere = Set(groupSubjectMappings
+            .filter { $0.key != groupId }
+            .flatMap { $0.value.values })
+        let existingKeys = Set(groupSubjectsByGroup[groupId]?.map { $0.id } ?? [])
+        return subjects.filter { subj in
+            subj.name != "Fachreferat"
+            && !existingKeys.contains(slugifySubjectName(subj.name))
+            && !usedElsewhere.contains(subj.name)
+        }
+    }
+
+    func isCurrentUserOwner(of groupId: String) async -> Bool {
+        guard let uid = Auth.auth().currentUser?.uid else { return false }
+        if let cached = await MainActor.run(body: { groupOwners[groupId] }) {
+            return cached == uid
+        }
+        do {
+            let snap = try await db.collection("groups").document(groupId).getDocument()
+            let owner = snap.data()?["ownerId"] as? String
+            await MainActor.run {
+                if let owner { groupOwners[groupId] = owner }
+            }
+            if let owner { return owner == uid }
+        } catch {
+            // optional loggen
+        }
+        return false
     }
 
     private func targetGroupIds(forLocalSubject subjectName: String) -> [String] {

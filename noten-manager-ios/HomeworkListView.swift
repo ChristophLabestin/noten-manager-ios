@@ -13,7 +13,7 @@ struct HomeworkListView: View {
     @State private var reminderHomework: Homework? = nil
 
     private var openHomeworks: [Homework] {
-        store.allHomeworks
+        linkedHomeworks
             .filter { !$0.isCompleted && !isAutoCompletedPastDue($0) }
             .sorted { lhs, rhs in
                 let l = sortKey(for: lhs)
@@ -24,13 +24,24 @@ struct HomeworkListView: View {
     }
 
     private var completedHomeworks: [Homework] {
-        store.allHomeworks
+        linkedHomeworks
             .filter { $0.isCompleted || isAutoCompletedPastDue($0) }
             .sorted {
                 let a = $0.dueDate ?? $0.createdAt
                 let b = $1.dueDate ?? $1.createdAt
                 return a > b
             }
+    }
+
+    private var linkedHomeworks: [Homework] {
+        store.allHomeworks.filter { hw in
+            // Nur anzeigen, wenn das Fach verknüpft ist (lokal oder via Mapping)
+            if let resolved = store.resolveLocalSubjectNameForHomework(hw),
+               store.subjects.contains(where: { $0.name == resolved }) {
+                return true
+            }
+            return store.subjects.contains(where: { $0.name == hw.subjectName })
+        }
     }
 
     private var hasOverdueHomeworks: Bool {
