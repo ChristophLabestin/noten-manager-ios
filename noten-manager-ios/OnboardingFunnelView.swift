@@ -636,6 +636,18 @@ struct OnboardingFunnelView: View {
                     .padding(14)
                     .background(Color.formInputBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 14))
+                if !schoolYearInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   !isValidSchoolYear(schoolYearInput) {
+                    Text("Bitte ein Schuljahr im Format 2024-25 eingeben.")
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else if schoolYearAlreadyExists {
+                    Text("Dieses Schuljahr existiert bereits. Bitte wähle ein anderes.")
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Schulart")
@@ -707,7 +719,12 @@ struct OnboardingFunnelView: View {
             }
             .buttonStyle(SoftTintButtonStyle(accent: accentPrimary))
             .padding(.top, 4)
-            .disabled(!isValidSchoolYear(schoolYearInput) || !gradeOptionsForSchoolType.contains(gradeSelection) || isSavingSchoolYear)
+            .disabled(
+                !isValidSchoolYear(schoolYearInput)
+                || schoolYearAlreadyExists
+                || !gradeOptionsForSchoolType.contains(gradeSelection)
+                || isSavingSchoolYear
+            )
         }
         .padding(18)
         .background(RoundedRectangle(cornerRadius: 18).fill(Color.formCardBackground))
@@ -1167,6 +1184,12 @@ struct OnboardingFunnelView: View {
         selectedSchoolType == .fos ? [11, 12, 13] : [12, 13]
     }
 
+    private var schoolYearAlreadyExists: Bool {
+        let trimmed = schoolYearInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        return store.schoolYears.contains(trimmed)
+    }
+
     private func bootstrapDefaults() {
         let baseYear = store.activeSchoolYearId ?? SchoolYearService.currentSchoolYearId()
         selectedSchoolType = store.schoolType
@@ -1191,6 +1214,10 @@ struct OnboardingFunnelView: View {
     private func handleSchoolYearContinue() {
         guard !isSavingSchoolYear else { return }
         let targetId = schoolYearInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        if schoolYearAlreadyExists {
+            schoolYearError = "Dieses Schuljahr gibt es schon. Bitte ein anderes Jahr wählen."
+            return
+        }
         guard isValidSchoolYear(targetId), gradeOptionsForSchoolType.contains(gradeSelection) else {
             schoolYearError = "Bitte Schuljahr und Jahrgang korrekt auswählen."
             return

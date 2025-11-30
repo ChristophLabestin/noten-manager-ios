@@ -39,21 +39,18 @@ struct AppSettingsView: View {
     @State private var schoolYearError: String?
     @State private var schoolYearInputIsValid: Bool = false
     @State private var showSchoolYearWizard: Bool = false
+    @State private var showSchoolYearEditor: Bool = false
 
     // Reset
     @State private var showResetAccountSheet: Bool = false
-    @State private var showResetYearSheet: Bool = false
     @State private var resetAccountPassword: String = ""
-    @State private var resetYearPassword: String = ""
     @State private var resetAccountSlideDone: Bool = false
-    @State private var resetYearSlideDone: Bool = false
     @State private var showDeleteAccountSheet: Bool = false
     @State private var deleteAccountPassword: String = ""
     @State private var deleteAccountSlideDone: Bool = false
     @State private var isResettingAccount: Bool = false
-    @State private var isResettingYear: Bool = false
     @State private var isDeletingAccount: Bool = false
-    @State private var resetError: String?
+    @State private var resetAccountError: String?
     @State private var deleteError: String?
     @State private var offlineStatusMessage: String?
     @State private var biometricToggleState: Bool = false
@@ -166,8 +163,11 @@ struct AppSettingsView: View {
         }.count
     }
 
-    private var gradeOptions: [Int] {
-        store.schoolType == .fos ? [11, 12, 13] : [12, 13]
+    private var activeSchoolYearLabel: String {
+        guard let id = store.activeSchoolYearId else { return "—" }
+        let name = store.schoolYearNames[id]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let name, !name.isEmpty { return name }
+        return id
     }
 
     private var animationsOn: Bool { store.animationsEnabled }
@@ -227,7 +227,7 @@ struct AppSettingsView: View {
                 LazyVGrid(columns: metricColumns, spacing: 12) {
                     CompactMetric(
                         title: "Schuljahr",
-                        value: store.activeSchoolYearId ?? "—",
+                        value: activeSchoolYearLabel,
                         icon: "calendar",
                         accent: .cyan
                     )
@@ -348,6 +348,10 @@ struct AppSettingsView: View {
                 }
                 .environmentObject(store)
             }
+            .sheet(isPresented: $showSchoolYearEditor) {
+                SchoolYearEditView()
+                    .environmentObject(store)
+            }
             .sheet(isPresented: $showExamSheet) {
                 ExamListView()
                     .environmentObject(store)
@@ -382,20 +386,8 @@ struct AppSettingsView: View {
                     isPresented: $showResetAccountSheet,
                     slideDone: $resetAccountSlideDone,
                     isProcessing: isResettingAccount,
-                    errorMessage: resetError,
+                    errorMessage: resetAccountError,
                     confirmAction: confirmResetAccount
-                )
-            }
-            .sheet(isPresented: $showResetYearSheet) {
-                ResetConfirmSheet(
-                    title: "Aktives Schuljahr zurücksetzen",
-                    message: "Alle Daten des aktiven Schuljahres werden gelöscht.",
-                    password: $resetYearPassword,
-                    isPresented: $showResetYearSheet,
-                    slideDone: $resetYearSlideDone,
-                    isProcessing: isResettingYear,
-                    errorMessage: resetError,
-                    confirmAction: confirmResetYear
                 )
             }
             .sheet(isPresented: $showDeleteAccountSheet) {
@@ -712,7 +704,7 @@ struct AppSettingsView: View {
     private var schoolYearCard: some View {
         SettingsCard(
             title: "Schuljahr",
-            subtitle: "Aktives Schuljahr, Jahrgang und Prüfungsfächer",
+            subtitle: "Aktives Schuljahr und Setup",
             systemImage: "graduationcap.fill",
             accent: .mint
         ) {
@@ -729,13 +721,21 @@ struct AppSettingsView: View {
                             VStack(spacing: 10) {
                                 ForEach(store.schoolYears, id: \.self) { sy in
                                     let isActive = store.activeSchoolYearId == sy
+                                    let name = (store.schoolYearNames[sy]?
+                                        .trimmingCharacters(in: .whitespacesAndNewlines))
+                                        .flatMap { $0.isEmpty ? nil : $0 } ?? sy
                                     Button {
                                         Task { await store.setActiveSchoolYear(id: sy) }
                                     } label: {
                                         HStack {
                                             VStack(alignment: .leading, spacing: 4) {
-                                                Text(sy)
+                                                Text(name)
                                                     .font(.headline)
+                                                if name != sy {
+                                                    Text(sy)
+                                                        .font(.caption)
+                                                        .foregroundStyle(.secondary)
+                                                }
                                                 if isActive {
                                                     Text("Aktiv")
                                                         .font(helperFont)
@@ -762,6 +762,22 @@ struct AppSettingsView: View {
                                 }
                             }
                         }
+                        if store.activeSchoolYearId != nil {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Button {
+                                    showSchoolYearEditor = true
+                                } label: {
+                                    Label("Schuljahr bearbeiten", systemImage: "square.and.pencil")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(SoftTintButtonStyle(accent: .mint))
+
+                                Text("Bezeichnung, Schulart, Jahrgangsstufe, Prüfungsfächer oder einen kompletten Reset verwalten.")
+                                    .font(helperFont)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.top, 6)
+                        }
                     }
                 }
 
@@ -780,122 +796,6 @@ struct AppSettingsView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(SoftTintButtonStyle(accent: .mint))
-                    }
-                }
-
-                SettingsSectionBox {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Schulart")
-                            .font(sectionHeaderFont)
-                        Text("Bestimmt die Berechnung der Abschlussnote (FOS: 11./12. + Praktikum, BOS: 12./13.).")
-                            .font(helperFont)
-                            .foregroundStyle(.secondary)
-
-                        Picker(
-                            "",
-                            selection: Binding(
-                                get: { store.schoolType },
-                                set: { val in
-                                    Task {
-                                        await store.updateSchoolType(val)
-                                        if val == .bos, store.gradeYear == 11 {
-                                            await store.updateGradeYear(12)
-                                        }
-                                    }
-                                }
-                            )
-                        ) {
-                            Text("FOS").tag(SchoolType.fos)
-                            Text("BOS").tag(SchoolType.bos)
-                        }
-                        .pickerStyle(.segmented)
-                    }
-                }
-
-                SettingsSectionBox {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Jahrgangsstufe")
-                            .font(sectionHeaderFont)
-                        Text("Wähle deine Jahrgangsstufe für das aktive Schuljahr.")
-                            .font(helperFont)
-                            .foregroundStyle(.secondary)
-
-                        VStack(spacing: 10) {
-                            ForEach(gradeOptions, id: \.self) { grade in
-                                let selected = store.gradeYear == grade
-                                Button {
-                                    Task { await store.updateGradeYear(grade) }
-                                } label: {
-                                    HStack {
-                                        Text("\(grade). Jahrgang")
-                                            .font(.body)
-                                        Spacer()
-                                        if selected {
-                                            Image(systemName: "checkmark.circle.fill")
-                                                .foregroundStyle(.green)
-                                        }
-                                    }
-                                    .padding(12)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 10)
-                                            .fill(selected ? Color.accentColor.opacity(0.12) : Color(.secondarySystemBackground))
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 10)
-                                            .stroke(selected ? Color.accentColor : Color.clear, lineWidth: 1)
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                }
-
-                SettingsSectionBox {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Prüfungsfächer")
-                            .font(sectionHeaderFont)
-                        Text("Maximal 4 Prüfungsfächer auswählen. Nur Hauptfächer sind zulässig.")
-                            .font(helperFont)
-                            .foregroundStyle(.secondary)
-
-                        let eligibleSubjects = examEligibleSubjects
-
-                        if eligibleSubjects.isEmpty {
-                            Text("Lege zuerst Hauptfächer an, um Prüfungsfächer zu wählen.")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            VStack(spacing: 8) {
-                                ForEach(eligibleSubjects, id: \.name) { subject in
-                                    ExamSubjectRow(
-                                        subject: subject,
-                                        isDisabled: !(subject.examSubject ?? false) && currentExamSubjectsCount >= maxExamSubjects,
-                                        onToggle: { isOn in
-                                            let nextExamType = subject.examType ?? .written
-                                            Task {
-                                                await store.updateSubjectExamFlags(
-                                                    subjectName: subject.name,
-                                                    examSubject: isOn,
-                                                    examType: nextExamType
-                                                )
-                                            }
-                                        }
-                                    )
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 8)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                            .fill(Color(.secondarySystemBackground))
-                                    )
-                                }
-                            }
-                            if currentExamSubjectsCount >= maxExamSubjects {
-                                Text("Du hast bereits 4 Prüfungsfächer ausgewählt. Entferne eines, um ein anderes Fach als Prüfungsfach zu markieren.")
-                                    .font(helperFont)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
                     }
                 }
             }
@@ -1459,31 +1359,11 @@ struct AppSettingsView: View {
     private var resetCard: some View {
         SettingsCard(
             title: "Daten zurücksetzen",
-            subtitle: "Account oder aktuelles Schuljahr bereinigen",
+            subtitle: "Account bereinigen oder löschen",
             systemImage: "exclamationmark.triangle.fill",
             accent: .red
         ) {
             VStack(alignment: .leading, spacing: 12) {
-                SettingsSectionBox {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Aktives Schuljahr zurücksetzen")
-                            .font(sectionHeaderFont)
-                        Text("Bereinigt alle Daten des aktuellen Schuljahres. Optimal, wenn du neu starten möchtest.")
-                            .font(helperFont)
-                            .foregroundStyle(.secondary)
-                        Button(role: .destructive) {
-                            resetYearPassword = ""
-                            resetYearSlideDone = false
-                            resetError = nil
-                            showResetYearSheet = true
-                        } label: {
-                            Text("Schuljahr zurücksetzen")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(SoftTintButtonStyle(accent: .orange))
-                    }
-                }
-
                 SettingsSectionBox {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Account zurücksetzen")
@@ -1494,7 +1374,7 @@ struct AppSettingsView: View {
                         Button(role: .destructive) {
                             resetAccountPassword = ""
                             resetAccountSlideDone = false
-                            resetError = nil
+                            resetAccountError = nil
                             showResetAccountSheet = true
                         } label: {
                             Text("Account zurücksetzen")
@@ -1743,7 +1623,7 @@ struct AppSettingsView: View {
     private func confirmResetAccount() {
         Task {
             guard !isResettingAccount else { return }
-            resetError = nil
+            resetAccountError = nil
             isResettingAccount = true
             defer { isResettingAccount = false }
             do {
@@ -1751,27 +1631,9 @@ struct AppSettingsView: View {
                 showResetAccountSheet = false
                 resetAccountPassword = ""
                 resetAccountSlideDone = false
-                resetError = nil
+                resetAccountError = nil
             } catch {
-                resetError = error.localizedDescription
-            }
-        }
-    }
-
-    private func confirmResetYear() {
-        Task {
-            guard !isResettingYear else { return }
-            resetError = nil
-            isResettingYear = true
-            defer { isResettingYear = false }
-            do {
-                try await store.resetActiveSchoolYear(password: resetYearPassword)
-                showResetYearSheet = false
-                resetYearPassword = ""
-                resetYearSlideDone = false
-                resetError = nil
-            } catch {
-                resetError = error.localizedDescription
+                resetAccountError = error.localizedDescription
             }
         }
     }
@@ -2339,6 +2201,431 @@ private struct CompactMetric: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(accent.opacity(0.16), lineWidth: 1)
         )
+    }
+}
+
+struct SchoolYearEditView: View {
+    @EnvironmentObject var store: GradesStore
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var nameInput: String = ""
+    @State private var isSavingName: Bool = false
+    @State private var nameMessage: String?
+    @State private var nameError: String?
+
+    @State private var showResetSheet: Bool = false
+    @State private var showDeleteSheet: Bool = false
+    @State private var resetPassword: String = ""
+    @State private var deletePassword: String = ""
+    @State private var resetSlideDone: Bool = false
+    @State private var deleteSlideDone: Bool = false
+    @State private var isResetting: Bool = false
+    @State private var isDeleting: Bool = false
+    @State private var resetError: String?
+    @State private var deleteError: String?
+
+    private var accent: Color {
+        store.theme == "feminine" ? Color(hex: "#ec4899") : .mint
+    }
+
+    private let sectionHeaderFont: Font = .headline.weight(.semibold)
+    private let helperFont: Font = .footnote
+    private let maxExamSubjects: Int = 4
+
+    private var gradeOptions: [Int] {
+        store.schoolType == .fos ? [11, 12, 13] : [12, 13]
+    }
+
+    private var examEligibleSubjects: [Subject] {
+        store
+            .sortedSubjectsForDisplay()
+            .filter { $0.type == 1 && !$0.isElective }
+    }
+
+    private var currentExamSubjectsCount: Int {
+        examEligibleSubjects.filter { ($0.examSubject ?? false) }.count
+    }
+
+    private var hasActiveYear: Bool { store.activeSchoolYearId != nil }
+
+    private var displayName: String {
+        guard let id = store.activeSchoolYearId else { return "" }
+        let name = store.schoolYearNames[id]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let name, !name.isEmpty { return name }
+        return id
+    }
+
+    private var nameHasChanges: Bool {
+        let trimmed = nameInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        return trimmed != displayName
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 16) {
+                    if !hasActiveYear {
+                        Text("Kein aktives Schuljahr vorhanden. Starte den Schuljahrs-Setup aus den Einstellungen.")
+                            .font(helperFont)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        SettingsCard(
+                            title: "Schuljahr \(store.activeSchoolYearId ?? "—")",
+                            subtitle: "Bezeichnung und Überblick",
+                            systemImage: "calendar.badge.clock",
+                            accent: accent
+                        ) {
+                            chips
+                            nameSection
+                        }
+
+                        SettingsCard(
+                            title: "Schulart & Jahrgang",
+                            subtitle: "Aktuelles Schuljahr konfigurieren",
+                            systemImage: "graduationcap.fill",
+                            accent: .indigo
+                        ) {
+                            schoolTypeSection
+                        }
+
+                        SettingsCard(
+                            title: "Prüfungsfächer",
+                            subtitle: "Bis zu 4 Hauptfächer markieren",
+                            systemImage: "checkmark.seal.fill",
+                            accent: .orange
+                        ) {
+                            examSection
+                        }
+
+                        SettingsCard(
+                            title: "Aktionen",
+                            subtitle: "Schuljahr zurücksetzen oder löschen",
+                            systemImage: "exclamationmark.triangle.fill",
+                            accent: .red
+                        ) {
+                            dangerZone
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+            }
+            .navigationTitle("Schuljahr bearbeiten")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Schließen") { dismiss() }
+                }
+            }
+            .background(
+                ThemedBackground(
+                    isDark: store.darkMode,
+                    isFeminine: store.theme == "feminine",
+                    intensity: store.themeBackgroundIntensity
+                )
+                .ignoresSafeArea()
+            )
+            .sheetNavigationTitle("Schuljahr bearbeiten")
+            .sheet(isPresented: $showResetSheet) {
+                ResetConfirmSheet(
+                    title: "Aktives Schuljahr zurücksetzen",
+                    message: "Alle Daten des aktiven Schuljahres werden gelöscht. Danach startest du den Schuljahrs-Setup erneut.",
+                    password: $resetPassword,
+                    isPresented: $showResetSheet,
+                    slideDone: $resetSlideDone,
+                    isProcessing: isResetting,
+                    errorMessage: resetError,
+                    confirmAction: confirmResetYear
+                )
+            }
+            .sheet(isPresented: $showDeleteSheet) {
+                ResetConfirmSheet(
+                    title: "Aktives Schuljahr löschen",
+                    message: "Das aktuelle Schuljahr wird komplett entfernt. Falls ein weiteres Schuljahr existiert, wird es automatisch aktiviert, sonst startet der Schuljahrs-Setup erneut.",
+                    password: $deletePassword,
+                    isPresented: $showDeleteSheet,
+                    slideDone: $deleteSlideDone,
+                    isProcessing: isDeleting,
+                    errorMessage: deleteError,
+                    confirmAction: confirmDeleteYear
+                )
+            }
+            .onAppear { bootstrap() }
+            .onChange(of: store.activeSchoolYearId) { _, _ in bootstrap() }
+        }
+    }
+
+    @ViewBuilder
+    private var chips: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                CompactStatusChip(
+                    text: store.schoolType == .fos ? "FOS" : "BOS",
+                    icon: "graduationcap.fill",
+                    color: accent
+                )
+                if let grade = store.gradeYear {
+                    CompactStatusChip(
+                        text: "\(grade). Jgst.",
+                        icon: "bookmark.fill",
+                        color: .indigo
+                    )
+                }
+                CompactStatusChip(
+                    text: "\(currentExamSubjectsCount)/\(maxExamSubjects) Prüfungsfächer",
+                    icon: "checkmark.seal.fill",
+                    color: .orange
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var nameSection: some View {
+        SettingsSectionBox {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Bezeichnung")
+                    .font(sectionHeaderFont)
+                Text("Passe die Anzeige deines aktuellen Schuljahres an.")
+                    .font(helperFont)
+                    .foregroundStyle(.secondary)
+
+                TextField(displayName.isEmpty ? "Schuljahr" : displayName, text: $nameInput)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .padding(12)
+                    .background(Color.formInputBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                Button {
+                    Task { await saveName() }
+                } label: {
+                    HStack(spacing: 8) {
+                        if isSavingName {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "checkmark.seal.fill")
+                            Text("Bezeichnung speichern")
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(SoftTintButtonStyle(accent: accent))
+                .disabled(!nameHasChanges || isSavingName)
+
+                if let msg = nameMessage {
+                    Text(msg)
+                        .font(helperFont)
+                        .foregroundStyle(.green)
+                }
+                if let err = nameError {
+                    Text(err)
+                        .font(helperFont)
+                        .foregroundStyle(.red)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var schoolTypeSection: some View {
+        SettingsSectionBox {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Schulart & Jahrgang")
+                    .font(sectionHeaderFont)
+                Text("Lege Schulart und Jahrgangsstufe für das aktuelle Schuljahr fest.")
+                    .font(helperFont)
+                    .foregroundStyle(.secondary)
+
+                Picker(
+                    "",
+                    selection: Binding(
+                        get: { store.schoolType },
+                        set: { val in
+                            Task {
+                                await store.updateSchoolType(val)
+                                if val == .bos, store.gradeYear == 11 {
+                                    await store.updateGradeYear(12)
+                                }
+                            }
+                        }
+                    )
+                ) {
+                    Text("FOS").tag(SchoolType.fos)
+                    Text("BOS").tag(SchoolType.bos)
+                }
+                .pickerStyle(.segmented)
+
+                VStack(spacing: 10) {
+                    ForEach(gradeOptions, id: \.self) { grade in
+                        let selected = store.gradeYear == grade
+                        Button {
+                            Task { await store.updateGradeYear(grade) }
+                        } label: {
+                            HStack {
+                                Text("\(grade). Jahrgang")
+                                    .font(.body)
+                                Spacer()
+                                if selected {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(.green)
+                                }
+                            }
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(selected ? Color.accentColor.opacity(0.12) : Color(.secondarySystemBackground))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(selected ? Color.accentColor : Color.clear, lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var examSection: some View {
+        SettingsSectionBox {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Prüfungsfächer")
+                    .font(sectionHeaderFont)
+                Text("Markiere bis zu 4 Prüfungsfächer für das aktuelle Schuljahr.")
+                    .font(helperFont)
+                    .foregroundStyle(.secondary)
+
+                let eligible = examEligibleSubjects
+
+                if eligible.isEmpty {
+                    Text("Lege zuerst Hauptfächer an, um Prüfungsfächer zu wählen.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    VStack(spacing: 8) {
+                        ForEach(eligible, id: \.name) { subject in
+                            ExamSubjectRow(
+                                subject: subject,
+                                isDisabled: !(subject.examSubject ?? false) && currentExamSubjectsCount >= maxExamSubjects,
+                                onToggle: { isOn in
+                                    let nextExamType = subject.examType ?? .written
+                                    Task {
+                                        await store.updateSubjectExamFlags(
+                                            subjectName: subject.name,
+                                            examSubject: isOn,
+                                            examType: nextExamType
+                                        )
+                                    }
+                                }
+                            )
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(Color(.secondarySystemBackground))
+                            )
+                        }
+                    }
+                    if currentExamSubjectsCount >= maxExamSubjects {
+                        Text("Du hast bereits 4 Prüfungsfächer ausgewählt. Entferne eines, um ein anderes Fach als Prüfungsfach zu markieren.")
+                            .font(helperFont)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var dangerZone: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Button(role: .destructive) {
+                resetPassword = ""
+                resetSlideDone = false
+                resetError = nil
+                showResetSheet = true
+            } label: {
+                Label("Schuljahr zurücksetzen", systemImage: "arrow.clockwise")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(SoftTintButtonStyle(accent: .orange))
+
+            Button(role: .destructive) {
+                deletePassword = ""
+                deleteSlideDone = false
+                deleteError = nil
+                showDeleteSheet = true
+            } label: {
+                Label("Schuljahr löschen", systemImage: "trash")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(SoftTintButtonStyle(accent: .red))
+        }
+    }
+
+    private func bootstrap() {
+        nameInput = displayName
+        nameMessage = nil
+        nameError = nil
+    }
+
+    private func saveName() async {
+        guard nameHasChanges else { return }
+        isSavingName = true
+        nameMessage = nil
+        nameError = nil
+        let trimmed = nameInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        defer { isSavingName = false }
+        guard !trimmed.isEmpty else {
+            nameError = "Bitte eine Bezeichnung eingeben."
+            return
+        }
+        await store.updateSchoolYearName(trimmed)
+        nameMessage = "Bezeichnung aktualisiert."
+        nameInput = trimmed
+    }
+
+    private func confirmResetYear() {
+        Task {
+            guard !isResetting else { return }
+            resetError = nil
+            isResetting = true
+            defer { isResetting = false }
+            do {
+                try await store.resetActiveSchoolYear(password: resetPassword)
+                resetPassword = ""
+                resetSlideDone = false
+                resetError = nil
+                showResetSheet = false
+                dismiss()
+            } catch {
+                resetError = error.localizedDescription
+            }
+        }
+    }
+
+    private func confirmDeleteYear() {
+        Task {
+            guard !isDeleting else { return }
+            deleteError = nil
+            isDeleting = true
+            defer { isDeleting = false }
+            do {
+                try await store.deleteActiveSchoolYearCompletely(password: deletePassword)
+                deletePassword = ""
+                deleteSlideDone = false
+                deleteError = nil
+                showDeleteSheet = false
+                dismiss()
+            } catch {
+                deleteError = error.localizedDescription
+            }
+        }
     }
 }
 

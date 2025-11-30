@@ -280,6 +280,7 @@ final class GradesStore: ObservableObject {
     private var schoolYearSnapshotCache: [String: SchoolYearSnapshot] = [:]
 
     @Published var schoolYears: [String] = []
+    @Published var schoolYearNames: [String: String] = [:]
 
     // Gemeinsame Gruppen-ID (Konzept: eine Gruppe für Klausuren & Hausaufgaben)
     var sharedGroupId: String? {
@@ -613,6 +614,7 @@ final class GradesStore: ObservableObject {
         seminarPerformance = nil
         activeSchoolYearId = nil
         schoolYears = []
+        schoolYearNames = [:]
 
         examGroupId = nil
         homeworkGroupId = nil
@@ -890,6 +892,19 @@ final class GradesStore: ObservableObject {
         return "\(previousStart)-\(endSuffix)"
     }
 
+    private func pickNextActiveSchoolYear(after deletedId: String, availableIds: [String]) -> String? {
+        let cleaned = availableIds
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !cleaned.isEmpty else { return nil }
+
+        let predictedNext = SchoolYearService.nextSchoolYearId(from: deletedId)
+        if cleaned.contains(predictedNext) {
+            return predictedNext
+        }
+        return cleaned.sorted(by: >).first
+    }
+
     private func startSchoolYearsListener(uid: String) {
         if schoolYearsCollectionListener != nil { return }
         schoolYearsCollectionListener = db.collection("users").document(uid).collection("schoolYears")
@@ -898,7 +913,16 @@ final class GradesStore: ObservableObject {
                     guard let self else { return }
                     let docs = snapshot?.documents ?? []
                     let ids = docs.map { $0.documentID }.sorted(by: >)
+                    var names: [String: String] = [:]
+                    for doc in docs {
+                        if let name = (doc.data()["name"] as? String)?
+                            .trimmingCharacters(in: .whitespacesAndNewlines),
+                           !name.isEmpty {
+                            names[doc.documentID] = name
+                        }
+                    }
                     self.schoolYears = ids
+                    self.schoolYearNames = names
                     self.persistOfflineSnapshotIfPossible()
                 }
             }
@@ -954,6 +978,7 @@ final class GradesStore: ObservableObject {
             ], merge: true)
             resetSchoolYearScopedData()
             activeSchoolYearId = id
+            schoolYearNames[id] = id
             isSettingUp = false
             await ensureSecondaryListeners(uid: uid, userData: [:])
             return id
@@ -995,6 +1020,7 @@ final class GradesStore: ObservableObject {
             "exams",
             "fachreferat",
             "practicalPerformance",
+            "seminar",
             "examGroupReminders",
             "homeworkGroupReminders",
             "examGroupCompleted",
@@ -1015,17 +1041,65 @@ final class GradesStore: ObservableObject {
         try await deleteSchoolYearData(yearRef: yearRef)
         try await yearRef.delete()
 
-        resetSchoolYearScopedData()
-        activeSchoolYearId = nil
+        let userRef = db.collection("users").document(uid)
+        try await userRef.setData([
+            "activeSchoolYearId": FieldValue.delete(),
+            "onboardingCompleted": false
+        ], merge: true)
 
-        let userData = try await db.collection("users").document(uid).getDocument().data() ?? [:]
-        let onboardingDone = resolveOnboardingDone(from: userData)
-        do {
-            let context = try await ensureYearContext(uid: uid, userData: userData, allowCreation: onboardingDone)
-            activeSchoolYearId = context.id
-            await ensureSecondaryListeners(uid: uid, userData: userData)
-        } catch {
-            // Falls Neuaufbau scheitert, Zustand bleibt bereinigt
+        resetSchoolYearScopedData()
+        schoolYearNames.removeValue(forKey: sid)
+        schoolYears.removeAll { $0 == sid }
+        activeSchoolYearId = nil
+        onboardingRequired = true
+    }
+
+    func deleteActiveSchoolYearCompletely(password: String) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else { throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"]) }
+        try await reauthenticateIfNeeded(password: password)
+        guard let sid = activeSchoolYearId else { throw NSError(domain: "GradesStore", code: -2, userInfo: [NSLocalizedDescriptionKey: "Kein aktives Schuljahr"]) }
+
+        let userRef = db.collection("users").document(uid)
+        let yearRef = schoolYearRef(uid: uid, id: sid)
+        try await deleteSchoolYearData(yearRef: yearRef)
+        try await yearRef.delete()
+
+        let remainingSnap = try await userRef.collection("schoolYears").getDocuments()
+        let remainingIds = remainingSnap.documents
+            .map { $0.documentID }
+            .filter { $0 != sid }
+            .sorted(by: >)
+        var names: [String: String] = [:]
+        for doc in remainingSnap.documents where doc.documentID != sid {
+            if let name = (doc.data()["name"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+               !name.isEmpty {
+                names[doc.documentID] = name
+            }
+        }
+
+        let nextId = pickNextActiveSchoolYear(after: sid, availableIds: remainingIds)
+        var userUpdate: [String: Any] = [:]
+        if let nextId {
+            userUpdate["activeSchoolYearId"] = nextId
+        } else {
+            userUpdate["activeSchoolYearId"] = FieldValue.delete()
+            userUpdate["onboardingCompleted"] = false
+        }
+        try await userRef.setData(userUpdate, merge: true)
+
+        resetSchoolYearScopedData()
+        schoolYearNames = names
+        schoolYears = remainingIds
+
+        if let nextId {
+            activeSchoolYearId = nextId
+            onboardingRequired = false
+            let latestUserData = try? await userRef.getDocument().data()
+            await ensureSecondaryListeners(uid: uid, userData: latestUserData)
+        } else {
+            activeSchoolYearId = nil
+            onboardingRequired = true
         }
     }
 
@@ -1108,6 +1182,7 @@ final class GradesStore: ObservableObject {
     private func shouldDeferSchoolYearSetup(onboardingDone: Bool, hasAnyActiveYear: Bool, forceYearSetup: Bool) -> Bool {
         if forceYearSetup { return false }
         if waitingForLegacyDecision { return true }
+        if onboardingRequired && activeSchoolYearId == nil { return true }
         return !onboardingDone && !hasAnyActiveYear
     }
 
@@ -2236,6 +2311,13 @@ final class GradesStore: ObservableObject {
         groupIds = unionIds
         examGroupIds = unionIds
         homeworkGroupIds = unionIds
+
+        if let sid = activeSchoolYearId,
+           let name = (data["name"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+           !name.isEmpty {
+            schoolYearNames[sid] = name
+        }
 
         if let gy = data["gradeYear"] as? Int, (11...13).contains(gy) {
             gradeYear = gy
@@ -5037,6 +5119,22 @@ final class GradesStore: ObservableObject {
         }
 
         persistOfflineSnapshotIfPossible()
+    }
+
+    func updateSchoolYearName(_ newName: String) async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let sid = activeSchoolYearId else { return }
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        do {
+            let ref = schoolYearRef(uid: uid, id: sid)
+            try await ref.setData([
+                "name": trimmed
+            ], merge: true)
+            schoolYearNames[sid] = trimmed
+        } catch {
+            // optional loggen
+        }
     }
 
     func markOnboardingCompletedIfPossible() async {

@@ -465,7 +465,7 @@ struct FinalGradeView: View {
                             .foregroundStyle(finalGradeColor(finalGradeValueForColor))
                             .clipShape(Capsule())
                             .onTapGesture { toggleFinalGradeToFixed() }
-                        Text("Note antippen")
+                        Text("antippen")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -1795,43 +1795,66 @@ struct FinalGradeView: View {
 
     private var statusDetailSheet: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Warum nicht bestanden?")
-                        .font(.headline)
-                    if statusDetailReasons.isEmpty {
-                        Text("Keine Details verfügbar.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(statusDetailReasons, id: \.self) { reason in
-                                HStack(alignment: .top, spacing: 6) {
-                                    Text("•")
-                                    Text(reason)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 16) {
+                    SettingsCard(
+                        title: "Status-Details",
+                        subtitle: "Prüfungsstatus verstehen",
+                        systemImage: "exclamationmark.triangle.fill",
+                        accent: .orange
+                    ) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Warum nicht bestanden?")
+                                .font(.headline)
+                            if statusDetailReasons.isEmpty {
+                                Text("Keine Details verfügbar.")
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    ForEach(statusDetailReasons, id: \.self) { reason in
+                                        HStack(alignment: .top, spacing: 8) {
+                                            Image(systemName: "xmark.circle.fill")
+                                                .foregroundStyle(.red)
+                                            Text(reason)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
 
                     if !statusDetailNextSteps.isEmpty {
-                        Divider().padding(.vertical, 4)
-                        Text("Was kannst du tun?")
-                            .font(.headline)
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(statusDetailNextSteps, id: \.self) { tip in
-                                HStack(alignment: .top, spacing: 6) {
-                                    Text("→")
-                                    Text(tip)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
+                        SettingsCard(
+                            title: "Nächste Schritte",
+                            subtitle: "So kannst du nachbessern",
+                            systemImage: "lightbulb.max.fill",
+                            accent: .mint
+                        ) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                ForEach(statusDetailNextSteps, id: \.self) { tip in
+                                    HStack(alignment: .top, spacing: 8) {
+                                        Image(systemName: "arrow.forward.circle.fill")
+                                            .foregroundStyle(.mint)
+                                        Text(tip)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
                                 }
                             }
                         }
                     }
                 }
-                .padding()
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
-            .navigationTitle("Status-Details")
+            .background(
+                ThemedBackground(
+                    isDark: store.darkMode,
+                    isFeminine: store.theme == "feminine",
+                    intensity: store.themeBackgroundIntensity
+                )
+            )
+            .sheetNavigationTitle("Status-Details")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Schließen") { showStatusDetails = false }
