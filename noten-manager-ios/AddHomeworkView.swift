@@ -1,10 +1,17 @@
 import SwiftUI
 
+struct AddHomeworkPrefill {
+    let subjectName: String?
+    let title: String?
+    let dueDate: Date?
+}
+
 struct AddHomeworkView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var store: GradesStore
 
     let preselectedSubjectName: String?
+    let prefill: AddHomeworkPrefill?
 
     @State private var subjectName: String = ""
     @State private var title: String = ""
@@ -22,34 +29,58 @@ struct AddHomeworkView: View {
         case title
     }
 
+    private let noSubjectLabel = "Kein Fach"
+
+    private var prefilledSubject: String? {
+        prefill?.subjectName?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private var subjects: [Subject] {
         store.sortedSubjectsForDisplay(store.subjects.filter { $0.name != "Fachreferat" })
     }
 
     private var subjectOptions: [String] {
-        ["Allgemein"] + subjects.map { $0.name }
+        var options = [noSubjectLabel] + subjects.map { $0.name }
+        if let prefilledSubject, !options.contains(prefilledSubject) {
+            options.append(prefilledSubject)
+        }
+        return options
     }
 
     private var canSave: Bool {
         guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         guard !subjectName.isEmpty else { return false }
-        if subjectName == "Allgemein" {
-            return selectedGroupId != nil
-        }
         if hasDueDate {
             return true
         }
         return true
     }
 
-    init(preselectedSubjectName: String? = nil) {
-        self.preselectedSubjectName = preselectedSubjectName
+    init(preselectedSubjectName: String? = nil, prefill: AddHomeworkPrefill? = nil) {
+        self.prefill = prefill
+        let defaultDueDate = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+        _subjectName = State(initialValue: prefill?.subjectName ?? "")
+        _title = State(initialValue: prefill?.title ?? "")
+        _hasDueDate = State(initialValue: prefill?.dueDate != nil)
+        _dueDate = State(initialValue: prefill?.dueDate ?? defaultDueDate)
+        self.preselectedSubjectName = preselectedSubjectName ?? prefill?.subjectName
     }
 
     var body: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 16) {
+                    if prefill != nil {
+                        HStack(spacing: 8) {
+                            Image(systemName: "link.badge.plus")
+                                .foregroundStyle(.blue)
+                            Text("Daten aus geteiltem Link übernommen.")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
                     SettingsCard(
                         title: "Hausaufgabe",
                         subtitle: "Fach, Aufgabe und Fälligkeit",
@@ -78,30 +109,6 @@ struct AddHomeworkView: View {
                                             .foregroundStyle(.secondary)
                                     }
 
-                                    if subjectName == "Allgemein" {
-                                        if store.groupIds.isEmpty {
-                                            Text("Du bist in keiner Gruppe. Tritt einer Gruppe bei, um allgemeine Hausaufgaben anzulegen.")
-                                                .font(.footnote)
-                                                .foregroundStyle(.secondary)
-                                        } else {
-                                            VStack(alignment: .leading, spacing: 6) {
-                                                Text("Gruppe")
-                                                    .font(.subheadline)
-                                                Picker("Gruppe", selection: Binding(
-                                                    get: { selectedGroupId ?? store.groupIds.first ?? "" },
-                                                    set: { selectedGroupId = $0 }
-                                                )) {
-                                                    ForEach(store.groupIds, id: \.self) { gid in
-                                                        Text(store.groupNames[gid] ?? gid).tag(gid)
-                                                    }
-                                                }
-                                                .pickerStyle(.menu)
-                                                .padding(10)
-                                                .background(Color.formInputBackground)
-                                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                            }
-                                        }
-                                    }
                                 }
                             }
 
@@ -157,7 +164,7 @@ struct AddHomeworkView: View {
                                 if !store.groupIds.isEmpty && subjectName != "Allgemein" {
                                     Toggle("Mit Gruppen teilen", isOn: $shareWithGroup)
                                         .tint(.orange)
-                                    Text("Geteilte Aufgaben erscheinen bei allen Gruppenmitgliedern.")
+                                    Text("Gruppen-Aufgaben erscheinen bei allen Gruppenmitgliedern.")
                                         .font(.footnote)
                                         .foregroundStyle(.secondary)
                                 }
@@ -175,7 +182,8 @@ struct AddHomeworkView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
-            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine"))
+            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
+            .sheetNavigationTitle("Hausaufgabe")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Abbrechen") { dismiss() }
@@ -198,18 +206,12 @@ struct AddHomeworkView: View {
                 onDone: { hideKeyboard() }
             )
             .onAppear {
-                if subjectName.isEmpty {
-                    if let pre = preselectedSubjectName,
-                       subjects.contains(where: { $0.name == pre }) {
-                        subjectName = pre
-                    } else if let first = subjects.first?.name {
-                        subjectName = first
-                    } else {
-                        subjectName = subjectOptions.first ?? ""
-                    }
-                }
+                applyInitialSubjectSelection()
                 shareWithGroup = !store.groupIds.isEmpty
                 selectedGroupId = store.groupIds.first
+            }
+            .onChange(of: store.subjects) {
+                applyInitialSubjectSelection()
             }
         }
     }
@@ -227,20 +229,16 @@ struct AddHomeworkView: View {
         do {
             let due: Date? = hasDueDate ? dueDate : nil
             let reminder: Date? = hasReminder ? reminderDate : nil
-            if subjectName == "Allgemein" {
-                guard let gid = selectedGroupId ?? store.groupIds.first else {
-                    error = "Bitte wähle eine Gruppe."
-                    isSaving = false
-                    return
-                }
-                let docId = try await store.addGeneralHomeworkToGroup(groupId: gid, title: trimmedTitle, dueDate: due, reminderAt: reminder)
-                if let reminder {
-                    try await store.setUserReminderForSharedHomework(homeworkId: docId, reminderAt: reminder, groupId: gid)
-                }
-            } else if shareWithGroup {
+            if shareWithGroup {
                 let sharedIds = try await store.addHomeworkToGroups(subjectName: subjectName, title: trimmedTitle, dueDate: due, reminderAt: reminder)
                 if sharedIds.isEmpty {
-                    try await store.addHomeworkToFirestore(subjectName: subjectName, title: trimmedTitle, dueDate: due, reminderAt: reminder)
+                    try await store.addHomeworkToFirestore(
+                        subjectName: subjectName,
+                        title: trimmedTitle,
+                        dueDate: due,
+                        reminderAt: reminder,
+                        importedFromShare: prefill != nil
+                    )
                 } else if let reminder {
                     // Reminder nur für die angelegten geteilten Einträge setzen
                     for item in sharedIds {
@@ -248,12 +246,42 @@ struct AddHomeworkView: View {
                     }
                 }
             } else {
-                try await store.addHomeworkToFirestore(subjectName: subjectName, title: trimmedTitle, dueDate: due, reminderAt: reminder)
+                try await store.addHomeworkToFirestore(
+                    subjectName: subjectName,
+                    title: trimmedTitle,
+                    dueDate: due,
+                    reminderAt: reminder,
+                    importedFromShare: prefill != nil
+                )
             }
             dismiss()
         } catch {
             self.error = error.localizedDescription
         }
         isSaving = false
+    }
+
+    private func applyInitialSubjectSelection() {
+        // Falls das vorbefüllte Fach nicht existiert, auf "Kein Fach" setzen
+        if let prefilledSubject,
+           !subjects.contains(where: { $0.name == prefilledSubject }),
+           !prefilledSubject.isEmpty {
+            subjectName = noSubjectLabel
+            return
+        }
+
+        if subjectName.isEmpty {
+            if let pre = preselectedSubjectName,
+               subjects.contains(where: { $0.name == pre }) {
+                subjectName = pre
+            } else if let prefilledSubject,
+                      subjects.contains(where: { $0.name == prefilledSubject }) {
+                subjectName = prefilledSubject
+            } else if let first = subjects.first?.name {
+                subjectName = first
+            } else {
+                subjectName = noSubjectLabel
+            }
+        }
     }
 }

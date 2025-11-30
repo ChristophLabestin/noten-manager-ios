@@ -36,6 +36,10 @@ struct AddFachreferatView: View {
         case grade, note
     }
 
+    private var sheetTitle: String {
+        store.fachreferat == nil ? "Fachreferat" : "Fachreferat bearbeiten"
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
@@ -114,15 +118,15 @@ struct AddFachreferatView: View {
                             }
                             .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.bordered)
-                        .tint(.red)
+                        .buttonStyle(SoftTintButtonStyle(accent: .red))
                         .padding(.top, 8)
                     }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
-            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine"))
+            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
+            .sheetNavigationTitle(sheetTitle)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Abbrechen") { dismiss() }

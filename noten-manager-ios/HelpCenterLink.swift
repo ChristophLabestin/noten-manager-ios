@@ -6,6 +6,7 @@ struct HelpCenterLink: View {
     let subtitle: String?
     let section: HelpCenterSection
     var accent: Color = .indigo
+    var scrollId: String? = nil
     @State private var showHelp: Bool = false
 
     var body: some View {
@@ -45,7 +46,7 @@ struct HelpCenterLink: View {
         .buttonStyle(.plain)
         .sheet(isPresented: $showHelp) {
             NavigationStack {
-                HelpCenterView(initialSection: section)
+                HelpCenterView(initialSection: section, initialScrollId: scrollId)
                     .environmentObject(store)
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {

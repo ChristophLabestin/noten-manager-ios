@@ -293,3 +293,11 @@ private struct KeyboardToolbarOverlay<Bar: View>: ViewModifier {
     }
 }
 #endif
+
+extension View {
+    /// Applies a large navigation title that behaves like the system sheet header.
+    func sheetNavigationTitle(_ title: String) -> some View {
+        navigationTitle(title)
+            .navigationBarTitleDisplayMode(.large)
+    }
+}

@@ -42,9 +42,11 @@ extension Color {
     static var formCardBackground: Color {
         Color(
             uiColor: UIColor { trait in
-                trait.userInterfaceStyle == .dark
-                ? .systemGray5
-                : .systemBackground
+                if trait.userInterfaceStyle == .dark {
+                    return UIColor(red: 0.12, green: 0.12, blue: 0.14, alpha: 1.0)
+                } else {
+                    return .systemBackground
+                }
             }
         )
     }
@@ -52,11 +54,123 @@ extension Color {
     static var formInputBackground: Color {
         Color(
             uiColor: UIColor { trait in
-                trait.userInterfaceStyle == .dark
-                ? .secondarySystemFill
-                : .systemGray6
+                if trait.userInterfaceStyle == .dark {
+                    return UIColor(red: 0.16, green: 0.16, blue: 0.18, alpha: 1.0)
+                } else {
+                    return .systemGray6
+                }
             }
         )
+    }
+
+    static var formSectionBackground: Color {
+        Color(
+            uiColor: UIColor { trait in
+                if trait.userInterfaceStyle == .dark {
+                    return UIColor(red: 0.10, green: 0.10, blue: 0.12, alpha: 1.0)
+                } else {
+                    return .secondarySystemGroupedBackground
+                }
+            }
+        )
+    }
+}
+
+struct AccentFilledButtonStyle: ButtonStyle {
+    var accent: Color
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        let pressed = configuration.isPressed
+        let base = accent
+        let fillTop = base.opacity(isEnabled ? 0.52 : 0.28)
+        let fillBottom = base.opacity(isEnabled ? 0.86 : 0.48)
+        let glassTint = base.opacity(isEnabled ? 0.24 : 0.12)
+        let edgeLight = Color.white.opacity(isEnabled ? 0.38 : 0.18)
+        let edgeDark = base.opacity(isEnabled ? 0.55 : 0.26)
+        let textColor = Color.white.opacity(isEnabled ? 0.97 : 0.62)
+
+        configuration.label
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(textColor)
+            .padding(.vertical, 11)
+            .frame(maxWidth: .infinity)
+            .background(
+                ZStack {
+                    Capsule(style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [fillTop, fillBottom],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .overlay(
+                            Capsule(style: .continuous)
+                                .fill(glassTint)
+                                .blendMode(.softLight)
+                        )
+                        .overlay(
+                            Capsule(style: .continuous)
+                                .stroke(
+                                    LinearGradient(
+                                        colors: [edgeLight, edgeDark],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
+                                    lineWidth: 1.25
+                                )
+                        )
+
+                    // Glassy top sheen
+                    Capsule(style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(isEnabled ? 0.35 : 0.18),
+                                    Color.white.opacity(0)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .padding(.horizontal, 1)
+                        .padding(.vertical, pressed ? 3 : 2.5)
+                        .blendMode(.screen)
+                        .opacity(isEnabled ? 1 : 0.6)
+                }
+            )
+            .scaleEffect(pressed ? 0.985 : 1)
+            .offset(y: pressed ? 1 : 0)
+            .opacity(isEnabled ? 1 : 0.7)
+            .animation(.spring(response: 0.32, dampingFraction: 0.82), value: pressed)
+    }
+}
+
+struct SoftTintButtonStyle: ButtonStyle {
+    var accent: Color
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        let bg = accent.opacity(isEnabled ? 0.16 : 0.08)
+        let stroke = accent.opacity(isEnabled ? 0.24 : 0.12)
+        configuration.label
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(accent.opacity(isEnabled ? 1 : 0.6))
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(bg)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(stroke, lineWidth: 1)
+            )
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .opacity(isEnabled ? 1 : 0.7)
+            .animation(.spring(response: 0.28, dampingFraction: 0.85), value: configuration.isPressed)
     }
 }
 
@@ -118,8 +232,8 @@ struct SettingsCard<Content: View, Trailing: View>: View {
                 .fill(
                     LinearGradient(
                         colors: [
-                            accent.opacity(0.12),
-                            Color(.secondarySystemBackground)
+                            accent.opacity(0.10),
+                            .formCardBackground
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
@@ -163,7 +277,7 @@ struct SettingsSectionBox<Content: View>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(.secondarySystemGroupedBackground))
+                .fill(Color.formSectionBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -318,8 +432,27 @@ struct StatChip: View {
 struct ThemedBackground: View {
     let isDark: Bool
     let isFeminine: Bool
+    let intensity: Double
 
-    var body: some View {
+    init(isDark: Bool, isFeminine: Bool, intensity: Double = 1.0) {
+        self.isDark = isDark
+        self.isFeminine = isFeminine
+        self.intensity = max(0, min(1, intensity))
+    }
+
+    private var clampedIntensity: Double {
+        max(0, min(1, intensity))
+    }
+
+    private var baseColor: Color {
+        if isDark {
+            return Color(red: 8 / 255, green: 9 / 255, blue: 11 / 255)
+        } else {
+            return Color.white
+        }
+    }
+
+    private var tintLayer: some View {
         Group {
             if isDark {
                 if isFeminine {
@@ -364,6 +497,13 @@ struct ThemedBackground: View {
                     endPoint: .bottom
                 )
             }
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            baseColor
+            tintLayer.opacity(clampedIntensity)
         }
         .ignoresSafeArea()
     }

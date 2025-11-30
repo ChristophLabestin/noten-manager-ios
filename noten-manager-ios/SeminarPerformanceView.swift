@@ -123,28 +123,28 @@ struct SeminarPerformanceView: View {
                                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                 }
 
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text("Abgabetermin (Dienstag der 2. Unterrichtswoche)")
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text("Termine")
                                         .font(.headline)
-                                    DatePicker("Abgabe", selection: $submissionDate, displayedComponents: .date)
-                                        .labelsHidden()
-                                        .onChange(of: submissionDate) { _, _ in
-                                            hasCustomSubmissionDate = true
+                                    dateRow(
+                                        icon: "calendar",
+                                        title: "Abgabe",
+                                        subtitle: "2. Dienstag im Schuljahr",
+                                        date: $submissionDate,
+                                        onChange: { hasCustomSubmissionDate = true }
+                                    )
+                                    dateRow(
+                                        icon: "person.2.fill",
+                                        title: "Präsentation",
+                                        subtitle: "Vortrag & Diskussion",
+                                        date: Binding(
+                                            get: { presentationDate ?? submissionDate },
+                                            set: { presentationDate = $0 }
+                                        ),
+                                        clearAction: {
+                                            presentationDate = nil
                                         }
-                                }
-
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text("Präsentation & Diskussion")
-                                        .font(.headline)
-                                    DatePicker("Präsentation", selection: Binding(
-                                        get: { presentationDate ?? submissionDate },
-                                        set: { presentationDate = $0 }
-                                    ), displayedComponents: .date)
-                                    Button("Präsentationsdatum löschen", role: .destructive) {
-                                        presentationDate = nil
-                                    }
-                                    .font(.caption)
-                                    .opacity(presentationDate == nil ? 0.4 : 1)
+                                    )
                                 }
 
                                 VStack(alignment: .leading, spacing: 6) {
@@ -165,9 +165,14 @@ struct SeminarPerformanceView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("FOBOSO-Kernpunkte")
                                     .font(.headline)
-                                infoRow(title: "Aufbau & Termine", text: "Blockphase nach der Fachabiturprüfung (min. 60 Stunden), Themenfestlegung bis Blockphasenende, mindestens eine Zwischenpräsentation/Exposé. Abgabe der Seminararbeit am Dienstag der zweiten Unterrichtswoche, Präsentation danach.")
-                                infoRow(title: "Bewertung", text: "Individuelle Leistung, Seminararbeit (2×) und Präsentation/Diskussion je 0–15 Punkte. 0 Punkte in einer Teilleistung ⇒ Seminar gesamt 0 Punkte.")
-                                infoRow(title: "Pflichten", text: "Seminar ist Pflichtveranstaltung (Unfallversicherung). Bei externen Partnern gelten Anordnungen/Hausordnung, kein Entgelt, Verschwiegenheit.")
+                                HelpCenterLink(
+                                    title: "Seminarfach im Help Center",
+                                    subtitle: "Bewertung, Termine und Pflichten",
+                                    section: .exams,
+                                    accent: .indigo,
+                                    scrollId: "help_exams_seminar"
+                                )
+                                .environmentObject(store)
                             }
                         }
                     }
@@ -189,20 +194,19 @@ struct SeminarPerformanceView: View {
                             }
                             .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.bordered)
-                        .tint(.red)
+                        .buttonStyle(SoftTintButtonStyle(accent: .red))
                         .padding(.top, 4)
                     }
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
             }
-            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine"))
-            .navigationTitle("Seminarfach")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") { dismiss() }
-                }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+        }
+        .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
+        .sheetNavigationTitle("Seminarfach")
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Abbrechen") { dismiss() }
+            }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
                         Task { await save() }
@@ -272,27 +276,63 @@ struct SeminarPerformanceView: View {
                 HStack {
                     Text(value.wrappedValue != nil ? "\(Int(value.wrappedValue!)) Punkte" : "Nicht eingetragen")
                         .font(.body.weight(.semibold))
+                        .foregroundStyle(Color.white)
                     Spacer()
                     Image(systemName: "chevron.down")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.white)
                 }
                 .padding(10)
-                .background(Color.formInputBackground)
+                .background(Color.gray.opacity(0.25))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
     }
 
-    private func infoRow(title: String, text: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-            Text(text)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+    private func dateRow(icon: String,
+                         title: String,
+                         subtitle: String? = nil,
+                         date: Binding<Date>,
+                         onChange: (() -> Void)? = nil,
+                         clearAction: (() -> Void)? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.indigo.opacity(0.16))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: icon)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color.indigo)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
+                    }
+                }
+                Spacer()
+            }
+
+            HStack(spacing: 8) {
+                Spacer()
+                DatePicker("", selection: date, displayedComponents: .date)
+                    .labelsHidden()
+                    .datePickerStyle(.compact)
+                    .onChange(of: date.wrappedValue) { _, _ in
+                        onChange?()
+                    }
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color.formInputBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private func save() async {

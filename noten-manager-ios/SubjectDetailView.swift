@@ -9,7 +9,6 @@ struct SubjectDetailView: View {
     let subject: Subject
 
     enum HalfYearFilter: Hashable { case all, one, two }
-    private enum WeightChoice: Hashable { case preset(Double), custom }
 
     // Aktueller Fachzustand (lokal, damit Umbenennen direkt sichtbar ist)
     @State private var currentSubjectName: String
@@ -20,15 +19,9 @@ struct SubjectDetailView: View {
 
     @State private var halfYear: HalfYearFilter = .all
 
-    // Inline-Editing State
-    @State private var editingGradeId: String? = nil
-    @State private var editedGradeValue: String = ""
-    @State private var editedWeightChoice: WeightChoice = .preset(1)
-    @State private var editedCustomWeightText: String = ""
-    @State private var editedDate: Date = Date()
-    @State private var editedHalfYear: Int = 1
-    @State private var editedNoteInline: String = ""
-    @State private var isSaving: Bool = false
+    // Grade sheet states
+    @State private var gradeToEdit: GradeWithId? = nil
+    @State private var gradeDetail: GradeWithId? = nil
 
     // Notiz Sheet
     @State private var showNoteSheet: Bool = false
@@ -61,6 +54,16 @@ struct SubjectDetailView: View {
     @State private var showExamListSheet: Bool = false
     @State private var examForNewGrade: Exam? = nil
     @State private var detailExam: Exam? = nil
+    @State private var detailHomework: Homework? = nil
+    @State private var editingExam: Exam? = nil
+    @State private var editingHomework: Homework? = nil
+
+    private var editSheetTitle: String {
+        let name = editName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !name.isEmpty { return name }
+        let current = currentSubjectName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return current.isEmpty ? "Fach bearbeiten" : current
+    }
 
     init(subject: Subject) {
         self.subject = subject
@@ -69,6 +72,11 @@ struct SubjectDetailView: View {
         _currentRoom = State(initialValue: subject.room)
         _currentEmail = State(initialValue: subject.email)
         _currentAlias = State(initialValue: subject.alias)
+    }
+
+    private var subjectTitle: String {
+        let trimmed = currentSubjectName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Fach" : trimmed
     }
 
     private var allGrades: [GradeWithId] {
@@ -103,54 +111,11 @@ struct SubjectDetailView: View {
         ]
     }
 
-    private func selectedEditedWeightLabel() -> String {
-        switch editedWeightChoice {
-        case .preset(let value):
-            if value == 3 { return "Fachreferat" }
-            if let match = weightOptions().first(where: { $0.value == value }) {
-                return match.title
-            }
-            return "Art auswählen"
-        case .custom:
-            if let weight = parsedEditedCustomWeight() {
-                return "Sonstige Leistung (\(formatWeight(weight))x)"
-            }
-            return "Sonstige Leistung"
-        }
-    }
-
-    private func parsedEditedCustomWeight() -> Double? {
-        let cleaned = editedCustomWeightText
-            .replacingOccurrences(of: ",", with: ".")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleaned.isEmpty, let value = Double(cleaned), value > 0 else { return nil }
-        return value
-    }
-
-    private func resolvedEditedWeight() -> Double? {
-        switch editedWeightChoice {
-        case .preset(let value):
-            return value
-        case .custom:
-            guard let custom = parsedEditedCustomWeight() else { return nil }
-            return -abs(custom)
-        }
-    }
-
     private func formatWeight(_ value: Double) -> String {
         if value == floor(value) {
             return String(Int(value))
         }
         return String(format: "%.2f", value)
-    }
-
-    private var canSaveInlineEdit: Bool {
-        if isSaving { return false }
-        if Double(editedGradeValue) == nil { return false }
-        if case .custom = editedWeightChoice {
-            return parsedEditedCustomWeight() != nil
-        }
-        return true
     }
 
     private func averageForSubject() -> Double? {
@@ -243,7 +208,7 @@ struct SubjectDetailView: View {
     }
 
     private var pageBackground: some View {
-        ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine")
+        ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity)
     }
 
     @Environment(\.colorScheme) private var colorScheme
@@ -285,17 +250,24 @@ struct SubjectDetailView: View {
                     Text("Halbjahr filtern")
                         .font(.headline)
                     HStack {
-                        HStack(spacing: 4) {
+                        HStack(spacing: 6) {
                             SegmentButton(title: "Alle", active: halfYear == .all) { halfYear = .all }
                             SegmentButton(title: "1. Hj", active: halfYear == .one) { halfYear = .one }
                             SegmentButton(title: "2. Hj", active: halfYear == .two) { halfYear = .two }
                         }
-                        .padding(4)
-                        .background(toggleBackground)
-                        .clipShape(Capsule())
+                        .padding(6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 999, style: .continuous)
+                                .fill(toggleBackground)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 999, style: .continuous)
+                                .stroke(toggleStroke, lineWidth: 1)
+                        )
                         .shadow(color: toggleShadow, radius: 8, x: 0, y: 4)
 
-                        Spacer()
+                        Spacer(minLength: 0)
                     }
                 }
             }
@@ -459,38 +431,61 @@ struct SubjectDetailView: View {
         .background(pageBackground)
         .sheet(isPresented: $showEditSubjectSheet) {
             NavigationStack {
-                Form {
-                    Section("Allgemein") {
-                        TextField("Fachname", text: $editName)
-                            .textInputAutocapitalization(.words)
-                    }
-                    Section("Details") {
-                        TextField("Lehrkraft", text: $editTeacher)
-                        TextField("Raum", text: $editRoom)
-                        TextField("Kürzel", text: $editAlias)
-                        TextField("E-Mail", text: $editEmail)
-                            .keyboardType(.emailAddress)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled(true)
-                    }
-                    Section {
-                        Button(role: .destructive) {
-                            showDeleteSubjectAlert = true
-                        } label: {
-                            HStack {
-                                Spacer()
-                                Text("Fach löschen")
-                                Spacer()
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 16) {
+                        SettingsCard(
+                            title: "Fach bearbeiten",
+                            subtitle: "Name & Details anpassen",
+                            systemImage: "slider.horizontal.3",
+                            accent: .indigo
+                        ) {
+                            VStack(alignment: .leading, spacing: 12) {
+                                SettingsSectionBox {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text("Name")
+                                            .font(.headline)
+                                        TextField("z. B. Mathematik", text: $editName)
+                                            .textInputAutocapitalization(.words)
+                                            .padding(12)
+                                            .background(Color.formInputBackground)
+                                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    }
+                                }
+
+                                SettingsSectionBox {
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        Text("Details")
+                                            .font(.headline)
+                                        detailField(label: "Lehrkraft", value: $editTeacher)
+                                        detailField(label: "Raum", value: $editRoom)
+                                        detailField(label: "Kürzel", value: $editAlias)
+                                        detailField(label: "E-Mail", value: $editEmail, keyboard: .emailAddress, autocap: .never)
+                                    }
+                                }
+
+                                SettingsSectionBox {
+                                    Button(role: .destructive) {
+                                        showDeleteSubjectAlert = true
+                                    } label: {
+                                        Text("Fach löschen")
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .tint(.red)
+                                }
                             }
                         }
-                    }
                 }
-                .navigationTitle("Fach bearbeiten")
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Abbrechen") {
-                            cancelEditSubject()
-                        }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+            }
+            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
+            .sheetNavigationTitle(editSheetTitle)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") {
+                        cancelEditSubject()
+                    }
                     }
                     ToolbarItem(placement: .confirmationAction) {
                         Button(isSavingSubject ? "Speichern…" : "Speichern") {
@@ -499,6 +494,8 @@ struct SubjectDetailView: View {
                         .disabled(isSavingSubject)
                     }
                 }
+                .scrollDismissesKeyboard(.interactively)
+                .hideKeyboardOnTap()
             }
         }
         .sheet(isPresented: $showNoteSheet) {
@@ -509,7 +506,7 @@ struct SubjectDetailView: View {
                             .frame(minHeight: 120)
                     }
                 }
-                .navigationTitle("Notiz bearbeiten")
+                .sheetNavigationTitle("Notiz bearbeiten")
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Abbrechen") { showNoteSheet = false }
@@ -520,6 +517,24 @@ struct SubjectDetailView: View {
                     }
                 }
             }
+        }
+        .sheet(item: $gradeToEdit) { grade in
+            EditGradeView(
+                grade: grade,
+                subjectName: currentSubjectName,
+                subjectType: subject.type
+            )
+            .environmentObject(store)
+        }
+        .sheet(item: $gradeDetail) { grade in
+            GradeDetailSheet(
+                grade: grade,
+                subjectName: currentSubjectName,
+                subjectType: subject.type,
+                onEdit: { gradeToEdit = $0 },
+                onDelete: { grade in deleteConfirmGradeId = grade.id }
+            )
+            .environmentObject(store)
         }
         .alert(
             "Note löschen?",
@@ -554,7 +569,7 @@ struct SubjectDetailView: View {
         } message: {
             Text("Dieses Fach und alle zugehörigen Noten werden dauerhaft gelöscht.")
         }
-        .navigationBarTitleDisplayMode(.inline)
+        .sheetNavigationTitle(subjectTitle)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 0) {
@@ -606,6 +621,7 @@ struct SubjectDetailView: View {
             AddGradeView(
                 preselectedSubjectName: exam.subjectName,
                 preselectedWeight: exam.weight,
+                preselectedCustomWeight: exam.customWeight,
                 prefilledNote: note,
                 linkedExamId: exam.id,
                 markLinkedExamCompletedByDefault: true
@@ -617,7 +633,25 @@ struct SubjectDetailView: View {
                 .environmentObject(store)
         }
         .sheet(item: $detailExam) { exam in
-            ExamDetailSheet(exam: exam)
+            ExamDetailSheet(
+                exam: exam,
+                onEdit: { editingExam = $0 }
+            )
+                .environmentObject(store)
+        }
+        .sheet(item: $detailHomework) { homework in
+            HomeworkDetailSheet(
+                homework: homework,
+                onEdit: { editingHomework = $0 }
+            )
+                .environmentObject(store)
+        }
+        .sheet(item: $editingExam) { exam in
+            EditExamView(exam: exam)
+                .environmentObject(store)
+        }
+        .sheet(item: $editingHomework) { hw in
+            EditHomeworkView(homework: hw)
                 .environmentObject(store)
         }
         .keyboardDismissToolbar()
@@ -635,12 +669,18 @@ struct SubjectDetailView: View {
 
     private var toggleBackground: Color {
         colorScheme == .dark
-            ? Color(red: 15 / 255, green: 23 / 255, blue: 42 / 255).opacity(0.9)
-            : .white
+            ? Color.white.opacity(0.06)
+            : Color(.systemBackground)
     }
 
     private var toggleShadow: Color {
         Color.black.opacity(colorScheme == .dark ? 0.5 : 0.12)
+    }
+
+    private var toggleStroke: Color {
+        colorScheme == .dark
+            ? Color.white.opacity(0.08)
+            : Color.black.opacity(0.05)
     }
 
     @ViewBuilder
@@ -657,18 +697,40 @@ struct SubjectDetailView: View {
     }
 
     @ViewBuilder
+    private func detailField(label: String, value: Binding<String>, keyboard: UIKeyboardType = .default, autocap: TextInputAutocapitalization = .sentences) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            TextField(label, text: value)
+                .keyboardType(keyboard)
+                .textInputAutocapitalization(autocap)
+                .padding(12)
+                .background(Color.formInputBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+    }
+
+    @ViewBuilder
     private func examRow(_ exam: Exam, onAddGrade: @escaping () -> Void) -> some View {
         let now = Date()
+        let isPast = !exam.isActive
         let canMarkCompleted = !exam.isCompleted && exam.date <= now
         let checkmarkSize: CGFloat = 18
+        let badge = statusBadge(
+            exam.isCompleted ? "Erledigt" : (isPast ? "Wartet auf Note" : "Geplant"),
+            color: exam.isCompleted ? .green : (isPast ? .red : .blue)
+        )
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(exam.title.isEmpty ? "Klausur" : exam.title)
                     .font(.headline)
                     .lineLimit(1)
-                Text(exam.date.formatted(date: .abbreviated, time: .omitted))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Text(exam.date.formatted(date: .abbreviated, time: exam.hasTime ? .shortened : .omitted))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 if let notes = exam.notes, !notes.isEmpty {
                     Text(notes)
                         .font(.caption2)
@@ -677,33 +739,50 @@ struct SubjectDetailView: View {
                 }
             }
             Spacer()
-            HStack(spacing: 8) {
-                if canMarkCompleted {
+            VStack(alignment: .trailing, spacing: 8) {
+                badge
+                HStack(spacing: 8) {
+                    if canMarkCompleted {
+                        Button {
+                            Task { await markExamCompleted(exam) }
+                        } label: {
+                            Image(systemName: "checkmark.circle")
+                                .foregroundStyle(.primary)
+                                .font(.system(size: checkmarkSize, weight: .semibold))
+                                .padding(8)
+                                .background(Color.formInputBackground)
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Als erledigt markieren")
+                    }
+
                     Button {
-                        Task { await markExamCompleted(exam) }
+                        detailExam = exam
                     } label: {
-                        Image(systemName: "checkmark.circle")
+                        Image(systemName: "info.circle")
                             .foregroundStyle(.primary)
-                            .font(.system(size: checkmarkSize, weight: .semibold))
+                            .font(.system(size: 18, weight: .semibold))
+                            .padding(8)
+                            .background(Color.formInputBackground)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Als erledigt markieren")
-                }
+                    .accessibilityLabel("Details anzeigen")
 
-                Button {
-                    onAddGrade()
-                } label: {
-                    Image(systemName: "text.badge.plus")
-                        .foregroundStyle(.blue)
-                        .font(.system(size: 16, weight: .semibold))
+                    Button {
+                        onAddGrade()
+                    } label: {
+                        Image(systemName: "text.badge.plus")
+                            .foregroundStyle(.primary)
+                            .font(.system(size: 18, weight: .semibold))
+                            .padding(8)
+                            .background(Color.formInputBackground)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Note hinzufügen")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Note hinzufügen")
-
-                statusBadge(
-                    exam.isCompleted ? "Erledigt" : (exam.date < now ? "Wartet auf Note" : "Geplant"),
-                    color: exam.isCompleted ? .green : (exam.date < now ? .red : .blue)
-                )
             }
         }
         .padding(12)
@@ -720,7 +799,7 @@ struct SubjectDetailView: View {
     private func noteForExam(_ exam: Exam) -> String {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
-        formatter.timeStyle = .none
+        formatter.timeStyle = exam.hasTime ? .short : .none
         let dateString = formatter.string(from: exam.date)
         return "Geschrieben am \(dateString)"
     }
@@ -732,7 +811,7 @@ struct SubjectDetailView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(homework.title)
                     .font(.headline)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1)
                 HStack(spacing: 6) {
                     if let due = homework.dueDate {
                         Text("Fällig: \(due.formatted(date: .abbreviated, time: .omitted))")
@@ -750,11 +829,29 @@ struct SubjectDetailView: View {
             }
             Spacer()
             HStack(spacing: 8) {
+                let iconSize: CGFloat = 18
+
+                Button {
+                    detailHomework = homework
+                } label: {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: iconSize, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .padding(8)
+                        .background(Color.formInputBackground)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+                .buttonStyle(.plain)
+
                 Button {
                     Task { await toggleHomeworkCompletion(homework) }
                 } label: {
                     Image(systemName: "checkmark.circle")
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(.system(size: iconSize, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .padding(8)
+                        .background(Color.formInputBackground)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 }
                 .buttonStyle(.plain)
             }
@@ -768,6 +865,8 @@ struct SubjectDetailView: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(Color(.separator).opacity(0.15), lineWidth: 1)
         )
+        .contentShape(Rectangle())
+        .onTapGesture { detailHomework = homework }
     }
 
 private func statusBadge(_ text: String, color: Color) -> some View {
@@ -837,6 +936,23 @@ private func statusBadge(_ text: String, color: Color) -> some View {
         return (2, hw.createdAt)
     }
 
+    private func gradeActionButton(icon: String, tint: Color, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .semibold))
+                Text(label)
+                    .font(.footnote.weight(.semibold))
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 10)
+            .background(tint.opacity(0.12))
+            .foregroundStyle(tint)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
     // MARK: - FAB-Action Sheet
 
     private struct AddActionChooserView: View {
@@ -849,7 +965,7 @@ private func statusBadge(_ text: String, color: Color) -> some View {
         var body: some View {
             NavigationStack {
                 ZStack {
-                    ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine")
+                    ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity)
                         .ignoresSafeArea()
 
                     VStack(spacing: 18) {
@@ -979,229 +1095,62 @@ private func statusBadge(_ text: String, color: Color) -> some View {
 
     @ViewBuilder
     private func gradeCard(_ grade: GradeWithId) -> some View {
-        let isEditing = (editingGradeId == grade.id)
         let typeLabel = gradeTypeLabel(weight: grade.weight)
         let halfYearText = halfYearLabel(grade.halfYear)
+        let noteText = grade.note ?? ""
 
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
                         Text(typeLabel)
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.primary)
                         if let halfYearLabel = halfYearText {
-                            PillBadge(
-                                text: halfYearLabel,
-                                systemImage: "calendar",
-                                foreground: .indigo,
-                                background: Color.indigo.opacity(0.14)
-                            )
+                            attentionBadge(halfYearLabel, color: .indigo, icon: "calendar")
                         }
                     }
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         Text(grade.date.formatted(date: .abbreviated, time: .omitted))
-                            .font(.caption)
+                            .font(.caption2)
                             .foregroundStyle(.secondary)
-                        if let note = grade.note, !note.isEmpty {
-                            Label("Notiz", systemImage: "note.text")
-                                .font(.caption)
-                                .labelStyle(.titleOnly)
-                                .foregroundStyle(.secondary)
+                        if !noteText.isEmpty {
+                            attentionBadge("Notiz", color: .orange, icon: "note.text")
                         }
                     }
                 }
 
-                Spacer()
+                Spacer(minLength: 0)
 
                 Text(String(format: "%.1f", grade.grade))
                     .font(.title3.weight(.semibold))
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(gradeColor(grade.grade).opacity(0.15))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(gradeColor(grade.grade).opacity(0.18))
                     .foregroundStyle(gradeColor(grade.grade))
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
 
-            if !isEditing {
-                HStack(spacing: 10) {
-                    if let note = grade.note, !note.isEmpty {
-                        Button {
-                            openNoteEditor(for: grade.id, current: note)
-                        } label: {
-                            Label("Notiz ansehen", systemImage: "text.quote")
-                        }
-                    } else {
-                        Button {
-                            openNoteEditor(for: grade.id, current: "")
-                        } label: {
-                            Label("Notiz hinzufügen", systemImage: "square.and.pencil")
-                        }
-                    }
-
-                    Spacer()
-
-                    Button {
-                        startInlineEdit(grade)
-                    } label: {
-                        Image(systemName: "slider.horizontal.3")
-                    }
-                    .buttonStyle(.bordered)
-
-                    Button(role: .destructive) {
-                        deleteConfirmGradeId = grade.id
-                    } label: {
-                        Image(systemName: "trash")
-                    }
-                    .buttonStyle(.bordered)
+            HStack(spacing: 10) {
+                gradeActionButton(icon: "slider.horizontal.3", tint: .orange, label: "Bearbeiten") {
+                    gradeToEdit = grade
                 }
-            } else {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 12) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Note")
-                                .font(.subheadline)
-                            TextField("z. B. 10.0", text: $editedGradeValue)
-                                .keyboardType(.decimalPad)
-                                .padding(10)
-                                .background(Color.formInputBackground)
-                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        }
 
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Halbjahr")
-                                .font(.subheadline)
-                            Picker("", selection: $editedHalfYear) {
-                                Text("1. Hj").tag(1)
-                                Text("2. Hj").tag(2)
-                            }
-                            .pickerStyle(.segmented)
-                        }
-                    }
+                gradeActionButton(icon: "info.circle", tint: .indigo, label: "Info") {
+                    gradeDetail = grade
+                }
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Art")
-                            .font(.subheadline)
-                        Menu {
-                            ForEach(weightOptions(), id: \.value) { option in
-                                let isSelected: Bool = {
-                                    if case .preset(let value) = editedWeightChoice {
-                                        return value == option.value
-                                    }
-                                    return false
-                                }()
-                                Button {
-                                    editedWeightChoice = .preset(option.value)
-                                    editedCustomWeightText = ""
-                                } label: {
-                                    HStack {
-                                        Text(option.title)
-                                        if isSelected {
-                                            Spacer()
-                                            Image(systemName: "checkmark")
-                                        }
-                                    }
-                                }
-                            }
-
-                            Divider()
-
-                            let isCustom = {
-                                if case .custom = editedWeightChoice { return true }
-                                return false
-                            }()
-                            Button {
-                                editedWeightChoice = .custom
-                            } label: {
-                                HStack {
-                                    Text("Sonstige Leistung")
-                                    if isCustom {
-                                        Spacer()
-                                        Image(systemName: "checkmark")
-                                    }
-                                }
-                            }
-                        } label: {
-                            HStack {
-                                Text(selectedEditedWeightLabel())
-                                    .font(.subheadline.weight(.semibold))
-                                Spacer()
-                                Image(systemName: "chevron.down")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.formInputBackground)
-                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        }
-                        .tint(.primary)
-
-                        if case .custom = editedWeightChoice {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Gewichtung")
-                                    .font(.subheadline)
-                                TextField("Gewichtung z. B. 1 oder 2.5", text: $editedCustomWeightText)
-                                    .keyboardType(.decimalPad)
-                                    .padding(10)
-                                    .background(Color.formInputBackground)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                Text("Die eingetragene Gewichtung wird direkt für den Schnitt genutzt.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-
-                    DatePicker("Datum", selection: $editedDate, displayedComponents: .date)
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Notiz (optional)")
-                            .font(.subheadline)
-                        TextField("Kommentar zur Note", text: $editedNoteInline)
-                            .padding(10)
-                            .background(Color.formInputBackground)
-                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    }
-
-                    HStack(spacing: 10) {
-                        Button {
-                            Task { await saveInlineEdit(gradeId: grade.id) }
-                        } label: {
-                            if isSaving {
-                                ProgressView()
-                            }
-                            Text(isSaving ? "Speichern..." : "Speichern")
-                                .fontWeight(.semibold)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(!canSaveInlineEdit)
-
-                        Button {
-                            cancelInlineEdit()
-                        } label: {
-                            Text("Abbrechen")
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                    .font(.footnote)
+                gradeActionButton(icon: "trash", tint: .red, label: "Löschen") {
+                    deleteConfirmGradeId = grade.id
                 }
             }
         }
-        .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color(.separator).opacity(0.15), lineWidth: 1)
-        )
+        .padding(10)
+        .background(Color.formSectionBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .contentShape(Rectangle())
         .onTapGesture {
-            if !isEditing {
-                startInlineEdit(grade)
-            }
+            gradeDetail = grade
         }
     }
 
@@ -1220,53 +1169,6 @@ private func statusBadge(_ text: String, color: Color) -> some View {
     private func halfYearLabel(_ value: Int?) -> String? {
         guard let v = value else { return nil }
         return v == 1 ? "1. Halbjahr" : "2. Halbjahr"
-    }
-
-    private func startInlineEdit(_ grade: GradeWithId) {
-        editingGradeId = grade.id
-        editedGradeValue = String(grade.grade)
-        if grade.weight < 0 {
-            editedWeightChoice = .custom
-            editedCustomWeightText = formatWeight(abs(grade.weight))
-        } else if weightOptions().contains(where: { $0.value == grade.weight }) || grade.weight == 3 {
-            editedWeightChoice = .preset(grade.weight)
-            editedCustomWeightText = ""
-        } else {
-            editedWeightChoice = .custom
-            editedCustomWeightText = formatWeight(abs(grade.weight))
-        }
-        editedDate = grade.date
-        editedHalfYear = grade.halfYear ?? 1
-        editedNoteInline = grade.note ?? ""
-    }
-
-    private func cancelInlineEdit() {
-        editingGradeId = nil
-        editedGradeValue = ""
-        editedNoteInline = ""
-    }
-
-    private func saveInlineEdit(gradeId: String) async {
-        guard !isSaving, let key = store.encryptionKey else { return }
-        isSaving = true
-        defer { isSaving = false }
-        guard let resolvedWeight = resolvedEditedWeight() else { return }
-        guard let value = Double(editedGradeValue) else { return }
-        do {
-            try await store.updateGradeInFirestore(
-                subjectId: currentSubjectName,
-                gradeId: gradeId,
-                grade: value,
-                weight: resolvedWeight,
-                date: editedDate,
-                note: editedNoteInline.isEmpty ? nil : editedNoteInline,
-                halfYear: editedHalfYear,
-                using: key
-            )
-            editingGradeId = nil
-        } catch {
-            // Optional: Fehler anzeigen
-        }
     }
 
     private func openNoteEditor(for gradeId: String, current: String) {

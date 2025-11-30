@@ -12,6 +12,54 @@
 				<string>com.googleusercontent.apps.884241144377-s4bcjia27ovl97c0pk7ols5u2g5cudtb</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>notenmanager</string>
+			</array>
+		</dict>
 	</array>
+	<key>CFBundleIcons</key>
+	<dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconFiles</key>
+			<array>
+				<string>AppIcon</string>
+			</array>
+			<key>CFBundleIconName</key>
+			<string>AppIcon</string>
+			<key>UIPrerenderedIcon</key>
+			<false/>
+		</dict>
+		<key>CFBundleAlternateIcons</key>
+		<dict>
+			<key>AppIconTwo</key>
+			<dict>
+				<key>CFBundleIconName</key>
+				<string>AppIconTwo</string>
+				<key>CFBundleIconFiles</key>
+				<array>
+					<string>AppIconTwo</string>
+				</array>
+				<key>UIPrerenderedIcon</key>
+				<false/>
+			</dict>
+		</dict>
+	</dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>de.christophlabestin.noten-manager-ios.refresh</string>
+		<string>de.christophlabestin.noten-manager-ios.liveactivity</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>processing</string>
+	</array>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 </dict>
 </plist>

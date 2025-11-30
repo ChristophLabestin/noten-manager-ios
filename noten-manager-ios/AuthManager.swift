@@ -3,6 +3,8 @@ import Combine
 import FirebaseAuth
 import FirebaseCore
 import GoogleSignIn
+import AuthenticationServices
+import CryptoKit
 
 enum SignInResult {
     case success
@@ -21,6 +23,7 @@ final class AuthManager: ObservableObject {
     }
 
     private var authHandle: AuthStateDidChangeListenerHandle?
+    private var appleAuthHandler: AppleAuthHandler?
 
     func startListeningAuthState() {
         if authHandle != nil { return }
@@ -163,6 +166,53 @@ final class AuthManager: ObservableObject {
         }
     }
 
+    // Apple Sign-In
+    @MainActor
+    func signInWithApple(presentationAnchor: ASPresentationAnchor?) async -> SignInResult {
+        guard !isLoading else { return .failure }
+        guard let anchor = presentationAnchor else {
+            errorMessage = "Kein Fenster für Apple Login gefunden."
+            return .failure
+        }
+        isLoading = true
+        errorMessage = nil
+
+        let rawNonce = randomNonceString()
+        do {
+            let appleCredential = try await performAppleAuthorization(
+                anchor: anchor,
+                hashedNonce: sha256(rawNonce)
+            )
+            return await completeAppleSignIn(appleCredential: appleCredential, rawNonce: rawNonce)
+        } catch {
+            isLoading = false
+            if let authError = error as? ASAuthorizationError, authError.code == .canceled {
+                return .failure
+            }
+            if error is ASAuthorizationError {
+                errorMessage = "Apple Login fehlgeschlagen: \(error.localizedDescription)"
+            } else {
+                errorMessage = mapAuthError(error)
+            }
+            return .failure
+        }
+    }
+
+    @MainActor
+    func signInWithApple(credential: ASAuthorizationAppleIDCredential, rawNonce: String) async -> SignInResult {
+        guard !isLoading else { return .failure }
+        isLoading = true
+        errorMessage = nil
+        return await completeAppleSignIn(appleCredential: credential, rawNonce: rawNonce)
+    }
+
+    func configureAppleRequest(_ request: ASAuthorizationAppleIDRequest) -> String {
+        let nonce = randomNonceString()
+        request.requestedScopes = [.fullName, .email]
+        request.nonce = sha256(nonce)
+        return nonce
+    }
+
     private func mapAuthError(_ error: Error) -> String {
         let ns = error as NSError
 
@@ -189,5 +239,125 @@ final class AuthManager: ObservableObject {
         } else {
             return "Anmeldung fehlgeschlagen. Bitte E-Mail/Passwort prüfen oder später erneut versuchen."
         }
+    }
+
+    private func performAppleAuthorization(anchor: ASPresentationAnchor, hashedNonce: String) async throws -> ASAuthorizationAppleIDCredential {
+        try await withCheckedThrowingContinuation { continuation in
+            let handler = AppleAuthHandler(anchor: anchor) { [weak self] result in
+                continuation.resume(with: result)
+                self?.appleAuthHandler = nil
+            }
+            appleAuthHandler = handler
+
+            let request = ASAuthorizationAppleIDProvider().createRequest()
+            request.requestedScopes = [.fullName, .email]
+            request.nonce = hashedNonce
+
+            let controller = ASAuthorizationController(authorizationRequests: [request])
+            controller.delegate = handler
+            controller.presentationContextProvider = handler
+            controller.performRequests()
+        }
+    }
+
+    @MainActor
+    private func completeAppleSignIn(appleCredential: ASAuthorizationAppleIDCredential, rawNonce: String) async -> SignInResult {
+        guard let idTokenData = appleCredential.identityToken,
+              let idTokenString = String(data: idTokenData, encoding: .utf8) else {
+            errorMessage = "Apple-Token fehlt."
+            isLoading = false
+            return .failure
+        }
+
+        let credential = OAuthProvider.appleCredential(
+            withIDToken: idTokenString,
+            rawNonce: rawNonce,
+            fullName: appleCredential.fullName
+        )
+
+        do {
+            let authResult = try await Auth.auth().signIn(with: credential)
+            OfflineModeManager.shared.recordOnlineLogin(uid: authResult.user.uid)
+
+            if authResult.additionalUserInfo?.isNewUser == true {
+                let formatter = PersonNameComponentsFormatter()
+                let fullNameString = appleCredential.fullName.flatMap { formatter.string(from: $0) }
+                let trimmedName = fullNameString?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let email = authResult.user.email
+                    ?? appleCredential.email
+                    ?? "\(authResult.user.uid)@privaterelay.appleid.com"
+                let resolvedName = (trimmedName?.isEmpty == false ? trimmedName : nil)
+                    ?? authResult.user.displayName
+                    ?? email.components(separatedBy: "@").first
+                    ?? "Apple Nutzer"
+
+                let salt = CryptoService.generateSalt(length: 16)
+                let profile = UserProfile(
+                    id: authResult.user.uid,
+                    name: resolvedName,
+                    email: email,
+                    encryptionSalt: salt
+                )
+                try? await FirestoreService.shared.setUserProfile(
+                    profile: profile,
+                    onboardingCompleted: false
+                )
+            }
+
+            isLoading = false
+            isAuthenticated = true
+            return .success
+        } catch {
+            isLoading = false
+            errorMessage = mapAuthError(error)
+            return .failure
+        }
+    }
+
+    private func randomNonceString(length: Int = 32) -> String {
+        precondition(length > 0)
+        let charset: [Character] = Array("0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._")
+        var result = ""
+        for _ in 0..<length {
+            var random: UInt8 = 0
+            let status = SecRandomCopyBytes(kSecRandomDefault, 1, &random)
+            if status != errSecSuccess {
+                fatalError("Unable to generate nonce. SecRandomCopyBytes failed with OSStatus \(status)")
+            }
+            result.append(charset[Int(random % UInt8(charset.count))])
+        }
+        return result
+    }
+
+    private func sha256(_ input: String) -> String {
+        let inputData = Data(input.utf8)
+        let hashed = SHA256.hash(data: inputData)
+        return hashed.map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+private final class AppleAuthHandler: NSObject, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
+    private let anchor: ASPresentationAnchor
+    private let completion: (Result<ASAuthorizationAppleIDCredential, Error>) -> Void
+
+    init(anchor: ASPresentationAnchor, completion: @escaping (Result<ASAuthorizationAppleIDCredential, Error>) -> Void) {
+        self.anchor = anchor
+        self.completion = completion
+    }
+
+    func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
+        anchor
+    }
+
+    func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
+        if let credential = authorization.credential as? ASAuthorizationAppleIDCredential {
+            completion(.success(credential))
+        } else {
+            completion(.failure(NSError(domain: "AppleAuth", code: -1, userInfo: [NSLocalizedDescriptionKey: "Ungültige Apple-Credential"])))
+        }
+    }
+
+    func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
+        completion(.failure(error))
     }
 }

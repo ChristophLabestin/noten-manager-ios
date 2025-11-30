@@ -22,6 +22,10 @@ struct UnifiedMappingView: View {
         store.sortedSubjectsForDisplay(store.subjects.filter { $0.name != "Fachreferat" }).map { $0.name }
     }
 
+    private var groupTitle: String {
+        store.groupNames[groupId] ?? "Gruppe"
+    }
+
     private func availableLocalNames(for groupSubjectId: String) -> [String] {
         let currentSelection = workingMap[groupSubjectId]
         return localSubjectNames.filter { name in
@@ -32,55 +36,91 @@ struct UnifiedMappingView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                if groupSubjects.isEmpty {
-                    Text("Keine Gruppenfächer vorhanden.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(groupSubjects, id: \.id) { gs in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(gs.name)
-                                if let alias = gs.alias, !alias.isEmpty {
-                                    Text(alias)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+            ScrollView {
+                VStack(spacing: 16) {
+                    SettingsCard(
+                        title: "Fächer abgleichen",
+                        subtitle: groupTitle,
+                        systemImage: "arrow.triangle.2.circlepath",
+                        accent: .purple
+                    ) {
+                        if groupSubjects.isEmpty {
+                            Text("Keine Gruppenfächer vorhanden.")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            VStack(spacing: 12) {
+                                ForEach(groupSubjects, id: \.id) { gs in
+                                    HStack(alignment: .center, spacing: 12) {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(gs.name)
+                                                .font(.body.weight(.semibold))
+                                            if let alias = gs.alias, !alias.isEmpty {
+                                                Text(alias)
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                        }
+                                        Spacer(minLength: 0)
+                                        Picker("", selection: Binding(
+                                            get: { workingMap[gs.id] ?? "" },
+                                            set: { workingMap[gs.id] = $0 }
+                                        )) {
+                                            Text("—").tag("")
+                                            ForEach(availableLocalNames(for: gs.id), id: \.self) { name in
+                                                Text(name).tag(name)
+                                            }
+                                        }
+                                        .pickerStyle(.menu)
+                                        .tint(.primary)
+                                        .padding(4)
+                                        .background(Color.formInputBackground)
+                                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    }
+                                    .padding(12)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .fill(Color.formSectionBackground)
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .stroke(Color.purple.opacity(0.14), lineWidth: 1)
+                                    )
                                 }
                             }
-                            Spacer()
-                            Picker("", selection: Binding(
-                                get: { workingMap[gs.id] ?? "" },
-                                set: { workingMap[gs.id] = $0 }
-                            )) {
-                                Text("—").tag("")
-                                ForEach(availableLocalNames(for: gs.id), id: \.self) { name in
-                                    Text(name).tag(name)
-                                }
-                            }
-                            .labelsHidden()
                         }
+
+                        Text("Fächer, die bereits mit einer anderen Gruppe verknüpft sind, sind nicht aufgelistet.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
-                }
-            }
-            .safeAreaInset(edge: .bottom) {
-                Text("Hinweis: Fächer, die bereits mit einer anderen Gruppe verknüpft sind, können hier nicht erneut verknüpft werden.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal)
-                    .padding(.vertical, 6)
-            }
-            .navigationTitle("Fächer abgleichen")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
+
                     Button {
                         Task { await save() }
                     } label: {
-                        if isSaving { ProgressView() } else { Text("Speichern") }
+                        HStack {
+                            if isSaving { ProgressView() }
+                            Text(isSaving ? "Speichern..." : "Speichern")
+                        }
+                        .frame(maxWidth: .infinity)
                     }
+                    .buttonStyle(SoftTintButtonStyle(accent: .purple))
                     .disabled(isSaving)
+                }
+                .padding(16)
+            }
+            .background(
+                ThemedBackground(
+                    isDark: store.darkMode,
+                    isFeminine: store.theme == "feminine",
+                    intensity: store.themeBackgroundIntensity
+                )
+            )
+            .scrollContentBackground(.hidden)
+            .sheetNavigationTitle(groupTitle)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") { dismiss() }
                 }
             }
             .onAppear {
@@ -99,7 +139,6 @@ struct UnifiedMappingView: View {
     }
 
     private func refreshUsedElsewhere() async {
-        // sammeln aller Mappings anderer Gruppen
         var used: Set<String> = []
         for (gid, map) in store.groupSubjectMappings where gid != groupId {
             for (_, local) in map { used.insert(local) }

@@ -42,6 +42,11 @@ struct PrivacyPolicyView: View {
                             .font(helperFont)
                         }
 
+                        legalSection("Anmeldung mit Google/Apple") {
+                            Text("Für die Anmeldung kannst du wahlweise E-Mail/Passwort, Google Sign-In oder Apple Sign-In nutzen. Dabei werden Name, E-Mail-Adresse, Nutzer-ID und die von Google/Apple bereitgestellten Signaturdaten zur Kontoanlage und Anmeldung verarbeitet (Rechtsgrundlage: Art. 6 Abs. 1 lit. b DSGVO). Google und Apple können Daten auf Servern in den USA verarbeiten (SCC).")
+                                .font(helperFont)
+                        }
+
                         legalSection("Welche Daten werden verarbeitet?") {
                             VStack(alignment: .leading, spacing: 10) {
                                 Text("Registrierungs- und Kontodaten")
@@ -66,12 +71,21 @@ struct PrivacyPolicyView: View {
                                     .padding(.top, 6)
                                 Text("Wir speichern Einstellungen wie Farbschema, Darstellungsoptionen, Benachrichtigungspräferenzen und Sortierungen, um dir eine konsistente Darstellung über mehrere Geräte hinweg zu ermöglichen.")
                                     .font(helperFont)
+
+                                Text("Live Activities")
+                                    .font(.subheadline.weight(.semibold))
+                                    .padding(.top, 6)
+                                Text("Wenn du Live Activities (Countdowns auf dem Sperrbildschirm) aktivierst, speichern wir in Firebase ein Push-Token sowie Prüfungs-ID, Titel, Fach und Zeiten, um die Aktivität aktuell zu halten. Diese Daten werden nach Ende der Prüfung bzw. Deaktivierung entfernt.")
+                                    .font(helperFont)
                             }
                         }
 
                         legalSection("Lokale Speicherung & Mitteilungen") {
-                            Text("Die App nutzt lokale Speicherbereiche deines Geräts (z. B. UserDefaults) für Einstellungen sowie lokale Mitteilungen für Erinnerungen an Hausaufgaben und Prüfungen. Benachrichtigungsdaten bleiben auf deinem Gerät; es werden keine Tracking- oder Marketing-Cookies eingesetzt.")
-                                .font(helperFont)
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Die App nutzt lokale Speicherbereiche deines Geräts (z. B. UserDefaults) für Einstellungen sowie lokale Mitteilungen für Erinnerungen an Hausaufgaben und Prüfungen. Benachrichtigungsdaten bleiben auf deinem Gerät; es werden keine Tracking- oder Marketing-Cookies eingesetzt.")
+                                Text("Für den Offline-Modus sowie Widgets/Live Activities wird zusätzlich ein Snapshot deiner Noten, Termine, Hausaufgaben und Einstellungen als JSON-Datei im App-Dokumentenordner gespeichert. Diese Datei bleibt lokal und wird beim Abmelden oder Account-Löschen entfernt.")
+                            }
+                            .font(helperFont)
                         }
 
                         legalSection("Weitergabe an Dritte und Drittlandtransfer") {
@@ -108,6 +122,26 @@ struct PrivacyPolicyView: View {
                                 .font(helperFont)
                         }
 
+                        legalSection("Support") {
+                            Text("Wenn du den Support kontaktierst, speichern wir Betreff, Nachricht und optional deine E-Mail-Adresse in Firebase, um dein Anliegen zu bearbeiten.")
+                                .font(helperFont)
+                        }
+
+                        legalSection("Teilen von Hausaufgaben") {
+                            Text("Beim Erstellen eines Teilungslinks werden Titel, Fach und Fälligkeitsdatum in einer URL kodiert (fosbos-notenmanager.de; bestehende Links auf noten-manager-v2.web.app funktionieren weiterhin). Jeder, der den Link erhält oder verarbeitet, kann diese Inhalte sehen.")
+                                .font(helperFont)
+                        }
+
+                        legalSection("Externe Inhalte") {
+                            Text("Für Ferieninformationen ruft die App schulferien-api.de per HTTPS auf. Dabei wird technisch deine IP-Adresse an diesen Anbieter übertragen. Eine Protokollierung durch uns erfolgt nicht.")
+                                .font(helperFont)
+                        }
+
+                        legalSection("Löschung in der App") {
+                            Text("Du kannst deinen Account jederzeit in den Einstellungen unter \"Daten zurücksetzen\" > \"Account löschen\" entfernen. Alternativ kannst du uns per E-Mail zur Löschung auffordern.")
+                                .font(helperFont)
+                        }
+
                         legalSection("Änderungen dieser Datenschutzerklärung") {
                             Text("Wir behalten uns vor, diese Datenschutzerklärung bei Bedarf anzupassen, insbesondere wenn wir neue Funktionen einführen oder sich rechtliche Rahmenbedingungen ändern. Die aktuelle Fassung findest du jederzeit in den App-Einstellungen unter \"Datenschutz\".")
                                 .font(helperFont)
@@ -119,10 +153,9 @@ struct PrivacyPolicyView: View {
             .padding(.vertical, 12)
         }
         .background(
-            ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine")
+            ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity)
         )
-        .navigationTitle("Datenschutz")
-        .navigationBarTitleDisplayMode(.inline)
+        .sheetNavigationTitle("Datenschutz")
     }
 
     @ViewBuilder
@@ -202,10 +235,9 @@ struct ImprintView: View {
             .padding(.vertical, 12)
         }
         .background(
-            ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine")
+            ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity)
         )
-        .navigationTitle("Impressum")
-        .navigationBarTitleDisplayMode(.inline)
+        .sheetNavigationTitle("Impressum")
     }
 
     @ViewBuilder
@@ -216,6 +248,115 @@ struct ImprintView: View {
                     .font(.headline)
                 content()
                     .foregroundStyle(.primary)
+            }
+        }
+    }
+}
+
+struct TermsOfUseView: View {
+    @EnvironmentObject private var store: GradesStore
+
+    private var helperFont: Font { .subheadline }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                SettingsCard(
+                    title: "Nutzungsbedingungen",
+                    subtitle: "Regeln für die Nutzung der App",
+                    systemImage: "doc.plaintext.fill",
+                    accent: .indigo
+                ) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        legalSection("Geltungsbereich") {
+                            Text("Diese Bedingungen regeln die Nutzung der Noten Manager iOS-App. Mit der Verwendung der App erkennst du sie an.")
+                                .font(helperFont)
+                        }
+
+                        legalSection("Leistungsumfang") {
+                            Text("Die App dient der Verwaltung von Schulnoten, Hausaufgaben und Prüfungen. Ein Anspruch auf bestimmte Verfügbarkeiten oder Funktionen besteht nicht; Wartung und Weiterentwicklung können zu Änderungen führen.")
+                                .font(helperFont)
+                        }
+
+                        legalSection("Nutzerkonto") {
+                            Text("Für personalisierte Funktionen ist ein Konto erforderlich. Du bist dafür verantwortlich, Zugangsdaten geheim zu halten und dein Konto nicht missbräuchlich zu verwenden.")
+                                .font(helperFont)
+                        }
+
+                        legalSection("Zulässige Nutzung") {
+                            bulletList([
+                                "App nur für private, schulische Zwecke verwenden.",
+                                "Keine rechtswidrigen Inhalte speichern oder teilen.",
+                                "Keine Sicherheitsmechanismen umgehen oder automatisiert Daten abgreifen.",
+                                "Bei Missbrauch oder Sicherheitsverdacht Support informieren."
+                            ])
+                        }
+
+                        legalSection("Kosten") {
+                            Text("Die App ist aktuell kostenlos. Sollte sich dies ändern, informieren wir dich vorab; eine Fortsetzung setzt deine Zustimmung voraus.")
+                                .font(helperFont)
+                        }
+
+                        legalSection("Verfügbarkeit & Haftung") {
+                            Text("Wir bemühen uns um eine stabile Bereitstellung, können Unterbrechungen jedoch nicht ausschließen. Für Datenverluste oder Schäden aus Nichtverfügbarkeit haften wir nur bei Vorsatz oder grober Fahrlässigkeit, sowie bei Verletzung von Leben, Körper oder Gesundheit.")
+                                .font(helperFont)
+                        }
+
+                        legalSection("Datenschutz") {
+                            Text("Informationen zur Verarbeitung personenbezogener Daten findest du in der Datenschutzerklärung in den App-Einstellungen.")
+                                .font(helperFont)
+                        }
+
+                        legalSection("Änderungen der Bedingungen") {
+                            Text("Wir können diese Bedingungen anpassen, wenn berechtigte Gründe bestehen (z. B. neue Funktionen oder rechtliche Anforderungen). Wesentliche Änderungen teilen wir in der App mit; setzt du die Nutzung fort, gelten die neuen Bedingungen.")
+                                .font(helperFont)
+                        }
+
+                        legalSection("Kündigung") {
+                            Text("Du kannst die Nutzung jederzeit beenden, indem du dein Konto löschst oder die App deinstallierst. Wir können den Zugang sperren oder kündigen, wenn du gegen diese Bedingungen verstößt.")
+                                .font(helperFont)
+                        }
+
+                        legalSection("Kontakt") {
+                            Link("clabestin@icloud.com", destination: URL(string: "mailto:clabestin@icloud.com")!)
+                                .font(helperFont)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+        }
+        .background(
+            ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity)
+        )
+        .sheetNavigationTitle("Nutzungsbedingungen")
+    }
+
+    @ViewBuilder
+    private func legalSection(_ title: String, @ViewBuilder content: () -> some View) -> some View {
+        SettingsSectionBox {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title)
+                    .font(.headline)
+                content()
+                    .foregroundStyle(.primary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func bulletList(_ items: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(items, id: \.self) { item in
+                HStack(alignment: .top, spacing: 8) {
+                    Text("•")
+                        .font(.subheadline.weight(.bold))
+                        .padding(.top, 1)
+                    Text(item)
+                        .font(.subheadline)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         }
     }

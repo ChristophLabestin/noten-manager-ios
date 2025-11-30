@@ -38,8 +38,16 @@ private struct HelpSearchEntry: Identifiable {
     }
 }
 
+private struct ScrollOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 struct HelpCenterView: View {
     let initialSection: HelpCenterSection?
+    let initialScrollId: String?
 
     @EnvironmentObject private var store: GradesStore
 
@@ -52,6 +60,7 @@ struct HelpCenterView: View {
     @State private var searchQuery: String = ""
     @FocusState private var searchFocused: Bool
     @State private var didScrollToInitialSection: Bool = false
+    @State private var showScrollToTop: Bool = false
 
     private let searchIndex: [HelpSearchEntry] = [
         HelpSearchEntry(
@@ -194,14 +203,18 @@ struct HelpCenterView: View {
         contactMessage.trimmingCharacters(in: .whitespacesAndNewlines).count >= 10
     }
 
-    init(initialSection: HelpCenterSection? = nil) {
+    init(initialSection: HelpCenterSection? = nil, initialScrollId: String? = nil) {
         self.initialSection = initialSection
+        self.initialScrollId = initialScrollId
     }
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 16) {
+                    Color.clear
+                        .frame(height: 0)
+                        .id("help_top")
                     headerCard
                     searchCard(proxy: proxy)
                     stepsCard
@@ -214,16 +227,55 @@ struct HelpCenterView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(key: ScrollOffsetPreferenceKey.self, value: geo.frame(in: .named("help_scroll")).minY)
+                    }
+                )
             }
+            .coordinateSpace(name: "help_scroll")
             .scrollDismissesKeyboard(.interactively)
-            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine"))
-            .navigationTitle("Help Center")
-            .navigationBarTitleDisplayMode(.inline)
+            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
+            .sheetNavigationTitle("Help Center")
             .onAppear {
                 if contactEmail.isEmpty {
                     contactEmail = Auth.auth().currentUser?.email ?? ""
                 }
                 scrollToInitialSection(using: proxy)
+            }
+            .onPreferenceChange(ScrollOffsetPreferenceKey.self) { minY in
+                // minY moves negative when scrolling down
+                showScrollToTop = minY < -40
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if showScrollToTop {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            proxy.scrollTo("help_top", anchor: .top)
+                        }
+                    } label: {
+                        Image(systemName: "arrow.up")
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(Color.white)
+                            .padding(14)
+                            .background(
+                                Circle()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [Color.indigo, Color.blue.opacity(0.9)],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .shadow(color: Color.black.opacity(0.25), radius: 10, x: 0, y: 6)
+                            )
+                    }
+                    .padding(.trailing, 16)
+                    .padding(.bottom, 24)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                    .animation(.easeInOut(duration: 0.2), value: showScrollToTop)
+                    .accessibilityLabel("Nach oben scrollen")
+                }
             }
             .hideKeyboardOnTap()
         }
@@ -427,6 +479,7 @@ struct HelpCenterView: View {
                     )
                 }
             }
+            .id("help_exams_seminar")
         }
         .softFadeIn(enabled: animationsOn, delay: 0.16, offset: 12)
         .id("help_exams")
@@ -499,7 +552,7 @@ struct HelpCenterView: View {
                     )
                     infoRow(
                         title: "Gruppen & Teilen",
-                        text: "Unter Einstellungen ▸ Gruppen kannst du Gruppen erstellen oder per Code beitreten. Geteilte Hausaufgaben und Klausurtermine erscheinen automatisch in deiner Übersicht; Erinnerungen und Erledigt-Status werden pro Nutzer gespeichert."
+                        text: "Unter Einstellungen ▸ Gruppen kannst du Gruppen erstellen oder per Code beitreten. Gruppen-Hausaufgaben und Gruppentermine erscheinen automatisch in deiner Übersicht; Erinnerungen und Erledigt-Status werden pro Nutzer gespeichert."
                     )
                 }
             }
@@ -610,15 +663,18 @@ struct HelpCenterView: View {
                     Button {
                         Task { await sendTicket() }
                     } label: {
-                        if isSendingTicket {
-                            ProgressView()
-                        } else {
-                            Text("Ticket absenden")
-                                .frame(maxWidth: .infinity)
+                        HStack(spacing: 8) {
+                            if isSendingTicket {
+                                ProgressView()
+                                    .progressViewStyle(.circular)
+                            } else {
+                                Image(systemName: "paperplane.fill")
+                                    .font(.subheadline.weight(.semibold))
+                            }
+                            Text(isSendingTicket ? "Wird gesendet…" : "Ticket absenden")
                         }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.indigo)
+                    .buttonStyle(SoftTintButtonStyle(accent: .indigo))
                     .disabled(!contactFormValid || isSendingTicket)
                 }
             }
@@ -971,7 +1027,9 @@ struct HelpCenterView: View {
     }
 
     private func scrollToInitialSection(using proxy: ScrollViewProxy) {
-        guard !didScrollToInitialSection, let target = initialSection?.scrollId else { return }
+        guard !didScrollToInitialSection else { return }
+        let target = initialScrollId ?? initialSection?.scrollId
+        guard let target else { return }
         didScrollToInitialSection = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             withAnimation(.easeInOut(duration: 0.25)) {

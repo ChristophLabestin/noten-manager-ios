@@ -305,8 +305,9 @@ final class GradesStore: ObservableObject {
     @Published var animationsEnabled: Bool = true
 
     // Settings-Erweiterungen (aus React)
-    @Published var appIcon: String = "default" // "default" | "pink" | "green" | "black"
+    @Published var appIcon: String = "default" // "default" | "pink"
     @Published var theme: String = "default" // "default" | "feminine"
+    @Published var themeBackgroundIntensity: Double = 1.0 // 0...1
     @Published var darkMode: Bool = false
     @Published var darkModeMode: String = "system" // "system" | "light" | "dark"
     @Published var homeworkReminderHour: Int = 19
@@ -340,7 +341,7 @@ final class GradesStore: ObservableObject {
     private let db = Firestore.firestore()
     private let pfingstferienPromptedKey = "grades_pfingst_prompted_year_ids"
     private let appIconDefaultsKey = "grades_appIcon"
-    private let supportedAppIcons: Set<String> = ["default", "pink", "green", "black"]
+    private let supportedAppIcons: Set<String> = ["default", "pink"]
 
     // Live-Listener
     private var userDocListener: ListenerRegistration?
@@ -1019,8 +1020,13 @@ final class GradesStore: ObservableObject {
 
         let userData = try await db.collection("users").document(uid).getDocument().data() ?? [:]
         let onboardingDone = resolveOnboardingDone(from: userData)
-        let _ = try await ensureYearContext(uid: uid, userData: userData, allowCreation: onboardingDone)
-        await ensureSecondaryListeners(uid: uid, userData: userData)
+        do {
+            let context = try await ensureYearContext(uid: uid, userData: userData, allowCreation: onboardingDone)
+            activeSchoolYearId = context.id
+            await ensureSecondaryListeners(uid: uid, userData: userData)
+        } catch {
+            // Falls Neuaufbau scheitert, Zustand bleibt bereinigt
+        }
     }
 
     func resetEntireAccount(password: String) async throws {
@@ -1050,8 +1056,51 @@ final class GradesStore: ObservableObject {
         resetState()
         let freshData = try await userRef.getDocument().data() ?? [:]
         let onboardingDone = resolveOnboardingDone(from: freshData)
-        let _ = try await ensureYearContext(uid: uid, userData: freshData, allowCreation: onboardingDone)
-        await ensureSecondaryListeners(uid: uid, userData: freshData)
+        do {
+            let context = try await ensureYearContext(uid: uid, userData: freshData, allowCreation: onboardingDone)
+            activeSchoolYearId = context.id
+            await ensureSecondaryListeners(uid: uid, userData: freshData)
+        } catch {
+            // Account wurde bereinigt; Neuaufbau kann später erfolgen
+        }
+    }
+
+    func deleteAccountCompletely(password: String) async throws {
+        guard let user = Auth.auth().currentUser else {
+            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
+        }
+        try await reauthenticateIfNeeded(password: password)
+
+        let userRef = db.collection("users").document(user.uid)
+        let schoolYearsSnap = try await userRef.collection("schoolYears").getDocuments()
+        for doc in schoolYearsSnap.documents {
+            let ref = doc.reference
+            try await deleteSchoolYearData(yearRef: ref)
+            try await ref.delete()
+        }
+
+        let legacyCollections = [
+            "subjects",
+            "homeworks",
+            "exams",
+            "fachreferat",
+            "practicalPerformance",
+            "examGroupReminders",
+            "homeworkGroupReminders",
+            "examGroupCompleted",
+            "homeworkGroupCompleted",
+            "subjectMappings",
+            "groupMappings",
+            "liveActivities"
+        ]
+        for name in legacyCollections {
+            try await deleteCollection(userRef.collection(name))
+        }
+
+        try? await userRef.delete()
+        try await user.delete()
+
+        resetState()
     }
 
     // MARK: - Setup der weiteren Listener (Subjects, Grades, Fachreferat)
@@ -1293,25 +1342,27 @@ final class GradesStore: ObservableObject {
                             let isCompleted = data["isCompleted"] as? Bool ?? false
                             let createdTs = data["createdAt"] as? Timestamp
                             let createdAt = createdTs?.dateValue() ?? Date()
-                            let dueTs = data["dueDate"] as? Timestamp
-                            let dueDate = dueTs?.dateValue()
-                            let reminderTs = data["reminderAt"] as? Timestamp
-                            let reminderAt = reminderTs?.dateValue()
-                            let creatorId = data["creatorId"] as? String ?? uid
-                            return Homework(
-                                id: doc.documentID,
-                                groupId: nil,
-                                subjectName: subjectName,
-                                subjectKey: nil,
-                                title: title,
-                                dueDate: dueDate,
-                                reminderAt: reminderAt,
-                                isCompleted: isCompleted,
-                                createdAt: createdAt,
-                                isShared: false,
-                                creatorId: creatorId
-                            )
-                        }
+                        let dueTs = data["dueDate"] as? Timestamp
+                        let dueDate = dueTs?.dateValue()
+                        let reminderTs = data["reminderAt"] as? Timestamp
+                        let reminderAt = reminderTs?.dateValue()
+                        let creatorId = data["creatorId"] as? String ?? uid
+                        let imported = data["importedFromShare"] as? Bool ?? false
+                        return Homework(
+                            id: doc.documentID,
+                            groupId: nil,
+                            subjectName: subjectName,
+                            subjectKey: nil,
+                            title: title,
+                            dueDate: dueDate,
+                            reminderAt: reminderAt,
+                            isCompleted: isCompleted,
+                            createdAt: createdAt,
+                            isShared: false,
+                            creatorId: creatorId,
+                            isImportedFromShare: imported
+                        )
+                    }
                         self.homeworks = list
                         self.rescheduleLocalNotifications()
                         self.persistOfflineSnapshotIfPossible()
@@ -1331,6 +1382,7 @@ final class GradesStore: ObservableObject {
                         let list: [Exam] = docs.compactMap { doc in
                             let data = doc.data()
                             let subjectName = data["subjectName"] as? String ?? ""
+                            let subjectKey = data["subjectKey"] as? String
                             let title = data["title"] as? String ?? ""
                             let notes = data["notes"] as? String
                             let isCompleted = data["isCompleted"] as? Bool ?? false
@@ -1338,7 +1390,11 @@ final class GradesStore: ObservableObject {
                             let createdAt = createdTs?.dateValue() ?? Date()
                             guard let dateTs = data["date"] as? Timestamp else { return nil }
                             let date = dateTs.dateValue()
+                            let hasTimeFlag = data["hasTime"] as? Bool
+                            let calendar = Calendar.current
+                            let hasTime = hasTimeFlag ?? !calendar.isDate(date, equalTo: calendar.startOfDay(for: date), toGranularity: .minute)
                             let weight = data["weight"] as? Int
+                            let customWeight = (data["customWeight"] as? NSNumber)?.doubleValue
                             let reminderTs = data["reminderAt"] as? Timestamp
                             let reminderAt = reminderTs?.dateValue()
                             let creatorId = data["creatorId"] as? String ?? uid
@@ -1347,11 +1403,13 @@ final class GradesStore: ObservableObject {
                                 id: doc.documentID,
                                 groupId: nil,
                                 subjectName: subjectName,
-                                subjectKey: nil,
+                                subjectKey: subjectKey,
                                 title: title,
                                 notes: notes,
                                 date: date,
+                                hasTime: hasTime,
                                 weight: weight,
+                                customWeight: customWeight,
                                 reminderAt: reminderAt,
                                 isCompleted: isCompleted,
                                 createdAt: createdAt,
@@ -1526,6 +1584,7 @@ final class GradesStore: ObservableObject {
                 let reminderTs = data["reminderAt"] as? Timestamp
                 let reminderAt = reminderTs?.dateValue()
                 let creatorId = data["creatorId"] as? String ?? uid
+                let imported = data["importedFromShare"] as? Bool ?? false
                 return Homework(
                     id: doc.documentID,
                     groupId: nil,
@@ -1537,7 +1596,8 @@ final class GradesStore: ObservableObject {
                     isCompleted: isCompleted,
                     createdAt: createdAt,
                     isShared: false,
-                    creatorId: creatorId
+                    creatorId: creatorId,
+                    isImportedFromShare: imported
                 )
             }
             homeworks = list
@@ -1553,6 +1613,7 @@ final class GradesStore: ObservableObject {
             let list: [Exam] = examSnap.documents.compactMap { doc in
                 let data = doc.data()
                 let subjectName = data["subjectName"] as? String ?? ""
+                let subjectKey = data["subjectKey"] as? String
                 let title = data["title"] as? String ?? ""
                 let notes = data["notes"] as? String
                 let isCompleted = data["isCompleted"] as? Bool ?? false
@@ -1560,7 +1621,11 @@ final class GradesStore: ObservableObject {
                 let createdAt = createdTs?.dateValue() ?? Date()
                 guard let dateTs = data["date"] as? Timestamp else { return nil }
                 let date = dateTs.dateValue()
+                let hasTimeFlag = data["hasTime"] as? Bool
+                let calendar = Calendar.current
+                let hasTime = hasTimeFlag ?? !calendar.isDate(date, equalTo: calendar.startOfDay(for: date), toGranularity: .minute)
                 let weight = data["weight"] as? Int
+                let customWeight = (data["customWeight"] as? NSNumber)?.doubleValue
                 let reminderTs = data["reminderAt"] as? Timestamp
                 let reminderAt = reminderTs?.dateValue()
                 let creatorId = data["creatorId"] as? String ?? uid
@@ -1569,11 +1634,13 @@ final class GradesStore: ObservableObject {
                     id: doc.documentID,
                     groupId: nil,
                     subjectName: subjectName,
-                    subjectKey: nil,
+                    subjectKey: subjectKey,
                     title: title,
                     notes: notes,
                     date: date,
+                    hasTime: hasTime,
                     weight: weight,
+                    customWeight: customWeight,
                     reminderAt: reminderAt,
                     isCompleted: isCompleted,
                     createdAt: createdAt,
@@ -1610,28 +1677,30 @@ final class GradesStore: ObservableObject {
                     let isCompleted = data["isCompleted"] as? Bool ?? false
                     let createdTs = data["createdAt"] as? Timestamp
                     let createdAt = createdTs?.dateValue() ?? Date()
-                    let dueTs = data["dueDate"] as? Timestamp
-                    let dueDate = dueTs?.dateValue()
-                    let reminderTs = data["reminderAt"] as? Timestamp
-                    let reminderAt = reminderTs?.dateValue()
-                    let creatorId = data["creatorId"] as? String ?? uid
-                    return Homework(
-                        id: doc.documentID,
-                        groupId: nil,
-                        subjectName: subjectName,
-                        subjectKey: nil,
-                        title: title,
-                        dueDate: dueDate,
-                        reminderAt: reminderAt,
-                        isCompleted: isCompleted,
-                        createdAt: createdAt,
-                        isShared: false,
-                        creatorId: creatorId
-                    )
-                }
-                await MainActor.run { self.homeworks = list }
-            } catch {
-                // optional loggen
+                let dueTs = data["dueDate"] as? Timestamp
+                let dueDate = dueTs?.dateValue()
+                let reminderTs = data["reminderAt"] as? Timestamp
+                let reminderAt = reminderTs?.dateValue()
+                let creatorId = data["creatorId"] as? String ?? uid
+                let imported = data["importedFromShare"] as? Bool ?? false
+                return Homework(
+                    id: doc.documentID,
+                    groupId: nil,
+                    subjectName: subjectName,
+                    subjectKey: nil,
+                    title: title,
+                    dueDate: dueDate,
+                    reminderAt: reminderAt,
+                    isCompleted: isCompleted,
+                    createdAt: createdAt,
+                    isShared: false,
+                    creatorId: creatorId,
+                    isImportedFromShare: imported
+                )
+            }
+            await MainActor.run { self.homeworks = list }
+        } catch {
+            // optional loggen
             }
         }
 
@@ -1645,6 +1714,7 @@ final class GradesStore: ObservableObject {
                 let list: [Exam] = snap.documents.compactMap { doc in
                     let data = doc.data()
                     let subjectName = data["subjectName"] as? String ?? ""
+                    let subjectKey = data["subjectKey"] as? String
                     let title = data["title"] as? String ?? ""
                     let notes = data["notes"] as? String
                     let isCompleted = data["isCompleted"] as? Bool ?? false
@@ -1652,7 +1722,11 @@ final class GradesStore: ObservableObject {
                     let createdAt = createdTs?.dateValue() ?? Date()
                     guard let dateTs = data["date"] as? Timestamp else { return nil }
                     let date = dateTs.dateValue()
+                    let hasTimeFlag = data["hasTime"] as? Bool
+                    let calendar = Calendar.current
+                    let hasTime = hasTimeFlag ?? !calendar.isDate(date, equalTo: calendar.startOfDay(for: date), toGranularity: .minute)
                     let weight = data["weight"] as? Int
+                    let customWeight = (data["customWeight"] as? NSNumber)?.doubleValue
                     let reminderTs = data["reminderAt"] as? Timestamp
                     let reminderAt = reminderTs?.dateValue()
                     let creatorId = data["creatorId"] as? String ?? uid
@@ -1661,11 +1735,13 @@ final class GradesStore: ObservableObject {
                         id: doc.documentID,
                         groupId: nil,
                         subjectName: subjectName,
-                        subjectKey: nil,
+                        subjectKey: subjectKey,
                         title: title,
                         notes: notes,
                         date: date,
+                        hasTime: hasTime,
                         weight: weight,
+                        customWeight: customWeight,
                         reminderAt: reminderAt,
                         isCompleted: isCompleted,
                         createdAt: createdAt,
@@ -1700,7 +1776,11 @@ final class GradesStore: ObservableObject {
                         let createdAt = createdTs?.dateValue() ?? Date()
                         guard let dateTs = data["date"] as? Timestamp else { return nil }
                         let date = dateTs.dateValue()
+                        let hasTimeFlag = data["hasTime"] as? Bool
+                        let calendar = Calendar.current
+                        let hasTime = hasTimeFlag ?? !calendar.isDate(date, equalTo: calendar.startOfDay(for: date), toGranularity: .minute)
                         let weight = data["weight"] as? Int
+                        let customWeight = (data["customWeight"] as? NSNumber)?.doubleValue
                         let creatorId = data["creatorId"] as? String
                         let requiresGrade = data["requiresGrade"] as? Bool
                         return Exam(
@@ -1711,7 +1791,9 @@ final class GradesStore: ObservableObject {
                             title: title,
                             notes: notes,
                             date: date,
+                            hasTime: hasTime,
                             weight: weight,
+                            customWeight: customWeight,
                             reminderAt: nil,
                             isCompleted: false,
                             createdAt: createdAt,
@@ -1754,7 +1836,8 @@ final class GradesStore: ObservableObject {
                             isCompleted: false,
                             createdAt: createdAt,
                             isShared: true,
-                            creatorId: creatorId
+                            creatorId: creatorId,
+                            isImportedFromShare: false
                         )
                     }
                     await MainActor.run { self.groupHomeworksByGroup[gid] = list }
@@ -1928,7 +2011,9 @@ final class GradesStore: ObservableObject {
                     title: exam.title,
                     notes: exam.notes,
                     date: exam.date,
+                    hasTime: exam.hasTime,
                     weight: exam.weight,
+                    customWeight: exam.customWeight,
                     reminderAt: date,
                     isCompleted: exam.isCompleted,
                     createdAt: exam.createdAt,
@@ -1945,7 +2030,9 @@ final class GradesStore: ObservableObject {
                     title: exam.title,
                     notes: exam.notes,
                     date: exam.date,
+                    hasTime: exam.hasTime,
                     weight: exam.weight,
+                    customWeight: exam.customWeight,
                     reminderAt: nil,
                     isCompleted: exam.isCompleted,
                     createdAt: exam.createdAt,
@@ -1962,9 +2049,9 @@ final class GradesStore: ObservableObject {
         sharedHomeworks = sharedHomeworks.map { hw in
             let key = compoundId(gid: hw.groupId, docId: hw.id)
             if let date = sharedHomeworkUserReminders[key] ?? sharedHomeworkUserReminders[hw.id] {
-                return Homework(id: hw.id, groupId: hw.groupId, subjectName: hw.subjectName, subjectKey: hw.subjectKey, title: hw.title, dueDate: hw.dueDate, reminderAt: date, isCompleted: hw.isCompleted, createdAt: hw.createdAt, isShared: true, creatorId: hw.creatorId)
+                return Homework(id: hw.id, groupId: hw.groupId, subjectName: hw.subjectName, subjectKey: hw.subjectKey, title: hw.title, dueDate: hw.dueDate, reminderAt: date, isCompleted: hw.isCompleted, createdAt: hw.createdAt, isShared: true, creatorId: hw.creatorId, isImportedFromShare: hw.isImportedFromShare)
             } else {
-                return Homework(id: hw.id, groupId: hw.groupId, subjectName: hw.subjectName, subjectKey: hw.subjectKey, title: hw.title, dueDate: hw.dueDate, reminderAt: nil, isCompleted: hw.isCompleted, createdAt: hw.createdAt, isShared: true, creatorId: hw.creatorId)
+                return Homework(id: hw.id, groupId: hw.groupId, subjectName: hw.subjectName, subjectKey: hw.subjectKey, title: hw.title, dueDate: hw.dueDate, reminderAt: nil, isCompleted: hw.isCompleted, createdAt: hw.createdAt, isShared: true, creatorId: hw.creatorId, isImportedFromShare: hw.isImportedFromShare)
             }
         }
     }
@@ -1985,7 +2072,8 @@ final class GradesStore: ObservableObject {
                 isCompleted: done,
                 createdAt: hw.createdAt,
                 isShared: true,
-                creatorId: hw.creatorId
+                creatorId: hw.creatorId,
+                isImportedFromShare: hw.isImportedFromShare
             )
         }
     }
@@ -2003,7 +2091,9 @@ final class GradesStore: ObservableObject {
                 title: exam.title,
                 notes: exam.notes,
                 date: exam.date,
+                hasTime: exam.hasTime,
                 weight: exam.weight,
+                customWeight: exam.customWeight,
                 reminderAt: exam.reminderAt,
                 isCompleted: done,
                 createdAt: exam.createdAt,
@@ -2031,6 +2121,11 @@ final class GradesStore: ObservableObject {
 
         if let themeVal = data["theme"] as? String, ["default","feminine"].contains(themeVal) {
             theme = themeVal
+        }
+        if let rawIntensity = data["themeIntensity"] as? Double ?? (data["themeIntensity"] as? NSNumber)?.doubleValue {
+            let clamped = max(0, min(1, rawIntensity))
+            themeBackgroundIntensity = clamped
+            UserDefaults.standard.set(clamped, forKey: "grades_themeIntensity")
         }
         if let iconVal = data["appIcon"] as? String, supportedAppIcons.contains(iconVal) {
             appIcon = iconVal
@@ -2214,6 +2309,12 @@ final class GradesStore: ObservableObject {
            ["default", "feminine"].contains(storedTheme) {
             theme = storedTheme
         }
+        if defaults.object(forKey: "grades_themeIntensity") != nil {
+            let storedIntensity = defaults.double(forKey: "grades_themeIntensity")
+            themeBackgroundIntensity = max(0, min(1, storedIntensity))
+        } else {
+            themeBackgroundIntensity = 1.0
+        }
         if let storedIcon = defaults.string(forKey: appIconDefaultsKey),
            supportedAppIcons.contains(storedIcon) {
             appIcon = storedIcon
@@ -2266,17 +2367,26 @@ final class GradesStore: ObservableObject {
         let targetName = alternateIconName(for: appIcon)
         guard UIApplication.shared.alternateIconName != targetName else { return }
 
+        if let iconsDict = Bundle.main.infoDictionary?["CFBundleIcons"] as? [String: Any],
+           let alternates = (iconsDict["CFBundleAlternateIcons"] as? [String: Any])?.keys.sorted() {
+            print("Available alternate icons in Info.plist: \(alternates)")
+        } else {
+            print("No alternate icons found in Info.plist")
+        }
+
         if #available(iOS 16.0, *) {
             do {
                 try await UIApplication.shared.setAlternateIconName(targetName)
             } catch {
+                print("AppIcon switch failed for \(targetName ?? "primary"): \(error)")
                 let resolved = selection(forAlternateIconName: UIApplication.shared.alternateIconName)
                 appIcon = resolved
                 UserDefaults.standard.set(appIcon, forKey: appIconDefaultsKey)
             }
         } else {
             UIApplication.shared.setAlternateIconName(targetName) { error in
-                guard error != nil else { return }
+                guard let error else { return }
+                print("AppIcon switch failed for \(targetName ?? "primary"): \(error)")
                 Task { @MainActor in
                     let resolved = self.selection(forAlternateIconName: UIApplication.shared.alternateIconName)
                     self.appIcon = resolved
@@ -2288,19 +2398,19 @@ final class GradesStore: ObservableObject {
 
     private func alternateIconName(for selection: String) -> String? {
         switch selection {
-        case "pink": return "AppIconPink"
-        case "green": return "AppIconGreen"
-        case "black": return "AppIconBlack"
-        default: return nil
+        case "pink":
+            return "AppIconTwo"
+        default:
+            return nil
         }
     }
 
     private func selection(forAlternateIconName name: String?) -> String {
         switch name {
-        case "AppIconPink": return "pink"
-        case "AppIconGreen": return "green"
-        case "AppIconBlack": return "black"
-        default: return "default"
+        case "AppIconTwo":
+            return "pink"
+        default:
+            return "default"
         }
     }
 
@@ -2370,6 +2480,7 @@ final class GradesStore: ObservableObject {
             animationsEnabled: animationsEnabled,
             showHolidayHints: showHolidayHints,
             theme: theme,
+            themeIntensity: themeBackgroundIntensity,
             appIcon: appIcon,
             darkMode: darkMode,
             darkModeMode: darkModeMode,
@@ -2413,6 +2524,7 @@ final class GradesStore: ObservableObject {
         animationsEnabled = snapshot.animationsEnabled
         showHolidayHints = snapshot.showHolidayHints ?? true
         theme = snapshot.theme
+        themeBackgroundIntensity = max(0, min(1, snapshot.themeIntensity ?? 1.0))
         if let icon = snapshot.appIcon, supportedAppIcons.contains(icon) {
             appIcon = icon
             UserDefaults.standard.set(icon, forKey: appIconDefaultsKey)
@@ -2678,30 +2790,36 @@ final class GradesStore: ObservableObject {
                     guard let self else { return }
                     let docs = snapshot?.documents ?? []
                     let list: [Exam] = docs.compactMap { doc in
-                let data = doc.data()
-                let subjectName = data["subjectName"] as? String ?? ""
-                let subjectKey = data["subjectKey"] as? String
-                let title = data["title"] as? String ?? ""
-                let notes = data["notes"] as? String
-                let createdTs = data["createdAt"] as? Timestamp
-                let createdAt = createdTs?.dateValue() ?? Date()
-                guard let dateTs = data["date"] as? Timestamp else { return nil }
-                let date = dateTs.dateValue()
-                let weight = data["weight"] as? Int
+                        let data = doc.data()
+                        let subjectName = data["subjectName"] as? String ?? ""
+                        let subjectKey = data["subjectKey"] as? String
+                        let title = data["title"] as? String ?? ""
+                        let notes = data["notes"] as? String
+                        let createdTs = data["createdAt"] as? Timestamp
+                        let createdAt = createdTs?.dateValue() ?? Date()
+                        guard let dateTs = data["date"] as? Timestamp else { return nil }
+                        let date = dateTs.dateValue()
+                        let hasTimeFlag = data["hasTime"] as? Bool
+                        let calendar = Calendar.current
+                        let hasTime = hasTimeFlag ?? !calendar.isDate(date, equalTo: calendar.startOfDay(for: date), toGranularity: .minute)
+                        let weight = data["weight"] as? Int
+                        let customWeight = (data["customWeight"] as? NSNumber)?.doubleValue
                         let creatorId = data["creatorId"] as? String
                         let requiresGrade = data["requiresGrade"] as? Bool
                         return Exam(
-                        id: doc.documentID,
-                        groupId: gid,
-                        subjectName: subjectName,
-                        subjectKey: subjectKey,
-                        title: title,
-                        notes: notes,
-                        date: date,
-                        weight: weight,
-                        reminderAt: nil,
-                        isCompleted: false,
-                        createdAt: createdAt,
+                            id: doc.documentID,
+                            groupId: gid,
+                            subjectName: subjectName,
+                            subjectKey: subjectKey,
+                            title: title,
+                            notes: notes,
+                            date: date,
+                            hasTime: hasTime,
+                            weight: weight,
+                            customWeight: customWeight,
+                            reminderAt: nil,
+                            isCompleted: false,
+                            createdAt: createdAt,
                             isShared: true,
                             creatorId: creatorId,
                             requiresGrade: requiresGrade
@@ -2758,7 +2876,20 @@ final class GradesStore: ObservableObject {
                     let dueTs = data["dueDate"] as? Timestamp
                     let dueDate = dueTs?.dateValue()
                     let creatorId = data["creatorId"] as? String
-                    return Homework(id: doc.documentID, groupId: gid, subjectName: subjectName, subjectKey: subjectKey, title: title, dueDate: dueDate, reminderAt: nil, isCompleted: false, createdAt: createdAt, isShared: true, creatorId: creatorId)
+                    return Homework(
+                        id: doc.documentID,
+                        groupId: gid,
+                        subjectName: subjectName,
+                        subjectKey: subjectKey,
+                        title: title,
+                        dueDate: dueDate,
+                        reminderAt: nil,
+                        isCompleted: false,
+                        createdAt: createdAt,
+                        isShared: true,
+                        creatorId: creatorId,
+                        isImportedFromShare: false
+                    )
                 }
                 self.legacySharedHomeworks = list
                 self.recomputeSharedCollections()
@@ -3098,6 +3229,16 @@ final class GradesStore: ObservableObject {
             }
         } catch {
             // optional loggen
+        }
+    }
+
+    func groupMetadata(for code: String) async -> (exists: Bool, schoolYearId: String?) {
+        do {
+            let snap = try await db.collection("groups").document(code).getDocument()
+            let year = snap.data()?["schoolYearId"] as? String
+            return (snap.exists, year)
+        } catch {
+            return (false, nil)
         }
     }
 
@@ -3442,7 +3583,7 @@ final class GradesStore: ObservableObject {
         return imported
     }
 
-    func addExamToFirestore(subjectName: String, title: String, notes: String?, date: Date, weight: Int?, reminderAt: Date?, requiresGrade: Bool? = true) async throws {
+    func addExamToFirestore(subjectName: String, subjectKey: String? = nil, title: String, notes: String?, date: Date, hasTime: Bool, weight: Int?, customWeight: Double?, reminderAt: Date?, requiresGrade: Bool? = true) async throws {
         guard let uid = Auth.auth().currentUser?.uid else {
             throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
         }
@@ -3456,13 +3597,18 @@ final class GradesStore: ObservableObject {
             "subjectName": subjectName,
             "title": title,
             "date": date,
+            "hasTime": hasTime,
             "isCompleted": false,
             "createdAt": now,
             "creatorId": uid
         ]
         if let notes { payload["notes"] = notes }
+        if let subjectKey { payload["subjectKey"] = subjectKey }
         if let weight {
             payload["weight"] = weight
+        }
+        if let customWeight {
+            payload["customWeight"] = customWeight
         }
         if let reminderAt {
             payload["reminderAt"] = reminderAt
@@ -3475,7 +3621,7 @@ final class GradesStore: ObservableObject {
     }
 
     // Neue Variante: verteilt automatisch in alle passenden Gruppen (nach Subject-Mapping)
-    func addExamToGroups(subjectName: String, title: String, notes: String?, date: Date, weight: Int?, reminderAt: Date?, requiresGrade: Bool? = true) async throws -> [(groupId: String, docId: String)] {
+    func addExamToGroups(subjectName: String, subjectKey: String? = nil, title: String, notes: String?, date: Date, hasTime: Bool, weight: Int?, customWeight: Double?, reminderAt: Date?, requiresGrade: Bool? = true) async throws -> [(groupId: String, docId: String)] {
         guard let uid = Auth.auth().currentUser?.uid else {
             throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
         }
@@ -3483,7 +3629,7 @@ final class GradesStore: ObservableObject {
         guard !gids.isEmpty else { return [] }
 
         let now = Date()
-        let subjectKey = slugifySubjectName(subjectName)
+        let subjectKey = subjectKey ?? slugifySubjectName(subjectName)
         var created: [(String, String)] = []
         for gid in gids {
             let ref = db.collection("groups").document(gid).collection("exams").document()
@@ -3492,11 +3638,13 @@ final class GradesStore: ObservableObject {
                 "subjectKey": subjectKey,
                 "title": title,
                 "date": date,
+                "hasTime": hasTime,
                 "createdAt": now,
                 "creatorId": uid
             ]
             if let notes { payload["notes"] = notes }
             if let weight { payload["weight"] = weight }
+            if let customWeight { payload["customWeight"] = customWeight }
             if let requiresGrade { payload["requiresGrade"] = requiresGrade }
             try await ref.setData(payload)
             created.append((gid, ref.documentID))
@@ -3509,10 +3657,13 @@ final class GradesStore: ObservableObject {
         do {
             let created = try await addExamToGroups(
                 subjectName: exam.subjectName,
+                subjectKey: exam.subjectKey,
                 title: exam.title,
                 notes: exam.notes,
                 date: exam.date,
+                hasTime: exam.hasTime,
                 weight: exam.weight,
+                customWeight: exam.customWeight,
                 reminderAt: exam.reminderAt,
                 requiresGrade: exam.requiresGrade
             )
@@ -3529,7 +3680,7 @@ final class GradesStore: ObservableObject {
         return true
     }
 
-    func addHomeworkToFirestore(subjectName: String, title: String, dueDate: Date?, reminderAt: Date?) async throws {
+    func addHomeworkToFirestore(subjectName: String, title: String, dueDate: Date?, reminderAt: Date?, importedFromShare: Bool = false) async throws {
         guard let uid = Auth.auth().currentUser?.uid else {
             throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
         }
@@ -3550,6 +3701,9 @@ final class GradesStore: ObservableObject {
         }
         if let reminderAt {
             payload["reminderAt"] = reminderAt
+        }
+        if importedFromShare {
+            payload["importedFromShare"] = true
         }
 
         try await ref.setData(payload)
@@ -3765,7 +3919,7 @@ final class GradesStore: ObservableObject {
         try await ref.updateData(payload)
     }
 
-    func updateExamInFirestore(id: String, subjectName: String, title: String, notes: String?, date: Date, weight: Int?, reminderAt: Date?, isCompleted: Bool) async throws {
+    func updateExamInFirestore(id: String, subjectName: String, subjectKey: String? = nil, title: String, notes: String?, date: Date, hasTime: Bool, weight: Int?, customWeight: Double?, reminderAt: Date?, isCompleted: Bool, requiresGrade: Bool? = nil) async throws {
         guard let uid = Auth.auth().currentUser?.uid else {
             throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
         }
@@ -3778,8 +3932,14 @@ final class GradesStore: ObservableObject {
             "subjectName": subjectName,
             "title": title,
             "date": date,
+            "hasTime": hasTime,
             "isCompleted": isCompleted
         ]
+        if let subjectKey {
+            payload["subjectKey"] = subjectKey
+        } else {
+            payload["subjectKey"] = FieldValue.delete()
+        }
         if let notes {
             payload["notes"] = notes
         } else {
@@ -3789,24 +3949,38 @@ final class GradesStore: ObservableObject {
             payload["weight"] = weight
         } else {
             payload["weight"] = NSNull()
+        }
+        if let customWeight {
+            payload["customWeight"] = customWeight
+        } else {
+            payload["customWeight"] = NSNull()
         }
         if let reminderAt {
             payload["reminderAt"] = reminderAt
         } else {
             payload["reminderAt"] = NSNull()
         }
+        if let requiresGrade {
+            payload["requiresGrade"] = requiresGrade
+        }
 
         try await ref.updateData(payload)
     }
 
-    func updateSharedExamInGroup(groupId: String, id: String, subjectName: String, title: String, notes: String?, date: Date, weight: Int?, reminderAt: Date?, requiresGrade: Bool? = nil) async throws {
+    func updateSharedExamInGroup(groupId: String, id: String, subjectName: String, subjectKey: String? = nil, title: String, notes: String?, date: Date, hasTime: Bool, weight: Int?, customWeight: Double?, reminderAt: Date?, requiresGrade: Bool? = nil) async throws {
         let ref = db.collection("groups").document(groupId).collection("exams").document(id)
 
         var payload: [String: Any] = [
             "subjectName": subjectName,
             "title": title,
-            "date": date
+            "date": date,
+            "hasTime": hasTime
         ]
+        if let subjectKey {
+            payload["subjectKey"] = subjectKey
+        } else {
+            payload["subjectKey"] = FieldValue.delete()
+        }
         if let notes {
             payload["notes"] = notes
         } else {
@@ -3816,6 +3990,11 @@ final class GradesStore: ObservableObject {
             payload["weight"] = weight
         } else {
             payload["weight"] = NSNull()
+        }
+        if let customWeight {
+            payload["customWeight"] = customWeight
+        } else {
+            payload["customWeight"] = NSNull()
         }
         if let requiresGrade {
             payload["requiresGrade"] = requiresGrade
@@ -4101,6 +4280,7 @@ final class GradesStore: ObservableObject {
                               halfYear: Int?,
                               note: String?,
                               company: String?,
+                              date: Date,
                               using key: SymmetricKey) async throws {
         guard let uid = Auth.auth().currentUser?.uid else { throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"]) }
         let yearRef = try await requireYearRef(uid: uid)
@@ -4113,14 +4293,13 @@ final class GradesStore: ObservableObject {
             return nil
         }()
         let entryId = id ?? UUID().uuidString
-        let existingDate = grades.first(where: { $0.id == entryId })?.date ?? Date()
         let newEntry = PracticalGradeEntry(
             id: entryId,
             grade: grade,
             company: company,
             note: note,
             halfYear: normalizedHalfYear,
-            date: existingDate
+            date: date
         )
 
         if let idx = grades.firstIndex(where: { $0.id == entryId }) {
@@ -4384,24 +4563,42 @@ final class GradesStore: ObservableObject {
 
     // MARK: - Update/Delete Grades
 
-    func updateGradeInFirestore(subjectId: String, gradeId: String, grade: Double, weight: Double, date: Date, note: String?, halfYear: Int?, using key: SymmetricKey) async throws {
+    func updateGradeInFirestore(
+        subjectId: String,
+        gradeId: String,
+        grade: Double,
+        weight: Double,
+        date: Date,
+        note: String?,
+        halfYear: Int?,
+        linkedExamId: String?,
+        using key: SymmetricKey
+    ) async throws {
         guard let uid = Auth.auth().currentUser?.uid else { throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"]) }
 
         let yearRef = try await requireYearRef(uid: uid)
         let encrypted = try CryptoService.encryptString(String(grade), key: key)
         let gradeDocRef = yearRef.collection("subjects").document(subjectId).collection("grades").document(gradeId)
-        try await gradeDocRef.updateData([
+        let previousLinkedExamId = gradesBySubject[subjectId]?.first(where: { $0.id == gradeId })?.linkedExamId
+
+        var payload: [String: Any] = [
             "grade": encrypted,
             "weight": weight,
             "date": date,
             "note": note as Any,
             "halfYear": halfYear as Any
-        ])
+        ]
+        if let linkedExamId {
+            payload["linkedExamId"] = linkedExamId
+        } else {
+            payload["linkedExamId"] = FieldValue.delete()
+        }
+
+        try await gradeDocRef.updateData(payload)
 
         // Optimistisch lokal (Listener setzt danach korrekt)
         var list = gradesBySubject[subjectId] ?? []
         if let idx = list.firstIndex(where: { $0.id == gradeId }) {
-            let linkedExamId = list[idx].linkedExamId
             list[idx] = GradeWithId(
                 id: gradeId,
                 grade: grade,
@@ -4412,6 +4609,17 @@ final class GradesStore: ObservableObject {
                 linkedExamId: linkedExamId
             )
             gradesBySubject[subjectId] = list
+        }
+
+        if previousLinkedExamId != linkedExamId, let previousLinkedExamId {
+            await resetExamAfterLinkedGradeDeletion(examId: previousLinkedExamId)
+        }
+        if let linkedExamId {
+            if let sharedExam = sharedExams.first(where: { $0.id == linkedExamId }) {
+                await setUserCompletedForSharedExam(examId: linkedExamId, completed: true, groupId: sharedExam.groupId)
+            } else {
+                await setExamCompleted(id: linkedExamId, completed: true)
+            }
         }
     }
 
@@ -4647,15 +4855,18 @@ final class GradesStore: ObservableObject {
     }
 
     func updatePreferences(theme: String? = nil,
+                           themeIntensity: Double? = nil,
                            darkMode: Bool? = nil,
                            darkModeMode: String? = nil,
                            compactView: Bool? = nil,
                            animationsEnabled: Bool? = nil,
                            holidayHintsEnabled: Bool? = nil) async {
         guard let uid = Auth.auth().currentUser?.uid else { return }
+        let clampedIntensity = themeIntensity.map { max(0, min(1, $0)) }
 
         // lokalen State vorab aktualisieren (optimistic UI)
         if let theme { self.theme = theme }
+        if let clampedIntensity { self.themeBackgroundIntensity = clampedIntensity }
         if let darkMode {
             self.darkMode = darkMode
             self.darkModeMode = darkMode ? "dark" : "light"
@@ -4671,6 +4882,7 @@ final class GradesStore: ObservableObject {
         // lokal speichern, damit Einstellungen direkt beim App-Start verfügbar sind
         let defaults = UserDefaults.standard
         if let theme { defaults.set(theme, forKey: "grades_theme") }
+        if let clampedIntensity { defaults.set(clampedIntensity, forKey: "grades_themeIntensity") }
         if let darkMode { defaults.set(darkMode, forKey: "grades_darkMode") }
         if let mode = darkModeMode { defaults.set(mode, forKey: "grades_darkModeMode") }
         if let compactView { defaults.set(compactView, forKey: "grades_compactView") }
@@ -4679,6 +4891,7 @@ final class GradesStore: ObservableObject {
 
         var payload: [String: Any] = [:]
         if let theme { payload["theme"] = theme }
+        if let clampedIntensity { payload["themeIntensity"] = clampedIntensity }
         if let darkMode { payload["darkMode"] = darkMode }
         if let mode = darkModeMode { payload["darkModeMode"] = mode }
         if let compactView { payload["compactView"] = compactView }
@@ -4695,6 +4908,7 @@ final class GradesStore: ObservableObject {
         persistOfflineSnapshotIfPossible()
     }
 
+    @MainActor
     func updateAppIcon(to selection: String) async {
         let normalized = supportedAppIcons.contains(selection) ? selection : "default"
         appIcon = normalized
@@ -4779,6 +4993,10 @@ final class GradesStore: ObservableObject {
             minute: homeworkReminderMinute,
             enabled: standardRemindersEnabled
         )
+        BackgroundRefreshManager.schedule(for: allExams)
+        Task {
+            await ExamLiveActivityManager.syncLiveActivities(for: allExams)
+        }
     }
 
     /// Wird aufgerufen, wenn die App im System-Modus läuft und sich das ColorScheme des Geräts ändert.
@@ -5341,7 +5559,11 @@ final class GradesStore: ObservableObject {
                     let createdAt = createdTs?.dateValue() ?? Date()
                     guard let dateTs = data["date"] as? Timestamp else { return nil }
                     let date = dateTs.dateValue()
+                    let hasTimeFlag = data["hasTime"] as? Bool
+                    let calendar = Calendar.current
+                    let hasTime = hasTimeFlag ?? !calendar.isDate(date, equalTo: calendar.startOfDay(for: date), toGranularity: .minute)
                     let weight = data["weight"] as? Int
+                    let customWeight = (data["customWeight"] as? NSNumber)?.doubleValue
                     let creatorId = data["creatorId"] as? String
                     let requiresGrade = data["requiresGrade"] as? Bool
                     return Exam(
@@ -5352,7 +5574,9 @@ final class GradesStore: ObservableObject {
                         title: title,
                         notes: notes,
                         date: date,
+                        hasTime: hasTime,
                         weight: weight,
+                        customWeight: customWeight,
                         reminderAt: nil,
                         isCompleted: false,
                         createdAt: createdAt,
@@ -5394,7 +5618,8 @@ final class GradesStore: ObservableObject {
                         isCompleted: false,
                         createdAt: createdAt,
                         isShared: true,
-                        creatorId: creatorId
+                        creatorId: creatorId,
+                        isImportedFromShare: false
                     )
                 }
                 self.groupHomeworksByGroup[gid] = list

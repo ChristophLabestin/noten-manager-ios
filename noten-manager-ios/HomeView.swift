@@ -25,6 +25,7 @@ struct HomeView: View {
     @State private var showExamSheet: Bool = false
     @State private var selectedSubject: Subject? = nil
     @State private var subjectLinkActive: Bool = false
+    @State private var showPraktikumDetail: Bool = false
     @State private var greetingAnimationSeed: UUID = UUID()
     @State private var greetingVisible: Bool = false
     @State private var upcomingHoliday: HolidayWindow?
@@ -214,6 +215,10 @@ struct HomeView: View {
         return map
     }
 
+    private func countLabel(_ count: Int, singular: String, plural: String) -> String {
+        count == 1 ? "1 \(singular)" : "\(count) \(plural)"
+    }
+
     private func sortedSubjects(subjectGrades: [String: [Grade]]) -> [Subject] {
         let base = baseSubjectsList()
         switch store.subjectSortMode {
@@ -289,7 +294,12 @@ struct HomeView: View {
         .contentShape(Rectangle())
 
         if subject.name == "Praktikum" {
-            row
+            Button {
+                showPraktikumDetail = true
+            } label: {
+                row
+            }
+            .buttonStyle(.plain)
         } else {
             Button {
                 openSubject(subject)
@@ -426,7 +436,7 @@ struct HomeView: View {
                     HStack(spacing: 8) {
                         if overdueHomeworksCount > 0 {
                             PillBadge(
-                                text: "Hausaufgaben fällig: \(overdueHomeworksCount)",
+                                text: countLabel(overdueHomeworksCount, singular: "Hausaufgabe fällig", plural: "Hausaufgaben fällig"),
                                 systemImage: "exclamationmark.triangle.fill",
                                 foreground: .orange,
                                 background: Color.orange.opacity(0.16)
@@ -434,7 +444,7 @@ struct HomeView: View {
                         }
                         if homeworkDueTomorrowCount > 0 {
                             PillBadge(
-                                text: "Hausaufgaben morgen: \(homeworkDueTomorrowCount)",
+                                text: countLabel(homeworkDueTomorrowCount, singular: "Hausaufgabe morgen", plural: "Hausaufgaben morgen"),
                                 systemImage: "clock.badge.exclamationmark",
                                 foreground: .yellow,
                                 background: Color.yellow.opacity(0.16)
@@ -442,7 +452,7 @@ struct HomeView: View {
                         }
                         if upcomingExamsNextTwoWeeksCount > 0 {
                             PillBadge(
-                                text: "\(upcomingExamsNextTwoWeeksCount) Klausuren stehen an",
+                                text: countLabel(upcomingExamsNextTwoWeeksCount, singular: "Klausur steht an", plural: "Klausuren stehen an"),
                                 systemImage: "calendar.badge.clock",
                                 foreground: .red,
                                 background: Color.red.opacity(0.12)
@@ -638,7 +648,7 @@ struct HomeView: View {
         .scrollContentBackground(.hidden)
         .listRowSeparator(.hidden)
         .listSectionSpacing(0)
-        .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine"))
+        .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -674,6 +684,10 @@ struct HomeView: View {
             } else {
                 EmptyView()
             }
+        }
+        .navigationDestination(isPresented: $showPraktikumDetail) {
+            PraktikumDetailView()
+                .environmentObject(store)
         }
         .navigationDestination(isPresented: $navigateToSettings) {
             AppSettingsView().environmentObject(store)
@@ -892,7 +906,7 @@ struct SubjectRowView: View {
         if avg >= 10 { return "Sehr starker Schnitt" }
         if avg >= 7 { return "Stabiler Schnitt" }
         if avg >= 4 { return "Ausbaufähig – dranbleiben" }
-        return "Achtung: Schnitt im roten Bereich"
+        return "Roter Bereich – Schritt für Schritt"
     }
 
     private func progress(for average: Double) -> Double {
@@ -964,6 +978,7 @@ struct SubjectRowView: View {
 
         let isFachreferat = subject.name == "Fachreferat"
         let isPraktikum = subject.name == "Praktikum"
+        let isSport = subject.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "sport"
         let accent = accent(for: subject)
 
         let displayName: String = {
@@ -976,11 +991,13 @@ struct SubjectRowView: View {
             return subject.name
         }()
 
-        let tag: Tag = {
+        let tag: Tag? = {
             if isFachreferat {
-                return Tag(text: "Halbjahresleistung", style: .main)
+                return nil
             } else if isPraktikum {
                 return Tag(text: "Praktikum", style: .minor)
+            } else if isSport {
+                return Tag(text: "Nicht einbringbar", style: .elective)
             } else if subject.isElective {
                 return Tag(text: "Wahlfach", style: .elective)
             }
@@ -994,7 +1011,9 @@ struct SubjectRowView: View {
                         .font(.headline.weight(.semibold))
                         .lineLimit(1)
                         .truncationMode(.tail)
-                    tag
+                    if let tag {
+                        tag
+                    }
                 }
 
                 Text(descriptor(for: average, gradesCount: gradesCount, isFachreferat: isFachreferat, isPraktikum: isPraktikum))
@@ -1171,11 +1190,11 @@ private struct HalfYearFilterRow: View {
         .padding(6)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 999, style: .continuous)
                 .fill(toggleBackground)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 999, style: .continuous)
                 .stroke(toggleStroke, lineWidth: 1)
         )
         .shadow(color: toggleShadow, radius: 8, x: 0, y: 4)

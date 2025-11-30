@@ -246,7 +246,7 @@ struct FinalGradeView: View {
         ScrollView {
             contentStack
         }
-        .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine"))
+        .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showHomeworkSheet) {
             HomeworkListView()

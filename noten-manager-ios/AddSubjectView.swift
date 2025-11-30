@@ -10,10 +10,14 @@ struct AddSubjectView: View {
     @State private var isElective: Bool = false
     @State private var isSaving: Bool = false
     @State private var error: String?
+    @State private var teacher: String = ""
+    @State private var room: String = ""
+    @State private var alias: String = ""
+    @State private var email: String = ""
     @FocusState private var focusedField: Field?
 
     private enum Field: Hashable {
-        case name
+        case name, teacher, room, alias, email
     }
 
     var body: some View {
@@ -71,6 +75,17 @@ struct AddSubjectView: View {
                                 }
                             }
 
+                            SettingsSectionBox {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("Details (optional)")
+                                        .font(.headline)
+                                    detailField("Lehrkraft", text: $teacher, field: .teacher)
+                                    detailField("Raum", text: $room, field: .room)
+                                    detailField("Kürzel", text: $alias, field: .alias)
+                                    detailField("E-Mail", text: $email, field: .email, keyboard: .emailAddress, autocap: .never, autocorrect: false)
+                                }
+                            }
+
                             if let error {
                                 Text(error)
                                     .font(.footnote)
@@ -82,7 +97,8 @@ struct AddSubjectView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
-            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine"))
+            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
+            .sheetNavigationTitle("Fach anlegen")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Abbrechen") { dismiss() }
@@ -132,5 +148,22 @@ struct AddSubjectView: View {
             self.error = error.localizedDescription
         }
         isSaving = false
+    }
+
+    @ViewBuilder
+    private func detailField(_ label: String, text: Binding<String>, field: Field, keyboard: UIKeyboardType = .default, autocap: TextInputAutocapitalization = .sentences, autocorrect: Bool = true) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            TextField(label, text: text)
+                .keyboardType(keyboard)
+                .textInputAutocapitalization(autocap)
+                .autocorrectionDisabled(!autocorrect)
+                .focused($focusedField, equals: field)
+                .padding(12)
+                .background(Color.formInputBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
     }
 }

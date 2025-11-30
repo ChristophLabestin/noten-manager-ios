@@ -25,6 +25,7 @@ struct BottomNavView: View {
     @State private var showAddSubject: Bool = false
     @State private var showAddGrade: Bool = false
     @State private var showAddFachreferat: Bool = false
+    @State private var showFachreferatDetail: Bool = false
     @State private var showAddHomework: Bool = false
     @State private var showAddExam: Bool = false
     @State private var showPractical: Bool = false
@@ -52,8 +53,10 @@ struct BottomNavView: View {
         gradeYear >= 12 || store.seminarPerformance != nil
     }
 
-    private let fabSize: CGFloat = 56
-    private let barHeight: CGFloat = 72
+    private let fabWidth: CGFloat = 84
+    private let fabHeight: CGFloat = 46
+    private let barHeight: CGFloat = 60
+    private let navCornerRadius: CGFloat = 999
 
     private var isFeminine: Bool { store.theme == "feminine" }
     private var isDark: Bool { store.darkMode }
@@ -100,34 +103,51 @@ struct BottomNavView: View {
     }
 
     private var navBackground: some View {
-        RoundedRectangle(cornerRadius: 26, style: .continuous)
+        RoundedRectangle(cornerRadius: navCornerRadius, style: .continuous)
             .fill(
                 LinearGradient(
                     colors: [
-                        surface.opacity(isDark ? 0.86 : 0.96),
-                        accentPrimary.opacity(isDark ? 0.24 : 0.2),
-                        surface.opacity(isDark ? 0.78 : 0.92)
+                        surface.opacity(isDark ? 0.9 : 0.94),
+                        accentPrimary.opacity(isDark ? 0.18 : 0.12),
+                        accentSecondary.opacity(isDark ? 0.16 : 0.1),
+                        surface.opacity(isDark ? 0.82 : 0.9)
                     ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
             )
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .background(
+                RoundedRectangle(cornerRadius: navCornerRadius, style: .continuous)
+                    .fill(.regularMaterial)
+                    .opacity(0.82)
+            )
             .overlay(
-                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                RoundedRectangle(cornerRadius: navCornerRadius, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(isDark ? 0.03 : 0.16),
+                                Color.clear
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: navCornerRadius, style: .continuous)
                     .stroke(
                         LinearGradient(
                             colors: [
-                                Color.white.opacity(isDark ? 0.16 : 0.3),
-                                accentPrimary.opacity(0.24)
+                                Color.white.opacity(isDark ? 0.32 : 0.56),
+                                accentPrimary.opacity(isDark ? 0.4 : 0.32)
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         ),
-                        lineWidth: 1
+                        lineWidth: 1.6
                     )
             )
-            .shadow(color: navShadow.opacity(0.9), radius: 14, x: 0, y: 10)
     }
 
     private var activeIconBackground: LinearGradient {
@@ -155,11 +175,11 @@ struct BottomNavView: View {
     var body: some View {
         GeometryReader { geo in
             let bottomInset = geo.safeAreaInsets.bottom
-            let barWidth = min(geo.size.width - 32, 500)
-            let bottomPadding = bottomInset == 0 ? 2 : max(0, bottomInset - 8)
+            let barWidth = min(geo.size.width - 40, 500)
+            let bottomPadding = bottomInset == 0 ? 2 : max(0, bottomInset - 14)
 
             ZStack(alignment: .bottom) {
-                HStack(spacing: 14) {
+                HStack(spacing: 8) {
                     navItem(icon: "house.fill", label: "Home", tab: .home, disabled: false) { onOpenHome?() }
                     navItem(icon: "chart.bar.fill", label: "Insights", tab: .insights, disabled: isFirstSubject) { onOpenInsights?() }
 
@@ -168,16 +188,31 @@ struct BottomNavView: View {
                     navItem(icon: "book.fill", label: "Abschluss", tab: .final, disabled: isFirstSubject) { onOpenFinalGrade?() }
                     navItem(icon: "gearshape.fill", label: "Einstellungen", tab: .settings, disabled: false) { onOpenSettings?() }
                 }
-                .padding(.horizontal, 18)
+                .padding(.horizontal, 0)
+                .padding(.vertical, -4)
                 .frame(width: barWidth, height: barHeight)
                 .background(navBackground)
-                .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-                .shadow(color: navShadow, radius: 14, x: 0, y: 10)
+                .overlay(
+                    RoundedRectangle(cornerRadius: navCornerRadius, style: .continuous)
+                        .stroke(
+                            LinearGradient(
+                                colors: [
+                                    accentPrimary.opacity(isDark ? 0.55 : 0.38),
+                                    Color.white.opacity(isDark ? 0.28 : 0.48)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1.6
+                        )
+                )
+                .clipShape(RoundedRectangle(cornerRadius: navCornerRadius, style: .continuous))
+                .shadow(color: navShadow.opacity(0.25), radius: 8, x: 0, y: 6)
                 .padding(.bottom, bottomPadding)
                 .overlay(alignment: .top) {
                     if isFirstSubject && !isOpen {
                         hintBubble
-                            .offset(y: -92)
+                            .offset(y: -76)
                     }
                 }
             }
@@ -202,6 +237,12 @@ struct BottomNavView: View {
                 AddFachreferatView(preselectedSubjectName: quickAddPreselectedSubjectName)
                     .environmentObject(store)
             }
+            .sheet(isPresented: $showFachreferatDetail) {
+                NavigationStack {
+                    FachreferatDetailView(subject: Subject(name: "Fachreferat", type: 0, date: Date()))
+                        .environmentObject(store)
+                }
+            }
             .sheet(isPresented: $showAddHomework) {
                 AddHomeworkView(preselectedSubjectName: quickAddPreselectedSubjectName)
                     .environmentObject(store)
@@ -211,8 +252,10 @@ struct BottomNavView: View {
                     .environmentObject(store)
             }
             .sheet(isPresented: $showPractical) {
-                PracticalTrainingView()
-                    .environmentObject(store)
+                NavigationStack {
+                    PraktikumDetailView()
+                        .environmentObject(store)
+                }
             }
             .sheet(isPresented: $showSeminar) {
                 SeminarPerformanceView()
@@ -226,62 +269,48 @@ struct BottomNavView: View {
     private func navItem(icon: String, label: String, tab: Tab, disabled: Bool, action: @escaping () -> Void) -> some View {
         let active = (currentTab == tab)
         return Button(action: action) {
-            VStack(spacing: 6) {
+            VStack(spacing: 4) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    Circle()
                         .fill(
                             active
                             ? AnyShapeStyle(
                                 LinearGradient(
                                     colors: [
-                                        accentPrimary.opacity(isDark ? 0.42 : 0.32),
-                                        accentSecondary.opacity(isDark ? 0.38 : 0.26)
+                                        accentPrimary.opacity(isDark ? 0.32 : 0.22),
+                                        accentSecondary.opacity(isDark ? 0.28 : 0.18)
                                     ],
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 )
                             )
-                            : AnyShapeStyle(
-                                LinearGradient(
-                                    colors: [
-                                        surface.opacity(isDark ? 0.9 : 0.98),
-                                        surface.opacity(isDark ? 0.78 : 0.9)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
+                            : AnyShapeStyle(Color.clear)
                         )
                         .overlay(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(active ? accentPrimary.opacity(isDark ? 0.9 : 0.7) : navStroke, lineWidth: 1)
+                            Circle()
+                                .stroke(active ? accentPrimary.opacity(isDark ? 0.9 : 0.7) : Color.clear, lineWidth: 1)
                         )
-                        .shadow(color: active ? accentPrimary.opacity(isDark ? 0.4 : 0.2) : Color.black.opacity(isDark ? 0.18 : 0.05),
-                                radius: active ? 10 : 4,
+                        .shadow(color: active ? accentPrimary.opacity(isDark ? 0.24 : 0.14) : Color.clear,
+                                radius: active ? 8 : 0,
                                 x: 0,
-                                y: active ? 7 : 3)
-                        .frame(width: 48, height: 42)
+                                y: active ? 5 : 0)
+                        .frame(width: 46, height: 46)
 
                     Image(systemName: icon)
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(
                             active
                             ? Color.white
-                            : accentPrimary.opacity(disabled ? 0.35 : 0.8)
+                            : accentPrimary.opacity(disabled ? 0.35 : 0.9)
                         )
                         .padding(.horizontal, 4)
                 }
-
-                Capsule()
-                    .fill(active ? accentPrimary : labelSecondary.opacity(0.25))
-                    .frame(width: active ? 28 : 10, height: 3)
-                    .opacity(disabled ? 0.2 : 1)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 2)
+            .padding(.vertical, 0)
             .opacity(disabled ? 0.55 : 1)
-            .scaleEffect(active ? 1.03 : 1.0)
-            .animation(.easeOut(duration: 0.16), value: active)
+            .scaleEffect(active ? 1.02 : 1.0)
+            .animation(.easeOut(duration: 0.15), value: active)
         }
         .buttonStyle(.plain)
         .disabled(disabled)
@@ -295,45 +324,45 @@ struct BottomNavView: View {
             }
         } label: {
             ZStack {
-                Circle()
-                    .fill(accentPrimary.opacity(0.08))
-                    .frame(width: fabSize + 16, height: fabSize + 16)
+                RoundedRectangle(cornerRadius: fabHeight / 2, style: .continuous)
+                    .fill(accentPrimary.opacity(isDark ? 0.16 : 0.12))
+                    .frame(width: fabWidth + 12, height: fabHeight + 10)
                     .blur(radius: 3)
 
-                Circle()
+                RoundedRectangle(cornerRadius: fabHeight / 2, style: .continuous)
                     .fill(
                         LinearGradient(
                             colors: [
                                 accentPrimary,
                                 accentSecondary.opacity(isDark ? 0.92 : 0.82)
                             ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
+                            startPoint: .leading,
+                            endPoint: .trailing
                         )
                     )
                     .overlay(
-                        Circle()
-                            .stroke(Color.white.opacity(isDark ? 0.22 : 0.4), lineWidth: 1.1)
+                        RoundedRectangle(cornerRadius: fabHeight / 2, style: .continuous)
+                            .stroke(Color.white.opacity(isDark ? 0.16 : 0.32), lineWidth: 1.1)
                     )
-                    .frame(width: fabSize, height: fabSize)
-                    .shadow(color: Color.black.opacity(isDark ? 0.35 : 0.12),
-                            radius: fabPressed ? 8 : 10,
+                    .frame(width: fabWidth, height: fabHeight)
+                    .shadow(color: Color.black.opacity(isDark ? 0.3 : 0.12),
+                            radius: fabPressed ? 6 : 8,
                             x: 0,
-                            y: fabPressed ? 6 : 9)
+                            y: fabPressed ? 4 : 6)
 
                 Image(systemName: isOpen ? "xmark" : "plus")
-                    .font(.system(size: 18, weight: .bold))
+                    .font(.system(size: 17, weight: .bold))
                     .foregroundStyle(Color.white)
                     .scaleEffect(isOpen ? 0.96 : 1.05)
             }
         }
-        .frame(width: max(fabSize, 56), height: barHeight)
+        .frame(width: fabWidth, height: barHeight)
         .simultaneousGesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { _ in withAnimation(.easeOut(duration: 0.08)) { fabPressed = true } }
                 .onEnded { _ in withAnimation(.easeOut(duration: 0.12)) { fabPressed = false } }
         )
-        .scaleEffect(fabPressed ? 0.96 : 1.0)
+        .scaleEffect(fabPressed ? 0.97 : 1.0)
         .accessibilityLabel("Schnelle Aktionen öffnen")
     }
 
@@ -478,27 +507,31 @@ struct BottomNavView: View {
                             }
 
                             if showFachreferatAction {
-                                ActionButton(
-                                    iconContent: AnyView(
-                                        Group {
-                                            if hasFachreferat {
-                                                Image(systemName: "slider.horizontal.3")
-                                                    .font(.system(size: 17, weight: .semibold))
-                                            } else {
-                                                Image(systemName: "doc.text.fill")
-                                                    .font(.system(size: 17, weight: .semibold))
-                                            }
+                            ActionButton(
+                                iconContent: AnyView(
+                                    Group {
+                                        if hasFachreferat {
+                                            Image(systemName: "slider.horizontal.3")
+                                                .font(.system(size: 17, weight: .semibold))
+                                        } else {
+                                            Image(systemName: "doc.text.fill")
+                                                .font(.system(size: 17, weight: .semibold))
                                         }
-                                    ),
-                                    label: hasFachreferat ? "Fachreferat bearbeiten" : "Fachreferat",
-                                    description: hasFachreferat ? "Bestehendes Fachreferat" : "Fachreferatsnote anlegen",
-                                    disabled: store.encryptionKey == nil || isFirstSubject,
-                                    title: store.encryptionKey == nil ? "Lade Schlüssel..." : (isFirstSubject ? "Lege zuerst ein Fach an" : "")
-                                ) {
-                                    isOpen = false
+                                    }
+                                ),
+                                label: hasFachreferat ? "Fachreferat anzeigen" : "Fachreferat",
+                                description: hasFachreferat ? "Gespeicherte Fachreferatsnote" : "Fachreferatsnote anlegen",
+                                disabled: store.encryptionKey == nil || isFirstSubject,
+                                title: store.encryptionKey == nil ? "Lade Schlüssel..." : (isFirstSubject ? "Lege zuerst ein Fach an" : "")
+                            ) {
+                                isOpen = false
+                                if hasFachreferat {
+                                    showFachreferatDetail = true
+                                } else {
                                     showAddFachreferat = true
                                 }
                             }
+                        }
 
                             if showSeminarAction {
                                 ActionButton(
@@ -545,7 +578,7 @@ struct BottomNavView: View {
                     )
                     .shadow(color: Color.black.opacity(isDark ? 0.8 : 0.2), radius: isDark ? 28 : 16, x: 0, y: isDark ? 18 : 10)
                     .padding(.horizontal, 16)
-                    .padding(.bottom, bottomInset + fabSize + 24)
+                    .padding(.bottom, bottomInset + fabHeight + 34)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .animation(.easeOut(duration: 0.3), value: isOpen)
                 }

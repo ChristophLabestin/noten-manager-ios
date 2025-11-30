@@ -5,6 +5,7 @@ import FirebaseCore
 import GoogleSignIn
 import UIKit
 import LocalAuthentication
+import AuthenticationServices
 
 enum AuthField: Hashable {
     case loginEmail, loginPassword
@@ -37,6 +38,7 @@ struct AuthView: View {
     @State private var resetEmail: String = ""
     @State private var showResetSheet: Bool = false
     @State private var resetInfo: String?
+    @State private var appleNonce: String?
 
     @FocusState private var activeField: AuthField?
 
@@ -485,28 +487,34 @@ struct AuthView: View {
             }
 
             VStack(spacing: 10) {
-                Button {
-                    authManager.errorMessage = "Apple Login bald verfügbar. Bitte E-Mail/Passwort nutzen."
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "apple.logo")
-                            .font(.headline)
-                        Text("Mit Apple")
-                            .font(.footnote.weight(.semibold))
+                SignInWithAppleButton(.signIn) { request in
+                    appleNonce = authManager.configureAppleRequest(request)
+                } onCompletion: { result in
+                    switch result {
+                    case .success(let auth):
+                        guard
+                            let credential = auth.credential as? ASAuthorizationAppleIDCredential,
+                            let nonce = appleNonce
+                        else {
+                            appleNonce = nil
+                            authManager.errorMessage = "Apple Login fehlgeschlagen. Bitte erneut versuchen."
+                            return
+                        }
+                        appleNonce = nil
+                        Task { await authManager.signInWithApple(credential: credential, rawNonce: nonce) }
+                    case .failure(let error):
+                        appleNonce = nil
+                        if let authError = error as? ASAuthorizationError, authError.code == .canceled {
+                            return
+                        }
+                        authManager.errorMessage = "Apple Login fehlgeschlagen: \(error.localizedDescription)"
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(Color.black.opacity(colorScheme == .dark ? 0.7 : 0.9))
-                    .foregroundStyle(Color.white.opacity(0.85))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 13, style: .continuous)
-                            .stroke(Color.white.opacity(0.22), lineWidth: 1)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
                 }
-                .buttonStyle(.plain)
-                .disabled(true)
-                .opacity(0.55)
+                .frame(maxWidth: .infinity)
+                .frame(height: 46)
+                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                .disabled(authManager.isLoading)
+                .opacity(authManager.isLoading ? 0.7 : 1)
 
                 Button {
                     Task { await signInWithGoogle() }
@@ -521,14 +529,17 @@ struct AuthView: View {
                             .font(.footnote.weight(.semibold))
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(Color.white.opacity(colorScheme == .dark ? 0.08 : 0.96))
-                    .foregroundStyle(Color.primary)
+                    .frame(height: 46)
+                    .foregroundStyle(Color(hex: "#3c4043"))
+                    .background(
+                        RoundedRectangle(cornerRadius: 13, style: .continuous)
+                            .fill(Color.white)
+                    )
                     .overlay(
                         RoundedRectangle(cornerRadius: 13, style: .continuous)
-                            .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+                            .stroke(Color(hex: "#dadce0"), lineWidth: 1)
                     )
-                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .disabled(authManager.isLoading)

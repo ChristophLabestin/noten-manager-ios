@@ -12,10 +12,40 @@
 		5535B85D2ECC2C7A00B778F4 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 5535B85C2ECC2C7A00B778F4 /* FirebaseAuth */; };
 		5535B85F2ECC2C7F00B778F4 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5535B85E2ECC2C7F00B778F4 /* FirebaseCore */; };
 		5535B8612ECC2C8500B778F4 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 5535B8602ECC2C8500B778F4 /* FirebaseFirestore */; };
+		553A0CE92EDA312F00D93B93 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 553A0CE82EDA312F00D93B93 /* WidgetKit.framework */; };
+		553A0CEB2EDA312F00D93B93 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 553A0CEA2EDA312F00D93B93 /* SwiftUI.framework */; };
+		553A0CFC2EDA313200D93B93 /* ExamCountdownWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 553A0CE72EDA312F00D93B93 /* ExamCountdownWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		553A0CFA2EDA313200D93B93 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5535B8422ECC21F600B778F4 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 553A0CE62EDA312F00D93B93;
+			remoteInfo = ExamCountdownWidgetExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		553A0D012EDA313200D93B93 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				553A0CFC2EDA313200D93B93 /* ExamCountdownWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		5535B84A2ECC21F600B778F4 /* noten-manager-ios.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "noten-manager-ios.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		553A0CE72EDA312F00D93B93 /* ExamCountdownWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ExamCountdownWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		553A0CE82EDA312F00D93B93 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		553A0CEA2EDA312F00D93B93 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -26,6 +56,13 @@
 			);
 			target = 5535B8492ECC21F600B778F4 /* noten-manager-ios */;
 		};
+		553A0D002EDA313200D93B93 /* Exceptions for "ExamCountdownWidget" folder in "ExamCountdownWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 553A0CE62EDA312F00D93B93 /* ExamCountdownWidgetExtension */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -35,6 +72,14 @@
 				55050D382ED62A370082A2EE /* Exceptions for "noten-manager-ios" folder in "noten-manager-ios" target */,
 			);
 			path = "noten-manager-ios";
+			sourceTree = "<group>";
+		};
+		553A0CEC2EDA312F00D93B93 /* ExamCountdownWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				553A0D002EDA313200D93B93 /* Exceptions for "ExamCountdownWidget" folder in "ExamCountdownWidgetExtension" target */,
+			);
+			path = ExamCountdownWidget;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -52,6 +97,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		553A0CE42EDA312F00D93B93 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				553A0CEB2EDA312F00D93B93 /* SwiftUI.framework in Frameworks */,
+				553A0CE92EDA312F00D93B93 /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -59,6 +113,7 @@
 			isa = PBXGroup;
 			children = (
 				5535B84C2ECC21F600B778F4 /* noten-manager-ios */,
+				553A0CEC2EDA312F00D93B93 /* ExamCountdownWidget */,
 				5535B85B2ECC2C7A00B778F4 /* Frameworks */,
 				5535B84B2ECC21F600B778F4 /* Products */,
 			);
@@ -68,6 +123,7 @@
 			isa = PBXGroup;
 			children = (
 				5535B84A2ECC21F600B778F4 /* noten-manager-ios.app */,
+				553A0CE72EDA312F00D93B93 /* ExamCountdownWidgetExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -75,6 +131,8 @@
 		5535B85B2ECC2C7A00B778F4 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				553A0CE82EDA312F00D93B93 /* WidgetKit.framework */,
+				553A0CEA2EDA312F00D93B93 /* SwiftUI.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -89,10 +147,12 @@
 				5535B8462ECC21F600B778F4 /* Sources */,
 				5535B8472ECC21F600B778F4 /* Frameworks */,
 				5535B8482ECC21F600B778F4 /* Resources */,
+				553A0D012EDA313200D93B93 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				553A0CFB2EDA313200D93B93 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				5535B84C2ECC21F600B778F4 /* noten-manager-ios */,
@@ -109,6 +169,28 @@
 			productReference = 5535B84A2ECC21F600B778F4 /* noten-manager-ios.app */;
 			productType = "com.apple.product-type.application";
 		};
+		553A0CE62EDA312F00D93B93 /* ExamCountdownWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 553A0CFD2EDA313200D93B93 /* Build configuration list for PBXNativeTarget "ExamCountdownWidgetExtension" */;
+			buildPhases = (
+				553A0CE32EDA312F00D93B93 /* Sources */,
+				553A0CE42EDA312F00D93B93 /* Frameworks */,
+				553A0CE52EDA312F00D93B93 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				553A0CEC2EDA312F00D93B93 /* ExamCountdownWidget */,
+			);
+			name = ExamCountdownWidgetExtension;
+			packageProductDependencies = (
+			);
+			productName = ExamCountdownWidgetExtension;
+			productReference = 553A0CE72EDA312F00D93B93 /* ExamCountdownWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -120,6 +202,9 @@
 				LastUpgradeCheck = 2610;
 				TargetAttributes = {
 					5535B8492ECC21F600B778F4 = {
+						CreatedOnToolsVersion = 26.1.1;
+					};
+					553A0CE62EDA312F00D93B93 = {
 						CreatedOnToolsVersion = 26.1.1;
 					};
 				};
@@ -143,12 +228,20 @@
 			projectRoot = "";
 			targets = (
 				5535B8492ECC21F600B778F4 /* noten-manager-ios */,
+				553A0CE62EDA312F00D93B93 /* ExamCountdownWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		5535B8482ECC21F600B778F4 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		553A0CE52EDA312F00D93B93 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -165,7 +258,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		553A0CE32EDA312F00D93B93 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		553A0CFB2EDA313200D93B93 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 553A0CE62EDA312F00D93B93 /* ExamCountdownWidgetExtension */;
+			targetProxy = 553A0CFA2EDA313200D93B93 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		5535B8532ECC21FA00B778F4 /* Debug */ = {
@@ -290,8 +398,11 @@
 		5535B8562ECC21FA00B778F4 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = AppIconTwo;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_ENTITLEMENTS = "noten-manager-ios/noten-manager-ios.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -327,8 +438,11 @@
 		5535B8572ECC21FA00B778F4 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = AppIconTwo;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_ENTITLEMENTS = "noten-manager-ios/noten-manager-ios.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -361,6 +475,68 @@
 			};
 			name = Release;
 		};
+		553A0CFE2EDA313200D93B93 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 48BM67TY9G;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ExamCountdownWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ExamCountdownWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "de.christophlabestin.noten-manager-ios.ExamCountdownWidget";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		553A0CFF2EDA313200D93B93 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 48BM67TY9G;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ExamCountdownWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ExamCountdownWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "de.christophlabestin.noten-manager-ios.ExamCountdownWidget";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -378,6 +554,15 @@
 			buildConfigurations = (
 				5535B8562ECC21FA00B778F4 /* Debug */,
 				5535B8572ECC21FA00B778F4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		553A0CFD2EDA313200D93B93 /* Build configuration list for PBXNativeTarget "ExamCountdownWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				553A0CFE2EDA313200D93B93 /* Debug */,
+				553A0CFF2EDA313200D93B93 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

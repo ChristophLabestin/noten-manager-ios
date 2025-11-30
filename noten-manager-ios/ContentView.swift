@@ -21,6 +21,8 @@ struct ContentView: View {
     @State private var biometricUnlocked: Bool = false
     @State private var biometricMessage: String?
     @State private var isRequestingBiometric: Bool = false
+    @State private var incomingHomeworkShare: HomeworkShareLinkPayload?
+    @State private var incomingExamId: String?
 
     var body: some View {
         ZStack {
@@ -33,7 +35,7 @@ struct ContentView: View {
                     } else {
                         MainView(onLogout: {
                             authManager.signOut()
-                        })
+                        }, incomingHomeworkShare: $incomingHomeworkShare, incomingExamId: $incomingExamId)
                         .environmentObject(authManager)
                         .environmentObject(offlineManager)
                         .environmentObject(biometricManager)
@@ -62,7 +64,7 @@ struct ContentView: View {
             }
         }
         .onChange(of: authManager.isAuthenticated) { _, isAuth in
-            if isAuth && offlineManager.isOfflineModeActive {
+            if isAuth && offlineManager.isOfflineModeActive && !offlineManager.isManualOfflinePinned {
                 offlineManager.deactivateOfflineMode()
             }
             refreshBiometricState(triggerUnlock: isAuth)
@@ -73,8 +75,12 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .background {
                 biometricUnlocked = false
+                let snapshot = offlineManager.cachedSnapshot ?? offlineManager.availableSnapshot()
+                let exams = snapshot.map { $0.exams + $0.sharedExams }
+                BackgroundRefreshManager.schedule(for: exams)
             } else if phase == .active {
                 Task { await attemptBiometricUnlockIfNeeded(force: false) }
+                Task { await BackgroundRefreshManager.refreshLiveActivitiesFromSnapshot() }
             }
         }
         .onChange(of: biometricManager.isEnabledForActiveUser) { _, _ in
@@ -89,6 +95,9 @@ struct ContentView: View {
             }
         } message: {
             Text(offlinePromptMessage)
+        }
+        .onOpenURL { url in
+            handleIncomingURL(url)
         }
         .hideKeyboardOnTap()
     }
@@ -147,7 +156,7 @@ struct ContentView: View {
             offlineSnapshotForPrompt = offlineManager.availableSnapshot()
         }
         guard offlineSnapshotForPrompt != nil else { return }
-        offlineManager.activateOfflineMode()
+        offlineManager.activateOfflineMode(manual: true)
         showOfflinePrompt = false
     }
 
@@ -307,6 +316,24 @@ struct ContentView: View {
         biometricUnlocked = true
         biometricMessage = message
     }
+
+    private func handleIncomingURL(_ url: URL) {
+        if let payload = HomeworkShareLinkBuilder.payload(from: url) {
+            incomingHomeworkShare = payload
+        }
+        if url.scheme?.lowercased() == "notenmanager",
+           url.host?.lowercased() == "exam" {
+            let components = url.pathComponents.filter { $0 != "/" }
+            if let id = components.first {
+                incomingExamId = id
+                NotificationCenter.default.post(name: .openExamDetail, object: id)
+            }
+        }
+    }
+}
+
+extension Notification.Name {
+    static let openExamDetail = Notification.Name("openExamDetail")
 }
 
 #Preview {

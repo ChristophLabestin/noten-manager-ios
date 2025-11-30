@@ -50,16 +50,6 @@ struct FachreferatDetailView: View {
                                 .clipShape(Capsule())
 
                             Spacer()
-
-                            if referat != nil {
-                                Button("Bearbeiten") { showEditSheet = true }
-                                    .font(.subheadline.weight(.semibold))
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
-                                    .background(Color.pink.opacity(0.12))
-                                    .foregroundStyle(Color.pink)
-                                    .clipShape(Capsule())
-                            }
                         }
 
                         if let subjectName = referat?.subjectName, !subjectName.isEmpty {
@@ -101,12 +91,23 @@ struct FachreferatDetailView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
         }
-        .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine"))
-        .navigationTitle("Fachreferat")
-        .navigationBarTitleDisplayMode(.inline)
+        .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
+        .sheetNavigationTitle("Fachreferat")
         .sheet(isPresented: $showEditSheet) {
             AddFachreferatView(preselectedSubjectName: referat?.subjectName)
                 .environmentObject(store)
+        }
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Schließen") { dismiss() }
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                if referat != nil {
+                    Button("Bearbeiten") {
+                        showEditSheet = true
+                    }
+                }
+            }
         }
     }
 }

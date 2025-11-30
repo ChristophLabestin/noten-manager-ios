@@ -8,6 +8,7 @@ struct AddGradeView: View {
     // Neu: optionale Vorauswahl (z. B. von SubjectDetail oder Prüfung)
     let preselectedSubjectName: String?
     let preselectedWeight: Int?
+    let preselectedCustomWeight: Double?
     let prefilledNote: String?
 
     let linkedExamId: String?
@@ -56,9 +57,10 @@ struct AddGradeView: View {
             .sorted { $0.date > $1.date }
     }
 
-    init(preselectedSubjectName: String? = nil, preselectedWeight: Int? = nil, prefilledNote: String? = nil, linkedExamId: String? = nil, markLinkedExamCompletedByDefault: Bool = false) {
+    init(preselectedSubjectName: String? = nil, preselectedWeight: Int? = nil, preselectedCustomWeight: Double? = nil, prefilledNote: String? = nil, linkedExamId: String? = nil, markLinkedExamCompletedByDefault: Bool = false) {
         self.preselectedSubjectName = preselectedSubjectName
         self.preselectedWeight = preselectedWeight
+        self.preselectedCustomWeight = preselectedCustomWeight
         self.prefilledNote = prefilledNote
         self.linkedExamId = linkedExamId
         self.markLinkedExamCompletedByDefault = markLinkedExamCompletedByDefault
@@ -320,7 +322,7 @@ struct AddGradeView: View {
 
                                 if linkToExam {
                                     if linkableExams.isEmpty {
-                                        Text("Keine offenen Termine für dieses Fach gefunden.")
+                                        Text("Keine wartende Termine für dieses Fach gefunden.")
                                             .font(.footnote)
                                             .foregroundStyle(.secondary)
                                     } else {
@@ -376,7 +378,8 @@ struct AddGradeView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
-            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine"))
+            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
+            .sheetNavigationTitle("Note erfassen")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Abbrechen") { dismiss() }
@@ -407,7 +410,10 @@ struct AddGradeView: View {
                         subjectName = subjects.first?.name ?? ""
                     }
                 }
-                if let w = preselectedWeight {
+                if let custom = preselectedCustomWeight {
+                    weightChoice = .custom
+                    customWeightText = formatWeight(custom)
+                } else if let w = preselectedWeight {
                     weightChoice = .preset(Double(w))
                 } else {
                     weightChoice = .preset(0)
@@ -554,13 +560,19 @@ struct AddGradeView: View {
     private func applyExamWeightIfAvailable(examId: String?) {
         guard let examId else { return }
         if let exam = store.allExams.first(where: { $0.id == examId }) {
-            if let w = exam.weight {
+            if let custom = exam.customWeight {
+                weightChoice = .custom
+                customWeightText = formatWeight(custom)
+            } else if let w = exam.weight {
                 weightChoice = .preset(Double(w))
             }
             return
         }
         if let exam = store.sharedExams.first(where: { $0.id == examId }) {
-            if let w = exam.weight {
+            if let custom = exam.customWeight {
+                weightChoice = .custom
+                customWeightText = formatWeight(custom)
+            } else if let w = exam.weight {
                 weightChoice = .preset(Double(w))
             }
         }

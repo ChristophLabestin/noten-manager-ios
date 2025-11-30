@@ -47,9 +47,14 @@ struct AppSettingsView: View {
     @State private var resetYearPassword: String = ""
     @State private var resetAccountSlideDone: Bool = false
     @State private var resetYearSlideDone: Bool = false
+    @State private var showDeleteAccountSheet: Bool = false
+    @State private var deleteAccountPassword: String = ""
+    @State private var deleteAccountSlideDone: Bool = false
     @State private var isResettingAccount: Bool = false
     @State private var isResettingYear: Bool = false
+    @State private var isDeletingAccount: Bool = false
     @State private var resetError: String?
+    @State private var deleteError: String?
     @State private var offlineStatusMessage: String?
     @State private var biometricToggleState: Bool = false
     @State private var biometricStatusMessage: String?
@@ -68,6 +73,8 @@ struct AppSettingsView: View {
     @State private var changeEmailError: String?
     @State private var isUpdatingEmail: Bool = false
 
+    @State private var currentDisplayName: String = ""
+
     @State private var changePasswordCurrent: String = ""
     @State private var changePasswordNew: String = ""
     @State private var changePasswordConfirm: String = ""
@@ -84,14 +91,18 @@ struct AppSettingsView: View {
     private let helperFont: Font = .footnote
     private let appIconOptions: [(id: String, title: String, imageName: String)] = [
         ("default", "Standard", "AppIconPreviewDefault"),
-        ("pink", "Pink", "AppIconPreviewPink"),
-        ("green", "Grün", "AppIconPreviewGreen"),
-        ("black", "Schwarz", "AppIconPreviewBlack")
+        ("pink", "Pink", "AppIconPreviewPink")
     ]
 
     private var maxExamSubjects: Int { 4 }
+    private var examEligibleSubjects: [Subject] {
+        store
+            .sortedSubjectsForDisplay()
+            .filter { $0.type == 1 && !$0.isElective }
+    }
+
     private var currentExamSubjectsCount: Int {
-        store.subjects.filter { ($0.examSubject ?? false) }.count
+        examEligibleSubjects.filter { ($0.examSubject ?? false) }.count
     }
 
     private var hasOverdueHomeworks: Bool {
@@ -211,24 +222,6 @@ struct AppSettingsView: View {
             }
         ) {
             let metricColumns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 2)
-            let statusItems: [(text: String, icon: String, color: Color)] = {
-                var items: [(String, String, Color)] = [
-                    (store.theme == "feminine" ? "Soft/Pink" : "Klassisch", "paintpalette.fill", .orange)
-                ]
-                if overdueHomeworksCount > 0 {
-                    items.append(("HW fällig: \(overdueHomeworksCount)", "exclamationmark.triangle.fill", .orange))
-                }
-                if homeworkDueTomorrowCount > 0 {
-                    items.append(("HW morgen: \(homeworkDueTomorrowCount)", "clock.badge.exclamationmark", .yellow))
-                }
-                if overdueExamsCount > 0 {
-                    items.append(("Prüfungen fällig: \(overdueExamsCount)", "calendar.badge.exclamationmark", .red))
-                }
-                if items.count == 1 && overdueHomeworksCount == 0 && homeworkDueTomorrowCount == 0 && overdueExamsCount == 0 {
-                    items.append(("Alles im Plan", "checkmark.circle.fill", .green))
-                }
-                return items
-            }()
 
             VStack(alignment: .leading, spacing: 12) {
                 LazyVGrid(columns: metricColumns, spacing: 12) {
@@ -256,16 +249,6 @@ struct AppSettingsView: View {
                         icon: "checkmark.seal.fill",
                         accent: .indigo
                     )
-                }
-
-                if !statusItems.isEmpty {
-                    Divider()
-                        .opacity(0.25)
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 8)], spacing: 8) {
-                        ForEach(Array(statusItems.enumerated()), id: \.offset) { _, item in
-                            CompactStatusChip(text: item.text, icon: item.icon, color: item.color)
-                        }
-                    }
                 }
             }
         }
@@ -310,7 +293,7 @@ struct AppSettingsView: View {
                 }
             }
             .background(
-                ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine")
+                ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity)
             )
             .scrollDismissesKeyboard(.interactively)
             .hideKeyboardOnTap()
@@ -350,6 +333,7 @@ struct AppSettingsView: View {
                 selectedSubjectsForNewGroup = []
                 syncBiometricToggle()
                 Task { await refreshEmailVerification() }
+                loadCurrentDisplayName()
             }
             .sheet(isPresented: $showHomeworkSheet) {
                 HomeworkListView()
@@ -414,6 +398,18 @@ struct AppSettingsView: View {
                     confirmAction: confirmResetYear
                 )
             }
+            .sheet(isPresented: $showDeleteAccountSheet) {
+                ResetConfirmSheet(
+                    title: "Account löschen",
+                    message: "Konto und alle Daten dauerhaft entfernen. Dieser Schritt kann nicht rückgängig gemacht werden.",
+                    password: $deleteAccountPassword,
+                    isPresented: $showDeleteAccountSheet,
+                    slideDone: $deleteAccountSlideDone,
+                    isProcessing: isDeletingAccount,
+                    errorMessage: deleteError,
+                    confirmAction: confirmDeleteAccount
+                )
+            }
             .sheet(isPresented: $showChangeEmailSheet) {
                 ChangeEmailSheet(
                     currentEmail: Auth.auth().currentUser?.email ?? "Unbekannt",
@@ -473,7 +469,11 @@ struct AppSettingsView: View {
                             .font(helperFont)
                             .foregroundStyle(.secondary)
                         VStack(spacing: 10) {
-                            TextField("Dein Name", text: $newName)
+                            TextField(
+                                "Dein Name",
+                                text: $newName,
+                                prompt: Text(currentDisplayName.isEmpty ? "Dein Name" : currentDisplayName)
+                            )
                                 .textContentType(.name)
                                 .submitLabel(.done)
                                 .onSubmit { hideKeyboard() }
@@ -483,17 +483,18 @@ struct AppSettingsView: View {
                             Button {
                                 Task { await saveName() }
                             } label: {
-                                if isSavingName {
-                                    ProgressView()
-                                        .frame(maxWidth: .infinity)
-                                } else {
-                                    Text("Name speichern")
-                                        .frame(maxWidth: .infinity)
+                                HStack(spacing: 10) {
+                                    if isSavingName {
+                                        ProgressView().tint(.cyan)
+                                    } else {
+                                        Image(systemName: "sparkles")
+                                            .font(.headline.weight(.semibold))
+                                        Text("Name speichern")
+                                    }
                                 }
+                                .frame(maxWidth: .infinity)
                             }
-                            .buttonStyle(.borderedProminent)
-                            .tint(.cyan)
-                            .frame(maxWidth: .infinity)
+                            .buttonStyle(SoftTintButtonStyle(accent: .cyan))
                             .disabled(isSavingName || newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         }
                         if nameSavedSuccess {
@@ -520,7 +521,39 @@ struct AppSettingsView: View {
                         }
                         .pickerStyle(.segmented)
 
+                        HStack {
+                            Text("Hintergrund-Intensität")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            Text("\(Int((store.themeBackgroundIntensity * 100).rounded()))%")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.top, 10)
+
+                        Slider(
+                            value: Binding(
+                                get: { store.themeBackgroundIntensity },
+                                set: { newVal in
+                                    // 1%-Schritte für feineres Tuning
+                                    let snapped = (newVal * 100).rounded() / 100
+                                    store.themeBackgroundIntensity = snapped
+                                }
+                            ),
+                            in: 0...1,
+                            step: 0.01,
+                            onEditingChanged: { editing in
+                                if !editing {
+                                    let value = store.themeBackgroundIntensity
+                                    Task { await store.updatePreferences(themeIntensity: value) }
+                                }
+                            }
+                        )
+
                         Text("Wähle, ob die Oberfläche eher klassisch oder mit einem weicheren Farbschema angezeigt wird.")
+                            .font(helperFont)
+                            .foregroundStyle(.secondary)
+                        Text("0% entspricht einem neutralen weißen bzw. dunklen Hintergrund, 100% dem vollen Farbverlauf.")
                             .font(helperFont)
                             .foregroundStyle(.secondary)
                     }
@@ -594,7 +627,7 @@ struct AppSettingsView: View {
                             get: { store.darkModeMode },
                             set: { val in Task { await store.updatePreferences(darkModeMode: val) } }
                         )) {
-                            Text("Geräteeinstellung").tag("system")
+                            Text("Automatisch").tag("system")
                             Text("Light Mode").tag("light")
                             Text("Dark Mode").tag("dark")
                         }
@@ -746,8 +779,7 @@ struct AppSettingsView: View {
                             Text("Schuljahrs-Setup starten")
                                 .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.mint)
+                        .buttonStyle(SoftTintButtonStyle(accent: .mint))
                     }
                 }
 
@@ -824,16 +856,18 @@ struct AppSettingsView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Prüfungsfächer")
                             .font(sectionHeaderFont)
-                        Text("Maximal 4 Prüfungsfächer auswählen.")
+                        Text("Maximal 4 Prüfungsfächer auswählen. Nur Hauptfächer sind zulässig.")
                             .font(helperFont)
                             .foregroundStyle(.secondary)
 
-                        if store.subjects.isEmpty {
-                            Text("Lege zuerst Fächer an, um Prüfungsfächer zu wählen.")
+                        let eligibleSubjects = examEligibleSubjects
+
+                        if eligibleSubjects.isEmpty {
+                            Text("Lege zuerst Hauptfächer an, um Prüfungsfächer zu wählen.")
                                 .foregroundStyle(.secondary)
                         } else {
                             VStack(spacing: 8) {
-                                ForEach(store.sortedSubjectsForDisplay(), id: \.name) { subject in
+                                ForEach(eligibleSubjects, id: \.name) { subject in
                                     ExamSubjectRow(
                                         subject: subject,
                                         isDisabled: !(subject.examSubject ?? false) && currentExamSubjectsCount >= maxExamSubjects,
@@ -878,11 +912,7 @@ struct AppSettingsView: View {
             accent: .indigo
         ) {
             VStack(alignment: .leading, spacing: 12) {
-                SettingsSectionBox {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Deine Gruppen")
-                            .font(sectionHeaderFont)
-
+                //SettingsSectionBox {
                         if store.groupIds.isEmpty {
                             Text("Lege eine Gruppe an oder tritt mit einem Code bei. Fächer werden gruppenbezogen geteilt.")
                                 .font(helperFont)
@@ -891,6 +921,7 @@ struct AppSettingsView: View {
                             VStack(spacing: 10) {
                                 ForEach(store.groupIds, id: \.self) { gid in
                                     let isCopied = copiedGroupId == gid
+                                    let isOwner = store.groupOwners[gid] == Auth.auth().currentUser?.uid
                                     VStack(alignment: .leading, spacing: 10) {
                                         HStack(alignment: .top) {
                                             VStack(alignment: .leading, spacing: 4) {
@@ -913,44 +944,37 @@ struct AppSettingsView: View {
                                                     }
                                                 }
                                             } label: {
-                                                HStack(spacing: 6) {
-                                                    Image(systemName: isCopied ? "checkmark.circle.fill" : "doc.on.doc")
-                                                        .foregroundStyle(isCopied ? .green : .blue)
-                                                    Text(isCopied ? "Kopiert" : "Kopieren")
-                                                        .font(.caption)
-                                                        .foregroundStyle(isCopied ? .green : .blue)
-                                                }
-                                                .padding(.horizontal, 10)
-                                                .padding(.vertical, 6)
-                                                .background(
-                                                    Capsule(style: .continuous)
-                                                        .fill(Color(.secondarySystemBackground))
-                                                )
+                                                Label(isCopied ? "kopiert" : "Kopieren", systemImage: isCopied ? "checkmark" : "doc.on.doc")
                                             }
-                                            .buttonStyle(.plain)
+                                            .buttonStyle(PillActionButtonStyle(accent: isCopied ? .green : .indigo))
                                             .accessibilityLabel("Gruppencode kopieren")
                                         }
 
-                                        HStack {
-                                            Button("Fächer verwalten") {
-                                                manageGroupId = gid
+                                        HStack(spacing: 8) {
+                                            if isOwner {
+                                                Button {
+                                                    manageGroupId = gid
+                                                } label: {
+                                                    Label("Verwalten", systemImage: "square.grid.2x2")
+                                                }
+                                                .buttonStyle(PillActionButtonStyle(accent: .indigo))
                                             }
-                                            Spacer()
-                                            Button("Fächer abgleichen") {
+
+                                            Button {
                                                 showMappingGroupId = gid
+                                            } label: {
+                                                Label("Abgleichen", systemImage: "arrow.triangle.2.circlepath")
                                             }
+                                            .buttonStyle(PillActionButtonStyle(accent: .teal))
+
                                             Spacer()
+
                                             Button(role: .destructive) {
                                                 groupPendingLeave = gid
                                             } label: {
-                                                HStack(spacing: 6) {
-                                                    Image(systemName: "rectangle.portrait.and.arrow.right")
-                                                    Text("Verlassen")
-                                                        .font(.caption)
-                                                }
-                                                .foregroundStyle(.red)
+                                                Label("Verlassen", systemImage: "rectangle.portrait.and.arrow.right")
                                             }
-                                            .buttonStyle(.plain)
+                                            .buttonStyle(PillActionButtonStyle(accent: .red))
                                             .accessibilityLabel("Gruppe verlassen")
                                         }
                                     }
@@ -967,8 +991,7 @@ struct AppSettingsView: View {
                                 }
                             }
                         }
-                    }
-                }
+                //}
 
                 SettingsSectionBox {
                     VStack(alignment: .leading, spacing: 8) {
@@ -1027,8 +1050,7 @@ struct AppSettingsView: View {
                         } label: {
                             if isCreatingGroup { ProgressView() } else { Text("Gruppe erstellen") }
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.indigo)
+                        .buttonStyle(SoftTintButtonStyle(accent: .indigo))
                         .disabled(groupNameInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
@@ -1060,8 +1082,7 @@ struct AppSettingsView: View {
                         } label: {
                             if isJoiningGroup { ProgressView() } else { Text("Mit Code beitreten") }
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.indigo)
+                        .buttonStyle(SoftTintButtonStyle(accent: .indigo))
                         .disabled(groupJoinCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                         if let msg = groupInfoMessage {
@@ -1125,7 +1146,7 @@ struct AppSettingsView: View {
             offlineStatusMessage = "Letzter Online-Login ist länger als 3 Tage her. Bitte online anmelden."
             return
         }
-        offlineManager.activateOfflineMode()
+        offlineManager.activateOfflineMode(manual: true)
         offlineStatusMessage = "Offline-Modus aktiviert. Daten bleiben lokal verfügbar, bis du wieder online gehst."
     }
 
@@ -1155,6 +1176,20 @@ struct AppSettingsView: View {
                     } label: {
                         HStack {
                             Label("Datenschutz", systemImage: "lock.shield")
+                                .font(.body)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+
+                    NavigationLink {
+                        TermsOfUseView()
+                            .environmentObject(store)
+                    } label: {
+                        HStack {
+                            Label("Nutzungsbedingungen", systemImage: "doc.plaintext")
                                 .font(.body)
                             Spacer()
                             Image(systemName: "chevron.right")
@@ -1242,39 +1277,39 @@ struct AppSettingsView: View {
                         Button {
                             activateOfflineManually()
                         } label: {
-                            Label {
+                            HStack(spacing: 12) {
+                                Image(systemName: "wifi.slash")
+                                    .font(.headline.weight(.semibold))
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text("Offline aktivieren")
                                     Text("Letzten Cache nutzen")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
-                            } icon: {
-                                Image(systemName: "wifi.slash")
+                                Spacer(minLength: 0)
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 12)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.purple)
+                        .buttonStyle(SoftTintButtonStyle(accent: .purple))
                         .disabled(!hasCache || offlineManager.isOfflineModeActive)
 
                         Button {
                             deactivateOffline()
                         } label: {
-                            Label {
+                            HStack(spacing: 12) {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.headline.weight(.semibold))
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text("Offline verlassen")
                                     Text("Sync wiederherstellen")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
-                            } icon: {
-                                Image(systemName: "arrow.clockwise")
+                                Spacer(minLength: 0)
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 12)
                         }
-                        .buttonStyle(.bordered)
-                        .tint(Color.purple.opacity(0.85))
+                        .buttonStyle(SoftTintButtonStyle(accent: .purple))
                         .disabled(!offlineManager.isOfflineModeActive)
                     }
 
@@ -1321,8 +1356,7 @@ struct AppSettingsView: View {
                                     .frame(maxWidth: .infinity)
                             }
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.orange)
+                        .buttonStyle(SoftTintButtonStyle(accent: .orange))
                         .frame(maxWidth: .infinity)
                         .disabled(isSendingVerification)
                         if let info = verificationMessage {
@@ -1355,8 +1389,7 @@ struct AppSettingsView: View {
                             Label("E-Mail ändern", systemImage: "envelope.badge")
                                 .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.blue)
+                        .buttonStyle(SoftTintButtonStyle(accent: .blue))
                         .disabled(isExternalAuthAccount)
                         .opacity(isExternalAuthAccount ? 0.5 : 1)
 
@@ -1367,8 +1400,7 @@ struct AppSettingsView: View {
                             Label("Passwort ändern", systemImage: "key.fill")
                                 .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.bordered)
-                        .tint(.indigo)
+                        .buttonStyle(SoftTintButtonStyle(accent: .indigo))
                         .disabled(isExternalAuthAccount)
                         .opacity(isExternalAuthAccount ? 0.5 : 1)
                     }
@@ -1419,8 +1451,7 @@ struct AppSettingsView: View {
                         Spacer()
                     }
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
+                .buttonStyle(SoftTintButtonStyle(accent: .red))
             }
         }
     }
@@ -1433,27 +1464,6 @@ struct AppSettingsView: View {
             accent: .red
         ) {
             VStack(alignment: .leading, spacing: 12) {
-                SettingsSectionBox {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Account komplett zurücksetzen")
-                            .font(sectionHeaderFont)
-                        Text("Alle Daten werden gelöscht. Bestätige im nächsten Schritt mit Slider und Passwort.")
-                            .font(helperFont)
-                            .foregroundStyle(.secondary)
-                        Button(role: .destructive) {
-                            resetAccountPassword = ""
-                            resetAccountSlideDone = false
-                            resetError = nil
-                            showResetAccountSheet = true
-                        } label: {
-                            Text("Account löschen")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.red)
-                    }
-                }
-
                 SettingsSectionBox {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Aktives Schuljahr zurücksetzen")
@@ -1470,8 +1480,47 @@ struct AppSettingsView: View {
                             Text("Schuljahr zurücksetzen")
                                 .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.bordered)
-                        .tint(.orange)
+                        .buttonStyle(SoftTintButtonStyle(accent: .orange))
+                    }
+                }
+
+                SettingsSectionBox {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Account zurücksetzen")
+                            .font(sectionHeaderFont)
+                        Text("Löscht alle deine gespeicherten Daten und setzt dein Konto zurück. Dein Login bleibt bestehen.")
+                            .font(helperFont)
+                            .foregroundStyle(.secondary)
+                        Button(role: .destructive) {
+                            resetAccountPassword = ""
+                            resetAccountSlideDone = false
+                            resetError = nil
+                            showResetAccountSheet = true
+                        } label: {
+                            Text("Account zurücksetzen")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(SoftTintButtonStyle(accent: .red))
+                    }
+                }
+
+                SettingsSectionBox {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Account löschen")
+                            .font(sectionHeaderFont)
+                        Text("Entfernt dein Konto und alle Daten dauerhaft. Nach der Löschung wirst du abgemeldet.")
+                            .font(helperFont)
+                            .foregroundStyle(.secondary)
+                        Button(role: .destructive) {
+                            deleteAccountPassword = ""
+                            deleteAccountSlideDone = false
+                            deleteError = nil
+                            showDeleteAccountSheet = true
+                        } label: {
+                            Text("Account löschen")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(SoftTintButtonStyle(accent: .red))
                     }
                 }
             }
@@ -1496,8 +1545,7 @@ struct AppSettingsView: View {
                         Text("Onboarding neu starten")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.teal)
+                    .buttonStyle(SoftTintButtonStyle(accent: .teal))
                 }
             }
         }
@@ -1643,10 +1691,37 @@ struct AppSettingsView: View {
         await store.updateUserDisplayName(name: trimmed)
         isSavingName = false
         nameSavedSuccess = true
+        currentDisplayName = trimmed
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
             nameSavedSuccess = false
         }
         newName = ""
+    }
+
+    private func loadCurrentDisplayName() {
+        if let local = Auth.auth().currentUser?.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !local.isEmpty {
+            currentDisplayName = local
+            return
+        }
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        Task {
+            do {
+                let snap = try await Firestore.firestore().collection("users").document(uid).getDocument()
+                let data = snap.data() ?? [:]
+                let name = (data["displayName"] as? String)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    ?? (data["name"] as? String)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if let name, !name.isEmpty {
+                    await MainActor.run {
+                        currentDisplayName = name
+                    }
+                }
+            } catch {
+                // optional: ignore fetch error
+            }
+        }
     }
 
     private func createSchoolYear() async {
@@ -1668,6 +1743,7 @@ struct AppSettingsView: View {
     private func confirmResetAccount() {
         Task {
             guard !isResettingAccount else { return }
+            resetError = nil
             isResettingAccount = true
             defer { isResettingAccount = false }
             do {
@@ -1685,6 +1761,7 @@ struct AppSettingsView: View {
     private func confirmResetYear() {
         Task {
             guard !isResettingYear else { return }
+            resetError = nil
             isResettingYear = true
             defer { isResettingYear = false }
             do {
@@ -1695,6 +1772,26 @@ struct AppSettingsView: View {
                 resetError = nil
             } catch {
                 resetError = error.localizedDescription
+            }
+        }
+    }
+
+    private func confirmDeleteAccount() {
+        Task {
+            guard !isDeletingAccount else { return }
+            deleteError = nil
+            isDeletingAccount = true
+            defer { isDeletingAccount = false }
+            do {
+                try await store.deleteAccountCompletely(password: deleteAccountPassword)
+                showDeleteAccountSheet = false
+                deleteAccountPassword = ""
+                deleteAccountSlideDone = false
+                deleteError = nil
+                store.stopListening()
+                authManager.signOut()
+            } catch {
+                deleteError = error.localizedDescription
             }
         }
     }
@@ -1831,6 +1928,7 @@ private struct ChangeEmailSheet: View {
     let submit: () -> Void
     let cancel: () -> Void
 
+    @EnvironmentObject private var store: GradesStore
     @Environment(\.dismiss) private var dismiss
 
     private var canSubmit: Bool {
@@ -1841,86 +1939,100 @@ private struct ChangeEmailSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 14) {
-                SettingsSectionBox {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("E-Mail aktualisieren")
-                            .font(.headline.weight(.semibold))
-                        Text("Aktuell: \(currentEmail)")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                        Text("Zur Sicherheit musst du dein aktuelles Passwort eingeben.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+            ScrollView {
+                VStack(spacing: 16) {
+                    SettingsCard(
+                        title: "E-Mail ändern",
+                        subtitle: "Aktuell: \(currentEmail)",
+                        systemImage: "envelope.fill",
+                        accent: .blue
+                    ) {
+                        VStack(alignment: .leading, spacing: 14) {
+                            Text("Zur Sicherheit musst du dein aktuelles Passwort eingeben.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
 
-                SettingsSectionBox {
-                    VStack(alignment: .leading, spacing: 10) {
-                        SecureField("Aktuelles Passwort", text: $currentPassword)
-                            .textContentType(.password)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .padding(12)
-                            .background(Color.formInputBackground)
-                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            SettingsSectionBox {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    IconField(
+                                        icon: "lock.fill",
+                                        placeholder: "Aktuelles Passwort",
+                                        text: $currentPassword,
+                                        isSecure: true,
+                                        contentType: .password
+                                    )
 
-                        TextField("Neue E-Mail", text: $newEmail)
-                            .textContentType(.emailAddress)
-                            .keyboardType(.emailAddress)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .padding(12)
-                            .background(Color.formInputBackground)
-                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    IconField(
+                                        icon: "envelope.badge",
+                                        placeholder: "Neue E-Mail",
+                                        text: $newEmail,
+                                        keyboard: .emailAddress,
+                                        contentType: .emailAddress
+                                    )
 
-                        TextField("Neue E-Mail bestätigen", text: $confirmEmail)
-                            .textContentType(.emailAddress)
-                            .keyboardType(.emailAddress)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .padding(12)
-                            .background(Color.formInputBackground)
-                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    }
-                }
+                                    IconField(
+                                        icon: "envelope.open.fill",
+                                        placeholder: "Neue E-Mail bestätigen",
+                                        text: $confirmEmail,
+                                        keyboard: .emailAddress,
+                                        contentType: .emailAddress
+                                    )
+                                }
+                            }
 
-                if let msg = message {
-                    Text(msg)
-                        .font(.footnote)
-                        .foregroundStyle(.green)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                            if let msg = message {
+                                StatusBubble(text: msg, icon: "checkmark.circle.fill", color: .green)
+                            }
 
-                if let err = errorMessage {
-                    Text(err)
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                            if let err = errorMessage {
+                                StatusBubble(text: err, icon: "exclamationmark.triangle.fill", color: .red)
+                            }
 
-                Button {
-                    submit()
-                } label: {
-                    HStack {
-                        if isProcessing {
-                            ProgressView()
-                        } else {
-                            Image(systemName: "envelope.fill")
-                            Text("E-Mail speichern")
+                            Button {
+                                submit()
+                            } label: {
+                                HStack {
+                                    if isProcessing {
+                                        ProgressView()
+                                    } else {
+                                        Image(systemName: "paperplane.fill")
+                                        Text("E-Mail speichern")
+                                    }
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(SoftTintButtonStyle(accent: .blue))
+                            .disabled(!canSubmit || isProcessing)
                         }
                     }
-                    .frame(maxWidth: .infinity)
+
+                    Button {
+                        cancel()
+                        dismiss()
+                    } label: {
+                        Label("Abbrechen", systemImage: "xmark")
+                            .font(.callout.weight(.semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 4)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.blue)
-                .disabled(!canSubmit || isProcessing)
+                .padding(18)
             }
-            .padding(18)
-            .background(Color(.systemGroupedBackground))
+            .background(
+                ThemedBackground(
+                    isDark: store.darkMode,
+                    isFeminine: store.theme == "feminine",
+                    intensity: store.themeBackgroundIntensity
+                )
+            )
             .navigationTitle("E-Mail ändern")
             .navigationBarTitleDisplayMode(.inline)
+            .scrollContentBackground(.hidden)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("E-Mail ändern")
+                        .font(.headline.weight(.semibold))
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Abbrechen") {
                         cancel()
@@ -1928,8 +2040,8 @@ private struct ChangeEmailSheet: View {
                     }
                 }
             }
+            .interactiveDismissDisabled(isProcessing)
         }
-        .interactiveDismissDisabled(isProcessing)
     }
 }
 
@@ -1943,6 +2055,7 @@ private struct ChangePasswordSheet: View {
     let submit: () -> Void
     let cancel: () -> Void
 
+    @EnvironmentObject private var store: GradesStore
     @Environment(\.dismiss) private var dismiss
 
     private var canSubmit: Bool {
@@ -1953,81 +2066,100 @@ private struct ChangePasswordSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 14) {
-                SettingsSectionBox {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Passwort ändern")
-                            .font(.headline.weight(.semibold))
-                        Text("Gib dein aktuelles Passwort ein und bestätige das neue zweimal.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+            ScrollView {
+                VStack(spacing: 16) {
+                    SettingsCard(
+                        title: "Passwort ändern",
+                        subtitle: "Mit aktuellem Passwort bestätigen",
+                        systemImage: "key.fill",
+                        accent: .indigo
+                    ) {
+                        VStack(alignment: .leading, spacing: 14) {
+                            Text("Gib dein aktuelles Passwort ein und bestätige das neue zweimal.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
 
-                SettingsSectionBox {
-                    VStack(alignment: .leading, spacing: 10) {
-                        SecureField("Aktuelles Passwort", text: $currentPassword)
-                            .textContentType(.password)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .padding(12)
-                            .background(Color.formInputBackground)
-                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            SettingsSectionBox {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    IconField(
+                                        icon: "lock.fill",
+                                        placeholder: "Aktuelles Passwort",
+                                        text: $currentPassword,
+                                        isSecure: true,
+                                        contentType: .password
+                                    )
 
-                        SecureField("Neues Passwort (min. 6 Zeichen)", text: $newPassword)
-                            .textContentType(.newPassword)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .padding(12)
-                            .background(Color.formInputBackground)
-                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    IconField(
+                                        icon: "key.horizontal.fill",
+                                        placeholder: "Neues Passwort (min. 6 Zeichen)",
+                                        text: $newPassword,
+                                        isSecure: true,
+                                        contentType: .newPassword
+                                    )
 
-                        SecureField("Neues Passwort bestätigen", text: $confirmPassword)
-                            .textContentType(.newPassword)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .padding(12)
-                            .background(Color.formInputBackground)
-                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    }
-                }
+                                    IconField(
+                                        icon: "checkmark.seal.fill",
+                                        placeholder: "Neues Passwort bestätigen",
+                                        text: $confirmPassword,
+                                        isSecure: true,
+                                        contentType: .newPassword
+                                    )
+                                }
+                            }
 
-                if let msg = message {
-                    Text(msg)
-                        .font(.footnote)
-                        .foregroundStyle(.green)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                            if let msg = message {
+                                StatusBubble(text: msg, icon: "checkmark.circle.fill", color: .green)
+                            }
 
-                if let err = errorMessage {
-                    Text(err)
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                            if let err = errorMessage {
+                                StatusBubble(text: err, icon: "exclamationmark.triangle.fill", color: .red)
+                            }
 
-                Button {
-                    submit()
-                } label: {
-                    HStack {
-                        if isProcessing {
-                            ProgressView()
-                        } else {
-                            Image(systemName: "key.fill")
-                            Text("Passwort speichern")
+                            Button {
+                                submit()
+                            } label: {
+                                HStack {
+                                    if isProcessing {
+                                        ProgressView()
+                                    } else {
+                                        Image(systemName: "key.fill")
+                                        Text("Passwort speichern")
+                                    }
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(SoftTintButtonStyle(accent: .indigo))
+                            .disabled(!canSubmit || isProcessing)
                         }
                     }
-                    .frame(maxWidth: .infinity)
+
+                    Button {
+                        cancel()
+                        dismiss()
+                    } label: {
+                        Label("Abbrechen", systemImage: "xmark")
+                            .font(.callout.weight(.semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 4)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.indigo)
-                .disabled(!canSubmit || isProcessing)
+                .padding(18)
             }
-            .padding(18)
-            .background(Color(.systemGroupedBackground))
+            .background(
+                ThemedBackground(
+                    isDark: store.darkMode,
+                    isFeminine: store.theme == "feminine",
+                    intensity: store.themeBackgroundIntensity
+                )
+            )
             .navigationTitle("Passwort ändern")
             .navigationBarTitleDisplayMode(.inline)
+            .scrollContentBackground(.hidden)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("Passwort ändern")
+                        .font(.headline.weight(.semibold))
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Abbrechen") {
                         cancel()
@@ -2035,8 +2167,138 @@ private struct ChangePasswordSheet: View {
                     }
                 }
             }
+            .interactiveDismissDisabled(isProcessing)
         }
-        .interactiveDismissDisabled(isProcessing)
+    }
+}
+
+private struct SheetHeaderCard: View {
+    let icon: String
+    let accent: Color
+    let title: String
+    let subtitle: String
+    let helper: String?
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(accent.opacity(colorScheme == .dark ? 0.22 : 0.14))
+                    .frame(width: 54, height: 54)
+                Image(systemName: icon)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(accent)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.title3.weight(.semibold))
+                Text(subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                if let helper, !helper.isEmpty {
+                    Text(helper)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            accent.opacity(colorScheme == .dark ? 0.18 : 0.12),
+                            Color.formSectionBackground
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(accent.opacity(0.2), lineWidth: 1)
+        )
+    }
+}
+
+private struct IconField: View {
+    let icon: String
+    let placeholder: String
+    @Binding var text: String
+    var isSecure: Bool = false
+    var keyboard: UIKeyboardType = .default
+    var contentType: UITextContentType? = nil
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .foregroundStyle(.secondary)
+            Group {
+                if isSecure {
+                    SecureField(placeholder, text: $text)
+                } else {
+                    TextField(placeholder, text: $text)
+                        .keyboardType(keyboard)
+                }
+            }
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .textContentType(contentType)
+        }
+        .padding(12)
+        .background(Color.formInputBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+private struct StatusBubble: View {
+    let text: String
+    let icon: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.footnote.weight(.semibold))
+            Text(text)
+                .font(.footnote)
+                .lineLimit(nil)
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .foregroundStyle(color)
+        .background(color.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+private struct PillActionButtonStyle: ButtonStyle {
+    var accent: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.footnote.weight(.semibold))
+            .lineLimit(1)
+            .minimumScaleFactor(0.9)
+            .padding(.vertical, 8)
+            .padding(.horizontal, 12)
+            .foregroundStyle(accent)
+            .background(accent.opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(accent.opacity(0.22), lineWidth: 1)
+            )
+            .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
+            .opacity(configuration.isPressed ? 0.9 : 1.0)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 
@@ -2144,119 +2406,121 @@ private struct ResetConfirmSheet: View {
     let errorMessage: String?
     let confirmAction: () -> Void
 
+    @EnvironmentObject private var store: GradesStore
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 18) {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 12) {
-                        ZStack {
-                            Circle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [
-                                            Color.red.opacity(colorScheme == .dark ? 0.28 : 0.18),
-                                            Color.orange.opacity(colorScheme == .dark ? 0.20 : 0.12)
-                                        ],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 18) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 12) {
+                            ZStack {
+                                Circle()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [
+                                                Color.red.opacity(colorScheme == .dark ? 0.28 : 0.18),
+                                                Color.orange.opacity(colorScheme == .dark ? 0.20 : 0.12)
+                                            ],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
                                     )
+                                    .frame(width: 56, height: 56)
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.title3.weight(.bold))
+                                    .foregroundStyle(.red)
+                            }
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(title)
+                                    .font(.title3.weight(.semibold))
+                                Text(message)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                    }
+                    .padding(16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.red.opacity(colorScheme == .dark ? 0.22 : 0.16),
+                                        Color.orange.opacity(colorScheme == .dark ? 0.18 : 0.12)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
                                 )
-                                .frame(width: 56, height: 56)
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .font(.title3.weight(.bold))
-                                .foregroundStyle(.red)
-                        }
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(title)
-                                .font(.title3.weight(.semibold))
-                            Text(message)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer(minLength: 0)
-                    }
-                }
-                .padding(16)
-                .background(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color.red.opacity(colorScheme == .dark ? 0.22 : 0.16),
-                                    Color.orange.opacity(colorScheme == .dark ? 0.18 : 0.12)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
                             )
-                        )
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(Color.red.opacity(0.25), lineWidth: 1)
-                )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(Color.red.opacity(0.25), lineWidth: 1)
+                    )
 
-                SlideToConfirmView(isConfirmed: $slideDone)
-                    .frame(height: 68)
+                    SlideToConfirmView(isConfirmed: $slideDone)
+                        .frame(height: 68)
 
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Mit Passwort bestätigen")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    HStack(spacing: 10) {
-                        Image(systemName: "lock.fill")
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Mit Passwort bestätigen")
+                            .font(.footnote.weight(.semibold))
                             .foregroundStyle(.secondary)
-                        SecureField("Passwort eingeben", text: $password)
-                            .textContentType(.password)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                    }
-                    .padding(12)
-                    .background(Color.formInputBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        HStack(spacing: 10) {
+                            Image(systemName: "lock.fill")
+                                .foregroundStyle(.secondary)
+                            SecureField("Passwort eingeben", text: $password)
+                                .textContentType(.password)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                        }
+                        .padding(12)
+                        .background(Color.formInputBackground)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-                    if let err = errorMessage {
-                        Text(err)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                            .padding(.vertical, 6)
-                            .padding(.horizontal, 10)
-                            .background(Color.red.opacity(0.08))
-                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    }
-                }
-
-                Button {
-                    confirmAction()
-                } label: {
-                    HStack {
-                        if isProcessing {
-                            ProgressView()
-                        } else {
-                            Image(systemName: "checkmark.seal.fill")
-                            Text("Bestätigen")
+                        if let err = errorMessage {
+                            Text(err)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                                .padding(.vertical, 6)
+                                .padding(.horizontal, 10)
+                                .background(Color.red.opacity(0.08))
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                         }
                     }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
-                .disabled(!(slideDone && !password.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) || isProcessing)
 
-                Button {
-                    isPresented = false
-                } label: {
-                    Label("Abbrechen", systemImage: "xmark")
-                        .font(.callout.weight(.semibold))
+                    Button {
+                        confirmAction()
+                    } label: {
+                        HStack {
+                            if isProcessing {
+                                ProgressView()
+                            } else {
+                                Image(systemName: "checkmark.seal.fill")
+                                Text("Bestätigen")
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(SoftTintButtonStyle(accent: .red))
+                    .disabled(!(slideDone && !password.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) || isProcessing)
                 }
-                .buttonStyle(.plain)
-                .padding(.top, 4)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 20)
             }
-            .padding(18)
-            .background(Color(.systemGroupedBackground))
+            .background(
+                ThemedBackground(
+                    isDark: store.darkMode,
+                    isFeminine: store.theme == "feminine",
+                    intensity: store.themeBackgroundIntensity
+                )
+            )
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Abbrechen") {
@@ -2265,6 +2529,8 @@ private struct ResetConfirmSheet: View {
                     }
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
+            .hideKeyboardOnTap()
         }
     }
 }

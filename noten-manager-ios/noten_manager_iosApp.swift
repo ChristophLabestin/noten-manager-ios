@@ -9,6 +9,7 @@ import SwiftUI
 import UIKit
 import UserNotifications
 import FirebaseCore
+import BackgroundTasks
 
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(
@@ -20,7 +21,16 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         HomeworkNotificationManager.configureCategories()
         ExamNotificationManager.configureCategories()
         DailyReminderNotificationManager.configureCategories()
+        BackgroundRefreshManager.register()
+        BackgroundRefreshManager.schedule()
+        if #unavailable(iOS 13.0) {
+            UIApplication.shared.setMinimumBackgroundFetchInterval(15 * 60)
+        }
         return true
+    }
+
+    func application(_ application: UIApplication, performFetchWithCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+        BackgroundRefreshManager.performBackgroundFetch(completion: completionHandler)
     }
 }
 

@@ -13,6 +13,8 @@ struct QuickAddSubjectPreferenceKey: PreferenceKey {
 
 struct MainView: View {
     let onLogout: () -> Void
+    @Binding var incomingHomeworkShare: HomeworkShareLinkPayload?
+    @Binding var incomingExamId: String?
     @StateObject private var gradesStore = GradesStore()
     @State private var currentTab: BottomNavView.Tab = .home
     @EnvironmentObject private var offlineManager: OfflineModeManager
@@ -35,111 +37,155 @@ struct MainView: View {
     // Von SubjectDetail per Preference gemeldetes Fach für „Note hinzufügen“
     @State private var quickAddSubjectName: String? = nil
     @State private var navigateToAbiturExam: Bool = false
+    @State private var deeplinkExamId: String? = nil
+    @State private var deeplinkExam: Exam? = nil
 
     var body: some View {
-        ZStack {
+        let base = ZStack {
             themedBackground
             navigationContainer
         }
-        // Änderungen am gemeldeten Fachnamen von SubjectDetail entgegennehmen
-        .onPreferenceChange(QuickAddSubjectPreferenceKey.self) { value in
-            quickAddSubjectName = value
-        }
-        // Wenn der Nutzer „System“ gewählt hat, den Dark-Mode-Status mit dem aktuellen
-        // ColorScheme des Geräts synchronisieren, sobald es sich ändert.
-        .onAppear {
-            gradesStore.syncDarkModeWithSystem(colorScheme: colorScheme)
-        }
-        .onChange(of: colorScheme) { newScheme in
-            gradesStore.syncDarkModeWithSystem(colorScheme: newScheme)
-        }
-        // Dark-Mode-Verhalten wie im React-Client:
-        // nutze die gespeicherte darkMode-Präferenz des Nutzers
-        .preferredColorScheme(gradesStore.preferredColorScheme)
-        .onChange(of: gradesStore.onboardingRequired) { required in
-            showOnboardingFunnel = required
-        }
-        .onChange(of: gradesStore.gradeYear) { _ in
-            Task { await evaluatePfingstferienPrompt() }
-        }
-        .onChange(of: gradesStore.activeSchoolYearId) { _ in
-            Task { await evaluatePfingstferienPrompt() }
-        }
-        .onChange(of: gradesStore.isLoading) { loading in
-            spinnerAnimating = loading
-            if !loading {
-                showOnboardingFunnel = gradesStore.onboardingRequired
-            } else if gradesStore.onboardingRequired {
-                showOnboardingFunnel = true
+        applyGlobalModifiers(to: base)
+    }
+
+    @ViewBuilder
+    private func applyGlobalModifiers<Content: View>(to view: Content) -> some View {
+        let base = view
+            .onPreferenceChange(QuickAddSubjectPreferenceKey.self) { value in
+                quickAddSubjectName = value
             }
-        }
-        .fullScreenCover(isPresented: $showOnboardingFunnel) {
-            OnboardingFunnelView {
-                showOnboardingFunnel = false
+            .onAppear {
+                gradesStore.syncDarkModeWithSystem(colorScheme: colorScheme)
             }
-            .environmentObject(gradesStore)
-            .environmentObject(authManager)
-        }
-        .task {
-            await handleDataLoading()
-            await refreshEmailVerification()
-        }
-        .onChange(of: offlineManager.isOfflineModeActive) { active in
-            Task {
-                await handleOfflineToggle(active: active)
+            .onChange(of: colorScheme) { _, newScheme in
+                gradesStore.syncDarkModeWithSystem(colorScheme: newScheme)
             }
-        }
-        .onChange(of: authManager.isAuthenticated) { _ in
-            Task { await refreshEmailVerification() }
-        }
-        .onChange(of: currentTab) { newTab in
-            if newTab != .settings {
-                scrollToAccountOnOpen = false
+            .preferredColorScheme(gradesStore.preferredColorScheme)
+
+        let onboardingTracking = base
+            .onChange(of: gradesStore.onboardingRequired) { _, required in
+                showOnboardingFunnel = required
             }
-        }
-        .onChange(of: gradesStore.legacyMigrationSummary) { summary in
-            if summary != nil {
-                showOnboardingFunnel = true
+            .onChange(of: gradesStore.gradeYear) {
+                Task { await evaluatePfingstferienPrompt() }
             }
-        }
-        .overlay(alignment: .center) {
-            if gradesStore.isLoading {
-                loadingOverlay
+            .onChange(of: gradesStore.activeSchoolYearId) {
+                Task { await evaluatePfingstferienPrompt() }
             }
-        }
-        .overlay(alignment: .top) {
-            VStack(spacing: 8) {
-                if emailBannerVisible {
-                    emailVerificationBanner
-                }
-                offlineBanner
-            }
-            .animation(.easeInOut(duration: 0.2), value: emailBannerVisible)
-        }
-        .toolbar {
-            if offlineManager.isOfflineModeActive, navPath.isEmpty {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    offlineToolbarButton
+            .onChange(of: gradesStore.isLoading) { _, loading in
+                spinnerAnimating = loading
+                if !loading {
+                    showOnboardingFunnel = gradesStore.onboardingRequired
+                } else if gradesStore.onboardingRequired {
+                    showOnboardingFunnel = true
                 }
             }
-            if needsEmailVerification, navPath.isEmpty {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    emailVerificationToolbarButton
+
+        let deeplinkTracking = onboardingTracking
+            .onChange(of: incomingExamId) { _, newId in
+                self.deeplinkExamId = newId
+                if newId != nil {
+                    self.currentTab = .home
                 }
+                self.handleDeeplinkExam()
             }
-        }
-        .alert("Neues Schuljahr anlegen?", isPresented: $showPfingstferienPrompt, presenting: nextSchoolYearSuggestion) { yearId in
-            Button("Ja, \(yearId) erstellen") {
+            .onChange(of: gradesStore.allExams) {
+                self.handleDeeplinkExam()
                 Task {
-                    await createNextSchoolYear(id: yearId)
+                    await ExamLiveActivityManager.syncLiveActivities(for: gradesStore.allExams)
+                    BackgroundRefreshManager.schedule(for: gradesStore.allExams)
                 }
             }
-            Button("Später", role: .cancel) {
-                showPfingstferienPrompt = false
+
+        let lifecycle = deeplinkTracking
+            .sheet(isPresented: $showOnboardingFunnel) {
+                OnboardingFunnelView {
+                    showOnboardingFunnel = false
+                }
+                .environmentObject(gradesStore)
+                .environmentObject(authManager)
             }
-        } message: { yearId in
-            Text("Die Pfingstferien sind vorbei. Möchtest du das neue Schuljahr \(yearId) jetzt anlegen?")
-        }
+            .task {
+                await handleDataLoading()
+                await refreshEmailVerification()
+            }
+            .onChange(of: offlineManager.isOfflineModeActive) { _, active in
+                Task {
+                    await handleOfflineToggle(active: active)
+                }
+            }
+            .onChange(of: authManager.isAuthenticated) {
+                Task { await refreshEmailVerification() }
+            }
+            .onChange(of: currentTab) { _, newTab in
+                if newTab != .settings {
+                    scrollToAccountOnOpen = false
+                }
+            }
+            .onChange(of: gradesStore.legacyMigrationSummary) { _, summary in
+                if summary != nil {
+                    showOnboardingFunnel = true
+                }
+            }
+
+        let overlays = lifecycle
+            .overlay(alignment: .center) {
+                if gradesStore.isLoading {
+                    loadingOverlay
+                }
+            }
+            .overlay(alignment: .top) {
+                VStack(spacing: 8) {
+                    if emailBannerVisible {
+                        emailVerificationBanner
+                    }
+                    offlineBanner
+                }
+                .animation(.easeInOut(duration: 0.2), value: emailBannerVisible)
+            }
+
+        overlays
+            .sheet(item: $deeplinkExam) { exam in
+                ExamDetailSheet(exam: exam, onEdit: { _ in })
+                    .environmentObject(gradesStore)
+            }
+            .toolbar {
+                if offlineManager.isOfflineModeActive, navPath.isEmpty {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        offlineToolbarButton
+                    }
+                }
+                if needsEmailVerification, navPath.isEmpty {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        emailVerificationToolbarButton
+                    }
+                }
+            }
+            .alert("Neues Schuljahr anlegen?", isPresented: $showPfingstferienPrompt, presenting: nextSchoolYearSuggestion) { yearId in
+                Button("Ja, \(yearId) erstellen") {
+                    Task {
+                        await createNextSchoolYear(id: yearId)
+                    }
+                }
+                Button("Später", role: .cancel) {
+                    showPfingstferienPrompt = false
+                }
+            } message: { yearId in
+                Text("Die Pfingstferien sind vorbei. Möchtest du das neue Schuljahr \(yearId) jetzt anlegen?")
+            }
+            .sheet(item: $incomingHomeworkShare, onDismiss: {
+                incomingHomeworkShare = nil
+            }) { payload in
+                AddHomeworkView(
+                    preselectedSubjectName: payload.subjectName,
+                    prefill: AddHomeworkPrefill(
+                        subjectName: payload.subjectName,
+                        title: payload.title,
+                        dueDate: payload.dueDate
+                    )
+                )
+                .environmentObject(gradesStore)
+            }
     }
 
     @MainActor
@@ -584,44 +630,20 @@ struct MainView: View {
         .zIndex(50)
     }
 
-    private var themedBackground: some View {
-        Group {
-            if gradesStore.darkMode {
-                // Entspricht body.dark-mode: radialer Verlauf, unabhängig vom Theme
-                RadialGradient(
-                    gradient: Gradient(colors: [
-                        Color(hex: "#1f2937"), // $color-bg-light-dark
-                        Color(red: 2 / 255, green: 6 / 255, blue: 23 / 255)
-                    ]),
-                    center: .top,
-                    startRadius: 0,
-                    endRadius: 800
-                )
-            } else if gradesStore.theme == "feminine" {
-                // Entspricht body.theme-feminine: pinker Gradient
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color(hex: "#fdf2ff"), // $color-bg-feminine-top
-                        Color(hex: "#fdf2f8"), // $color-bg-feminine-mid
-                        Color(hex: "#fef2f2")  // $color-bg-feminine-bottom
-                    ]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            } else {
-                // Standard-Gradient wie im Web body.theme-default
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color(red: 238 / 255, green: 242 / 255, blue: 255 / 255),
-                        Color(red: 249 / 255, green: 250 / 255, blue: 251 / 255),
-                        Color(red: 247 / 255, green: 247 / 255, blue: 247 / 255)
-                    ]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            }
+    private func handleDeeplinkExam() {
+        guard let id = self.deeplinkExamId else { return }
+        if let exam = self.gradesStore.allExams.first(where: { $0.id == id }) {
+            self.deeplinkExam = exam
+            self.deeplinkExamId = nil
         }
-        .ignoresSafeArea()
+    }
+
+    private var themedBackground: some View {
+        ThemedBackground(
+            isDark: gradesStore.darkMode,
+            isFeminine: gradesStore.theme == "feminine",
+            intensity: gradesStore.themeBackgroundIntensity
+        )
     }
 }
 
@@ -635,7 +657,7 @@ struct LegacyMigrationPromptView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine")
+                ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity)
                     .ignoresSafeArea()
 
                 ScrollView {

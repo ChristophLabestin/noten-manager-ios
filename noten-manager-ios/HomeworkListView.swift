@@ -11,6 +11,12 @@ struct HomeworkListView: View {
     @State private var visibleCompletedCount: Int = 5
     @State private var editingHomework: Homework? = nil
     @State private var reminderHomework: Homework? = nil
+    @State private var shareURL: URL? = nil
+    @State private var showShareSheet: Bool = false
+    @State private var shareError: String? = nil
+    @State private var detailHomework: Homework? = nil
+    @State private var showAddHomeworkSheet: Bool = false
+    private let noSubjectLabel = "Kein Fach"
 
     private var openHomeworks: [Homework] {
         linkedHomeworks
@@ -36,6 +42,9 @@ struct HomeworkListView: View {
     private var linkedHomeworks: [Homework] {
         store.allHomeworks.filter { hw in
             // Nur anzeigen, wenn das Fach verknüpft ist (lokal oder via Mapping)
+            if hw.isImportedFromShare { return true }
+            let cleanedSubject = hw.subjectName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if cleanedSubject.isEmpty || cleanedSubject == noSubjectLabel { return true }
             if let resolved = store.resolveLocalSubjectNameForHomework(hw),
                store.subjects.contains(where: { $0.name == resolved }) {
                 return true
@@ -55,7 +64,11 @@ struct HomeworkListView: View {
     }
 
     private func resolvedSubjectName(for hw: Homework) -> String {
-        store.resolveLocalSubjectNameForHomework(hw) ?? hw.subjectName
+        let fallback = hw.subjectName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if fallback.isEmpty {
+            return noSubjectLabel
+        }
+        return store.resolveLocalSubjectNameForHomework(hw) ?? hw.subjectName
     }
 
     private var hasOverdueExams: Bool {
@@ -67,36 +80,60 @@ struct HomeworkListView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                Section("Offene Hausaufgaben") {
-                    if openHomeworks.isEmpty {
-                        Text("Du hast aktuell keine offenen Hausaufgaben.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(openHomeworks) { hw in
-                            homeworkRow(hw)
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 16) {
+                    SettingsCard(
+                        title: "Offene Hausaufgaben",
+                        subtitle: "Aktuelle Aufgaben",
+                        systemImage: "checklist",
+                        accent: .indigo
+                    ) {
+                        SettingsSectionBox {
+                            if openHomeworks.isEmpty {
+                                Text("Du hast aktuell keine offenen Hausaufgaben.")
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            } else {
+                                LazyVStack(spacing: 10) {
+                                    ForEach(openHomeworks) { hw in
+                                        homeworkRow(hw)
+                                    }
+                                }
+                            }
                         }
                     }
-                }
 
-                if !completedHomeworks.isEmpty {
-                    Section("Erledigt") {
-                        ForEach(Array(completedHomeworks.prefix(visibleCompletedCount))) { hw in
-                            homeworkRow(hw)
-                        }
-
-                        if completedHomeworks.count > visibleCompletedCount {
-                            Button {
-                                visibleCompletedCount += 5
-                            } label: {
-                                Text("Weitere 5 anzeigen")
+                    if !completedHomeworks.isEmpty {
+                        SettingsCard(
+                            title: "Erledigt",
+                            subtitle: "Abgeschlossen",
+                            systemImage: "checkmark.seal.fill",
+                            accent: .green
+                        ) {
+                            SettingsSectionBox {
+                                LazyVStack(spacing: 10) {
+                                    ForEach(Array(completedHomeworks.prefix(visibleCompletedCount))) { hw in
+                                        homeworkRow(hw)
+                                    }
+                                    if completedHomeworks.count > visibleCompletedCount {
+                                        Button {
+                                            visibleCompletedCount += 5
+                                        } label: {
+                                            Text("Weitere 5 anzeigen")
+                                                .frame(maxWidth: .infinity)
+                                        }
+                                        .buttonStyle(SoftTintButtonStyle(accent: .green))
+                                    }
+                                }
                             }
                         }
                     }
                 }
-
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
-            .navigationTitle("Hausaufgaben")
+            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
+            .sheetNavigationTitle("Hausaufgaben")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button {
@@ -105,10 +142,16 @@ struct HomeworkListView: View {
                         Text("Schließen")
                     }
                 }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        showAddHomework()
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("Hausaufgabe hinzufügen")
+                }
             }
-            .onAppear {
-                visibleCompletedCount = 5
-            }
+            .onAppear { visibleCompletedCount = 5 }
             .sheet(item: $editingHomework) { hw in
                 EditHomeworkView(homework: hw)
                     .environmentObject(store)
@@ -117,101 +160,121 @@ struct HomeworkListView: View {
                 LocalHomeworkReminderSheet(homework: hw)
                     .environmentObject(store)
             }
+            .sheet(item: $detailHomework) { hw in
+                HomeworkDetailSheet(homework: hw, onEdit: { editingHomework = $0 })
+                    .environmentObject(store)
+            }
+            .sheet(isPresented: $showShareSheet) {
+                if let shareURL {
+                    ShareSheet(activityItems: [shareURL])
+                } else {
+                    Text("Kein Link verfügbar")
+                }
+            }
+            .alert("Link konnte nicht erstellt werden", isPresented: Binding(
+                get: { shareError != nil },
+                set: { isPresented in
+                    if !isPresented { shareError = nil }
+                }
+            )) {
+                Button("OK", role: .cancel) {
+                    shareError = nil
+                }
+            } message: {
+                Text(shareError ?? "Unbekannter Fehler.")
+            }
+            .sheet(isPresented: $showAddHomeworkSheet) {
+                NavigationStack {
+                    AddHomeworkView()
+                        .environmentObject(store)
+                }
+            }
         }
+    }
+
+    private func showAddHomework() {
+        showAddHomeworkSheet = true
     }
 
     @ViewBuilder
     private func homeworkRow(_ hw: Homework) -> some View {
-        let currentUserId = Auth.auth().currentUser?.uid
-        let isSharedOwner = hw.isShared && hw.creatorId == currentUserId
         let autoCompleted = isAutoCompletedPastDue(hw)
         let treatedCompleted = hw.isCompleted || autoCompleted
         let badge: (text: String, color: Color, icon: String?)? = badgeState(for: hw, treatedCompleted: treatedCompleted)
         let personalNote = store.userNoteForHomework(hw)
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(hw.title)
-                        .font(.body)
-                        .lineLimit(2)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    let subjectDisplay = resolvedSubjectName(for: hw)
+                    if !subjectDisplay.isEmpty {
+                        Text(subjectDisplay)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let due = hw.dueDate {
+                        Text("Fällig am \(formattedDate(due))")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Kein Fälligkeitsdatum")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let personalNote, !personalNote.isEmpty {
+                        Text(personalNote)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                   if hw.isShared {
+                       let name = hw.groupId.flatMap { store.groupNames[$0] } ?? hw.groupId ?? ""
+                       VStack(alignment: .leading, spacing: 2) {
+                           HStack(spacing: 4) {
+                               Image(systemName: "person.2.fill")
+                                   .foregroundStyle(.blue)
+                               Text("Gruppen Hausaufgabe")
+                                   .font(.caption2)
+                                   .foregroundStyle(.blue)
+                           }
+                           if !name.isEmpty {
+                                Text(name)
+                                    .font(.caption2)
+                                    .foregroundStyle(.orange)
+                           }
+                       }
+                   } else if hw.isImportedFromShare {
+                        HStack(spacing: 4) {
+                            Image(systemName: "link.badge.plus")
+                                .foregroundStyle(.green)
+                            Text("Geteilte Hausaufgabe")
+                                .font(.caption2)
+                                .foregroundStyle(.green)
+                        }
+                    }
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 6) {
                     if let tag = badge {
                         attentionBadge(tag.text, color: tag.color, icon: tag.icon)
                     }
-                }
-                if !hw.subjectName.isEmpty {
-                    Text(resolvedSubjectName(for: hw))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                if let due = hw.dueDate {
-                    Text("Fällig am \(formattedDate(due))")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("Kein Fälligkeitsdatum")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                if let personalNote, !personalNote.isEmpty {
-                    Text(personalNote)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-                if hw.isShared {
-                    let name = hw.groupId.flatMap { store.groupNames[$0] } ?? hw.groupId ?? ""
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "person.2.fill")
-                                .foregroundStyle(.blue)
-                            Text("Geteilte Hausaufgabe")
-                                .font(.caption2)
-                                .foregroundStyle(.blue)
-                        }
-                        if !name.isEmpty {
-                            Text("Gruppe: \(name)")
-                                .font(.caption2)
-                                .foregroundStyle(.orange)
-                        }
-                    }
-                }
-            }
-            Spacer()
-            HStack(spacing: 12) {
-                // Glocke nur anzeigen, wenn nicht als erledigt behandelt
-                if !treatedCompleted {
-                    Button {
-                        reminderHomework = hw
-                    } label: {
-                        Image(systemName: reminderIconName(hw))
-                            .font(.system(size: 16, weight: .regular))
-                            .foregroundStyle(reminderIconColor(hw))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Erinnerung bearbeiten")
-                    .contextMenu {
-                        Button("Erinnerung bearbeiten…") { reminderHomework = hw }
-                        if hw.reminderAt != nil {
-                            Button("Erinnerung entfernen", role: .destructive) {
-                                Task { await toggleReminder(hw) }
+                    HStack(spacing: 8) {
+                        if !treatedCompleted {
+                            Button {
+                                reminderHomework = hw
+                            } label: {
+                                Image(systemName: reminderIconName(hw))
+                                    .font(.system(size: 16, weight: .regular))
+                                    .foregroundStyle(reminderIconColor(hw))
+                                    .padding(8)
+                                    .background(Color.formInputBackground)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                             }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Erinnerung bearbeiten")
                         }
-                    }
-                }
-
-                // Bearbeiten-Button direkt neben der Glocke
-                Button {
-                    editingHomework = hw
-                } label: {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 16, weight: .regular))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Hausaufgabe bearbeiten")
-                
-                // Status / Aktionen
-                if hw.isShared {
-                    if isSharedOwner {
                         if treatedCompleted && hw.isCompleted {
                             Button {
                                 Task { await markNotCompleted(hw) }
@@ -219,6 +282,9 @@ struct HomeworkListView: View {
                                 Image(systemName: "arrow.uturn.backward.circle")
                                     .font(.system(size: 18, weight: .semibold))
                                     .foregroundStyle(.orange)
+                                    .padding(8)
+                                    .background(Color.formInputBackground)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel("Als nicht erledigt markieren")
@@ -229,74 +295,48 @@ struct HomeworkListView: View {
                                 Image(systemName: "checkmark.circle")
                                     .font(.system(size: 18, weight: .semibold))
                                     .foregroundStyle(.primary)
+                                    .padding(8)
+                                    .background(Color.formInputBackground)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel("Als erledigt markieren")
                         }
-                    } else {
-                        if !treatedCompleted {
-                            Button {
-                                Task { await markCompleted(hw) }
-                            } label: {
-                                Image(systemName: "checkmark.circle")
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundStyle(.primary)
-                            }
-                        }
-                        if treatedCompleted && hw.isCompleted {
-                            Button {
-                                Task { await markNotCompleted(hw) }
-                            } label: {
-                                Image(systemName: "arrow.uturn.backward.circle")
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundStyle(.orange)
-                            }
-                        }
                     }
-                } else {
-                    if treatedCompleted && hw.isCompleted {
-                        Button {
-                            Task { await markNotCompleted(hw) }
-                        } label: {
-                            Image(systemName: "arrow.uturn.backward.circle")
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundStyle(.orange)
+                    if let reminder = hw.reminderAt {
+                            Text(shortReminder(reminder))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.trailing)
+                                .lineLimit(2)
                         }
-                        .buttonStyle(.plain)
-                    } else if !treatedCompleted {
-                        Button {
-                            Task { await markCompleted(hw) }
-                        } label: {
-                            Image(systemName: "checkmark.circle")
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundStyle(.primary)
-                        }
-                        .buttonStyle(.plain)
-                    }
+                }
+            }
+
+            HStack(spacing: 10) {
+                actionButton(icon: "slider.horizontal.3", tint: .orange, label: "Bearb.") {
+                    editingHomework = hw
+                }
+                actionButton(icon: "square.and.arrow.up", tint: .blue, label: "Teilen") {
+                    presentShareLink(for: hw)
                 }
             }
         }
-        .padding(.vertical, 6)
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            let autoCompleted = isAutoCompletedPastDue(hw)
-            let treatedCompleted = hw.isCompleted || autoCompleted
-            if !treatedCompleted {
-                Button {
-                    Task { await markCompleted(hw) }
-                } label: {
-                    Label("Erledigt", systemImage: "checkmark.circle.fill")
-                }
-                .tint(.green)
-            }
-            if treatedCompleted && hw.isCompleted {
-                Button {
-                    Task { await markNotCompleted(hw) }
-                } label: {
-                    Label("Nicht erledigt", systemImage: "arrow.uturn.backward.circle")
-                }
-                .tint(.orange)
-            }
+        .padding(10)
+        .background(Color.formSectionBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .contentShape(Rectangle())
+        .onTapGesture { detailHomework = hw }
+    }
+
+    private func presentShareLink(for hw: Homework) {
+        shareError = nil
+        guard let url = HomeworkShareLinkBuilder.url(for: hw) else {
+            shareError = "Der Link konnte nicht erstellt werden."
+            return
         }
+        shareURL = url
+        showShareSheet = true
     }
 
     private func formattedDate(_ date: Date) -> String {
@@ -366,6 +406,14 @@ struct HomeworkListView: View {
         return "Erinnerung bearbeiten"
     }
 
+    private func shortReminder(_ date: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(date) {
+            return hwReminderTimeFormatter.string(from: date)
+        }
+        return "\(hwReminderDateFormatter.string(from: date))\n\(hwReminderTimeFormatter.string(from: date))"
+    }
+
     private func attentionBadge(_ text: String, color: Color, icon: String? = nil) -> some View {
         HStack(spacing: 4) {
             if let icon {
@@ -380,6 +428,23 @@ struct HomeworkListView: View {
         .background(color.opacity(0.12))
         .foregroundStyle(color)
         .clipShape(Capsule())
+    }
+
+    private func actionButton(icon: String, tint: Color, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .semibold))
+                Text(label)
+                    .font(.footnote.weight(.semibold))
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 10)
+            .background(tint.opacity(0.12))
+            .foregroundStyle(tint)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     private func sortKey(for hw: Homework) -> (priority: Int, date: Date) {
@@ -442,26 +507,49 @@ private struct LocalHomeworkReminderSheet: View {
         _reminderDate = State(initialValue: homework.reminderAt ?? Date().addingTimeInterval(60 * 60))
     }
 
+    private var sheetTitle: String {
+        let trimmed = homework.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Erinnerung" : trimmed
+    }
+
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Erinnerung für Hausaufgabe") {
-                    Toggle("Zusätzliche Erinnerung aktivieren", isOn: $hasReminder)
+            ScrollView {
+                VStack(spacing: 16) {
+                    SettingsCard(
+                        title: "Erinnerung",
+                        subtitle: "Eigene Erinnerung einstellen",
+                        systemImage: "bell.badge",
+                        accent: .orange
+                    ) {
+                        SettingsSectionBox {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Toggle("Erinnerung aktivieren", isOn: $hasReminder)
+                                    .tint(.orange)
 
-                    if hasReminder {
-                        DatePicker(
-                            "Erinnerungszeitpunkt",
-                            selection: $reminderDate,
-                            displayedComponents: [.date, .hourAndMinute]
-                        )
+                                if hasReminder {
+                                    DatePicker(
+                                        "",
+                                        selection: $reminderDate,
+                                        displayedComponents: [.date, .hourAndMinute]
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if let error {
+                        Text(error)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-                if let error {
-                    Text(error)
-                        .foregroundStyle(.red)
-                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
-            .navigationTitle("Erinnerung festlegen")
+            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
+            .sheetNavigationTitle(sheetTitle)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Abbrechen") { dismiss() }
@@ -503,3 +591,17 @@ private struct LocalHomeworkReminderSheet: View {
         isSaving = false
     }
 }
+
+private let hwReminderDateFormatter: DateFormatter = {
+    let fmt = DateFormatter()
+    fmt.dateStyle = .medium
+    fmt.timeStyle = .none
+    return fmt
+}()
+
+private let hwReminderTimeFormatter: DateFormatter = {
+    let fmt = DateFormatter()
+    fmt.dateStyle = .none
+    fmt.timeStyle = .short
+    return fmt
+}()

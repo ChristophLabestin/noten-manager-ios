@@ -47,176 +47,210 @@ struct GroupSubjectManagementView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                Section("Übersicht") {
-                    if groupSubjects.isEmpty {
-                        Text("Keine Gruppenfächer vorhanden.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(groupSubjects, id: \.id) { gs in
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(gs.name)
-                                    if let alias = gs.alias, !alias.isEmpty {
-                                        Text(alias)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+            ScrollView {
+                VStack(spacing: 16) {
+                    SettingsCard(
+                        title: "Gruppenfächer",
+                        subtitle: groupTitle,
+                        systemImage: "square.stack.3d.up.fill",
+                        accent: .indigo
+                    ) {
+                        SettingsSectionBox {
+                            if groupSubjects.isEmpty {
+                                Text("Keine Gruppenfächer vorhanden.")
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                VStack(spacing: 10) {
+                                    ForEach(groupSubjects, id: \.id) { gs in
+                                        HStack(alignment: .center, spacing: 10) {
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(gs.name)
+                                                    .font(.body.weight(.semibold))
+                                                if let alias = gs.alias, !alias.isEmpty {
+                                                    Text(alias)
+                                                        .font(.caption)
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                                if let mapped = mapping[gs.id], !mapped.isEmpty, mapped != gs.name {
+                                                    Text("Lokal: \(mapped)")
+                                                        .font(.caption2)
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                            }
+                                            Spacer(minLength: 0)
+                                            if deletingIds.contains(gs.id) {
+                                                ProgressView()
+                                                    .scaleEffect(0.8)
+                                            } else if isOwner {
+                                                Button(role: .destructive) {
+                                                    Task { await deleteGroupSubject(gs) }
+                                                } label: {
+                                                    Image(systemName: "trash")
+                                                }
+                                                .buttonStyle(PillActionButtonStyle(accent: .red))
+                                            } else if missingIds.contains(gs.id) {
+                                                Text("Nicht übernommen")
+                                                    .font(.caption2.weight(.semibold))
+                                                    .foregroundStyle(.orange)
+                                            } else if mapping[gs.id] == nil {
+                                                Text("Ohne Mapping")
+                                                    .font(.caption2.weight(.semibold))
+                                                    .foregroundStyle(.secondary)
+                                            } else {
+                                                Image(systemName: "checkmark.circle.fill")
+                                                    .foregroundStyle(.green)
+                                            }
+                                        }
+                                        .padding(12)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                .fill(Color(.secondarySystemBackground))
+                                        )
                                     }
-                                    if let mapped = mapping[gs.id], !mapped.isEmpty, mapped != gs.name {
-                                        Text("Lokal: \(mapped)")
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                Spacer()
-                                if deletingIds.contains(gs.id) {
-                                    ProgressView()
-                                        .scaleEffect(0.7)
-                                } else if isOwner {
-                                    Button {
-                                        Task { await deleteGroupSubject(gs) }
-                                    } label: {
-                                        Image(systemName: "trash")
-                                    }
-                                    .buttonStyle(.borderless)
-                                    .tint(.red)
-                                } else if missingIds.contains(gs.id) {
-                                    Text("Nicht übernommen")
-                                        .font(.caption2)
-                                        .foregroundStyle(.orange)
-                                } else if mapping[gs.id] == nil {
-                                    Text("Ohne Mapping")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                } else {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(.green)
                                 }
                             }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                if isOwner {
-                                    Button(role: .destructive) {
-                                        Task { await deleteGroupSubject(gs) }
-                                    } label: {
-                                        Label("Löschen", systemImage: "trash")
-                                    }
-                                    .disabled(deletingIds.contains(gs.id))
                         }
                         if isOwner {
-                            Text("Als Ersteller kannst du Fächer löschen: nach links wischen oder den Mülleimer nutzen.")
+                            Text("Als Ersteller kannst du Fächer direkt löschen.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
                     }
-                }
-                    }
-                }
 
-                Section("Neue Fächer zur Gruppe hinzufügen") {
-                    if attachableSubjects.isEmpty {
-                        Text("Keine freien Fächer verfügbar. Fächer, die bereits in anderen Gruppen gemappt sind, werden hier ausgeblendet.")
-                            .foregroundStyle(.secondary)
-                            .font(.footnote)
-                    } else {
-                        ForEach(attachableSubjects, id: \.name) { subj in
-                            Toggle(isOn: Binding(
-                                get: { attachSelection.contains(subj.name) },
-                                set: { val in
-                                    if val { attachSelection.insert(subj.name) }
-                                    else { attachSelection.remove(subj.name) }
-                                }
-                            )) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(subj.name)
-                                    if let alias = subj.alias, !alias.isEmpty {
-                                        Text(alias)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                    SettingsCard(
+                        title: "Zur Gruppe hinzufügen",
+                        subtitle: "Eigene Fächer anhängen",
+                        systemImage: "plus.square.on.square",
+                        accent: .blue
+                    ) {
+                        SettingsSectionBox {
+                            if attachableSubjects.isEmpty {
+                                Text("Keine freien Fächer verfügbar. Fächer, die bereits in anderen Gruppen gemappt sind, werden hier ausgeblendet.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    ForEach(attachableSubjects, id: \.name) { subj in
+                                        Toggle(isOn: Binding(
+                                            get: { attachSelection.contains(subj.name) },
+                                            set: { val in
+                                                if val { attachSelection.insert(subj.name) }
+                                                else { attachSelection.remove(subj.name) }
+                                            }
+                                        )) {
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(subj.name)
+                                                if let alias = subj.alias, !alias.isEmpty {
+                                                    Text(alias)
+                                                        .font(.caption)
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                            }
+                                        }
                                     }
-                                }
-                            }
-                        }
-                        Button {
-                            Task { await addSelectedSubjects() }
-                        } label: {
-                            HStack {
-                                if isAdding { ProgressView() }
-                                Text("Zur Gruppe hinzufügen")
-                            }
-                            .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.indigo)
-                        .disabled(isAdding || attachSelection.isEmpty)
-                    }
-                }
-
-                Section("Fächer aus der Gruppe kopieren") {
-                    if missingSubjects.isEmpty {
-                        Text("Alle Gruppenfächer sind bereits in deinem Plan.")
-                            .foregroundStyle(.secondary)
-                            .font(.footnote)
-                    } else {
-                        ForEach(missingSubjects, id: \.id) { gs in
-                            Toggle(isOn: Binding(
-                                get: { importSelection.contains(gs.name) },
-                                set: { val in
-                                    if val { importSelection.insert(gs.name) }
-                                    else { importSelection.remove(gs.name) }
-                                }
-                            )) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(gs.name)
-                                    if let alias = gs.alias, !alias.isEmpty {
-                                        Text(alias)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                    Button {
+                                        Task { await addSelectedSubjects() }
+                                    } label: {
+                                        HStack {
+                                            if isAdding { ProgressView() }
+                                            Text("Zur Gruppe hinzufügen")
+                                        }
+                                        .frame(maxWidth: .infinity)
                                     }
+                                    .buttonStyle(SoftTintButtonStyle(accent: .indigo))
+                                    .disabled(isAdding || attachSelection.isEmpty)
                                 }
                             }
                         }
-                        Button {
-                            Task { await importSelectedSubjects() }
-                        } label: {
-                            HStack {
-                                if isImporting { ProgressView() }
-                                Text("In eigene Fächer kopieren")
+                    }
+
+                    SettingsCard(
+                        title: "Aus Gruppe übernehmen",
+                        subtitle: "Fehlende Fächer kopieren",
+                        systemImage: "tray.and.arrow.down.fill",
+                        accent: .teal
+                    ) {
+                        SettingsSectionBox {
+                            if missingSubjects.isEmpty {
+                                Text("Alle Gruppenfächer sind bereits in deinem Plan.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    ForEach(missingSubjects, id: \.id) { gs in
+                                        Toggle(isOn: Binding(
+                                            get: { importSelection.contains(gs.name) },
+                                            set: { val in
+                                                if val { importSelection.insert(gs.name) }
+                                                else { importSelection.remove(gs.name) }
+                                            }
+                                        )) {
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(gs.name)
+                                                if let alias = gs.alias, !alias.isEmpty {
+                                                    Text(alias)
+                                                        .font(.caption)
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Button {
+                                        Task { await importSelectedSubjects() }
+                                    } label: {
+                                        HStack {
+                                            if isImporting { ProgressView() }
+                                            Text("In eigene Fächer kopieren")
+                                        }
+                                        .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(SoftTintButtonStyle(accent: .teal))
+                                    .disabled(isImporting || importSelection.isEmpty)
+                                }
                             }
-                            .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(isImporting || importSelection.isEmpty)
-                    }
-                }
-
-                Section {
-                    Button {
-                        showMapping = true
-                    } label: {
-                        HStack {
-                            Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
-                            Text("Fach-Mapping öffnen")
                         }
                     }
-                } footer: {
-                    Text("Prüfe das Mapping, wenn neue Fächer hinzugekommen sind oder Namen abweichen.")
-                        .font(.footnote)
-                }
 
-                if let info = infoMessage {
-                    Section {
-                        Text(info)
-                            .foregroundStyle(.green)
+                    SettingsCard(
+                        title: "Mapping & Abgleich",
+                        subtitle: "Namen synchronisieren",
+                        systemImage: "arrow.triangle.2.circlepath",
+                        accent: .purple
+                    ) {
+                        SettingsSectionBox {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Prüfe das Mapping, wenn neue Fächer hinzugekommen sind oder Namen abweichen.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                Button {
+                                    showMapping = true
+                                } label: {
+                                    Label("Abgleichen", systemImage: "arrow.triangle.2.circlepath.circle.fill")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(SoftTintButtonStyle(accent: .purple))
+                            }
+                        }
+                    }
+
+                    if let info = infoMessage {
+                        StatusLabel(text: info, color: .green, icon: "checkmark.circle.fill")
+                    }
+                    if let err = errorMessage {
+                        StatusLabel(text: err, color: .red, icon: "exclamationmark.triangle.fill")
                     }
                 }
-                if let err = errorMessage {
-                    Section {
-                        Text(err)
-                            .foregroundStyle(.red)
-                    }
-                }
+                .padding(16)
             }
-            .navigationTitle(groupTitle)
+            .background(
+                ThemedBackground(
+                    isDark: store.darkMode,
+                    isFeminine: store.theme == "feminine",
+                    intensity: store.themeBackgroundIntensity
+                )
+            )
+            .scrollContentBackground(.hidden)
+            .sheetNavigationTitle(groupTitle)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Schließen") { dismiss() }
@@ -298,5 +332,46 @@ struct GroupSubjectManagementView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+}
+
+private struct StatusLabel: View {
+    let text: String
+    let color: Color
+    let icon: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.callout.weight(.semibold))
+            Text(text)
+                .font(.callout)
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(color.opacity(0.12))
+        .foregroundStyle(color)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+private struct PillActionButtonStyle: ButtonStyle {
+    let accent: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.footnote.weight(.semibold))
+            .padding(.vertical, 8)
+            .padding(.horizontal, 10)
+            .foregroundStyle(accent)
+            .background(accent.opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(accent.opacity(0.2), lineWidth: 1)
+            )
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .opacity(configuration.isPressed ? 0.9 : 1)
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
     }
 }

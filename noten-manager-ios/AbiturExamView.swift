@@ -188,24 +188,25 @@ struct AbiturExamView: View {
                 HStack {
                     Image(systemName: icon)
                         .font(.caption.weight(.bold))
-                        .foregroundStyle(accent)
+                        .foregroundStyle(Color.yellow.opacity(0.9))
                         .frame(width: 26, height: 26)
-                        .background(accent.opacity(0.14))
+                        .background(Color.yellow.opacity(0.2))
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     VStack(alignment: .leading, spacing: 2) {
                         Text(value != nil ? "\(Int(value!)) Punkte" : "Nicht eingetragen")
                             .font(.body.weight(.semibold))
+                            .foregroundStyle(Color.white)
                         Text("0 bis 15 Punkte")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.white.opacity(0.85))
                     }
                     Spacer()
                     Image(systemName: "chevron.down")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.white)
                 }
                 .padding(10)
-                .background(Color(.secondarySystemBackground))
+                .background(Color.gray.opacity(0.25))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .disabled(disabled)
@@ -505,7 +506,7 @@ struct AbiturExamView: View {
             Task { await loadExamState() }
         }
         .background(
-            ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine")
+            ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity)
         )
         .background(
             NavigationLinksBackground(

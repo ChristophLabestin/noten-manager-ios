@@ -33,6 +33,7 @@ struct OfflineSnapshot: Codable {
     let animationsEnabled: Bool
     let showHolidayHints: Bool?
     let theme: String
+    let themeIntensity: Double?
     let appIcon: String?
     let darkMode: Bool
     let darkModeMode: String
@@ -52,6 +53,7 @@ final class OfflineModeManager: ObservableObject {
     @Published private(set) var cachedSnapshot: OfflineSnapshot?
     @Published private(set) var isOnline: Bool = true
     @Published private(set) var networkStatusReady: Bool = false
+    @Published private(set) var isManualOfflinePinned: Bool = false
 
     private let monitor = NWPathMonitor()
     private let monitorQueue = DispatchQueue(label: "OfflineModeMonitor")
@@ -64,6 +66,7 @@ final class OfflineModeManager: ObservableObject {
 
     private let lastLoginKey = "offline_last_login"
     private let lastLoginUidKey = "offline_last_login_uid"
+    private let manualOfflineKey = "offline_manual_mode_active"
     private let snapshotFileName = "offline-cache.json"
     private let offlineWindow: TimeInterval = 60 * 60 * 24 * 3 // 3 Tage
 
@@ -77,6 +80,12 @@ final class OfflineModeManager: ObservableObject {
         decoder = dec
 
         cachedSnapshot = try? loadSnapshotFromDisk()
+
+        isManualOfflinePinned = defaults.bool(forKey: manualOfflineKey)
+        if isManualOfflinePinned {
+            isOfflineModeActive = true
+            disableFirestoreNetwork()
+        }
     }
 
     func startMonitoring() {
@@ -96,7 +105,9 @@ final class OfflineModeManager: ObservableObject {
     func recordOnlineLogin(uid: String) {
         defaults.set(Date(), forKey: lastLoginKey)
         defaults.set(uid, forKey: lastLoginUidKey)
-        isOfflineModeActive = false
+        if !isManualOfflinePinned {
+            deactivateOfflineMode(resetManualPin: false)
+        }
     }
 
     var lastLoginDate: Date? {
@@ -123,19 +134,22 @@ final class OfflineModeManager: ObservableObject {
         return nil
     }
 
-    func activateOfflineMode() {
+    func activateOfflineMode(manual: Bool = false) {
         isOfflineModeActive = true
+        if manual { setManualOfflinePinned(true) }
         disableFirestoreNetwork()
     }
 
-    func deactivateOfflineMode() {
+    func deactivateOfflineMode(resetManualPin: Bool = true) {
         isOfflineModeActive = false
+        if resetManualPin { setManualOfflinePinned(false) }
         enableFirestoreNetworkIfNeeded()
     }
 
     func clearOfflineData() {
         cachedSnapshot = nil
         isOfflineModeActive = false
+        setManualOfflinePinned(false)
         defaults.removeObject(forKey: lastLoginKey)
         defaults.removeObject(forKey: lastLoginUidKey)
         try? FileManager.default.removeItem(at: snapshotURL())
@@ -173,6 +187,11 @@ final class OfflineModeManager: ObservableObject {
     private func snapshotURL() -> URL {
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         return dir.appendingPathComponent(snapshotFileName)
+    }
+
+    private func setManualOfflinePinned(_ active: Bool) {
+        isManualOfflinePinned = active
+        defaults.set(active, forKey: manualOfflineKey)
     }
 
     private func disableFirestoreNetwork() {

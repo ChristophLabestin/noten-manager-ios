@@ -334,7 +334,7 @@ struct InsightsView: View {
             ExamListView()
                 .environmentObject(store)
         }
-        .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine"))
+        .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
     }
 
     @ViewBuilder

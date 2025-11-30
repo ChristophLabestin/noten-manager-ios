@@ -18,11 +18,14 @@ struct EditHomeworkView: View {
     @State private var isDeleting: Bool = false
     @State private var showDeleteConfirm: Bool = false
     @State private var error: String?
-    @State private var showPersonalNoteEditor: Bool = false
+    @State private var personalNote: String = ""
     @State private var isSharing: Bool = false
     @State private var isUnsharing: Bool = false
     @State private var shareInfo: String?
     @State private var shareError: String?
+    @State private var shareLinkURL: URL?
+    @State private var showShareSheet: Bool = false
+    @State private var shareLinkError: String?
 
     @State private var isShared: Bool = false
     @State private var sharedId: String? = nil
@@ -40,9 +43,13 @@ struct EditHomeworkView: View {
         homework.isShared && homework.creatorId == currentUserId
     }
 
+    private let noSubjectLabel = "Kein Fach"
+    @State private var loadedNote: Bool = false
+
     init(homework: Homework) {
         self.homework = homework
-        _subjectName = State(initialValue: homework.subjectName)
+        let initialSubject = homework.subjectName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? noSubjectLabel : homework.subjectName
+        _subjectName = State(initialValue: initialSubject)
         _title = State(initialValue: homework.title)
         let initialDue = homework.dueDate ?? Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
         _hasDueDate = State(initialValue: homework.dueDate != nil)
@@ -51,6 +58,8 @@ struct EditHomeworkView: View {
         _hasReminder = State(initialValue: homework.reminderAt != nil)
         _reminderDate = State(initialValue: initialReminder)
         _isCompleted = State(initialValue: homework.isCompleted)
+        _personalNote = State(initialValue: "")
+        _loadedNote = State(initialValue: false)
         // isShared stays false by default, no model field to set from
     }
 
@@ -60,6 +69,9 @@ struct EditHomeworkView: View {
 
     private var subjectOptions: [String] {
         var list = subjects.map { $0.name }
+        if !list.contains(noSubjectLabel) {
+            list.insert(noSubjectLabel, at: 0)
+        }
         if !list.contains("Allgemein") {
             list.insert("Allgemein", at: 0)
         }
@@ -71,6 +83,11 @@ struct EditHomeworkView: View {
 
     private var canSave: Bool {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !subjectName.isEmpty
+    }
+
+    private var sheetTitle: String {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Hausaufgabe bearbeiten" : trimmed
     }
 
     var body: some View {
@@ -168,6 +185,42 @@ struct EditHomeworkView: View {
                         }
                     }
 
+                    SettingsCard(
+                        title: "Per Link teilen",
+                        subtitle: "An Freund:innen senden, auch ohne Gruppe",
+                        systemImage: "link",
+                        accent: .indigo
+                    ) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Button {
+                                shareLinkError = nil
+                                guard let url = HomeworkShareLinkBuilder.url(for: homework) else {
+                                    shareLinkError = "Link konnte nicht erstellt werden."
+                                    return
+                                }
+                                shareLinkURL = url
+                                showShareSheet = true
+                            } label: {
+                                Label("Link erstellen & teilen", systemImage: "square.and.arrow.up")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(SoftTintButtonStyle(accent: .indigo))
+                            .disabled(isSaving || isDeleting)
+
+                            if let shareLinkURL {
+                                Text(shareLinkURL.absoluteString)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                            }
+                            if let shareLinkError {
+                                Text(shareLinkError)
+                                    .font(.footnote)
+                                    .foregroundStyle(.red)
+                            }
+                        }
+                    }
+
                     if homework.isShared {
                         SettingsCard(
                             title: "Eigene Notiz",
@@ -175,22 +228,20 @@ struct EditHomeworkView: View {
                             systemImage: "note.text",
                             accent: .teal
                         ) {
-                            let currentNote = store.userNoteForHomework(homework) ?? ""
-                            VStack(alignment: .leading, spacing: 10) {
-                                if currentNote.isEmpty {
-                                    Text("Keine Notiz gespeichert.")
-                                        .font(.footnote)
+                            SettingsSectionBox {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Persönliche Notiz")
+                                        .font(.headline)
+                                    TextEditor(text: $personalNote)
+                                        .frame(minHeight: 100)
+                                        .scrollContentBackground(.hidden)
+                                        .padding(10)
+                                        .background(Color.formInputBackground)
+                                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    Text("Nur für dich sichtbar, wird mit der Aufgabe gespeichert.")
+                                        .font(.caption)
                                         .foregroundStyle(.secondary)
-                                } else {
-                                    Text(currentNote)
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(4)
                                 }
-                                Button("Eigene Notiz bearbeiten") {
-                                    showPersonalNoteEditor = true
-                                }
-                                .buttonStyle(.borderedProminent)
                             }
                         }
                     }
@@ -213,7 +264,7 @@ struct EditHomeworkView: View {
                                             .frame(maxWidth: .infinity)
                                     }
                                 }
-                                .buttonStyle(.borderedProminent)
+                                .buttonStyle(SoftTintButtonStyle(accent: .blue))
                                 .disabled(isSharing)
 
                                 if let shareInfo {
@@ -248,8 +299,7 @@ struct EditHomeworkView: View {
                                             .frame(maxWidth: .infinity)
                                     }
                                 }
-                                .buttonStyle(.borderedProminent)
-                                .tint(.red)
+                                .buttonStyle(SoftTintButtonStyle(accent: .red))
                                 .disabled(isUnsharing)
 
                                 if let shareInfo {
@@ -283,13 +333,13 @@ struct EditHomeworkView: View {
                                 .frame(maxWidth: .infinity)
                         }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
+                    .buttonStyle(SoftTintButtonStyle(accent: .red))
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
-            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine"))
+            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
+            .sheetNavigationTitle(sheetTitle)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Abbrechen") {
@@ -313,14 +363,18 @@ struct EditHomeworkView: View {
                 label: nil,
                 onDone: { hideKeyboard() }
             )
-            .sheet(isPresented: $showPersonalNoteEditor) {
-                PersonalNoteEditor(
-                    title: "Eigene Notiz",
-                    initialText: store.userNoteForHomework(homework) ?? "",
-                    onSave: { text in
-                        Task { await store.setUserNoteForSharedHomework(homeworkId: homework.id, note: text, groupId: homework.groupId) }
-                    }
-                )
+            .sheet(isPresented: $showShareSheet) {
+                if let shareLinkURL {
+                    ShareSheet(activityItems: [shareLinkURL])
+                } else {
+                    Text("Kein Link verfügbar")
+                }
+            }
+            .onAppear {
+                if !loadedNote && homework.isShared {
+                    personalNote = store.userNoteForHomework(homework) ?? ""
+                    loadedNote = true
+                }
             }
             .alert(
                 "Hausaufgabe löschen?",
@@ -360,6 +414,7 @@ struct EditHomeworkView: View {
                 if hasReminder {
                     try await store.setUserReminderForSharedHomework(homeworkId: homework.id, reminderAt: reminder, groupId: gid)
                 }
+                await store.setUserNoteForSharedHomework(homeworkId: homework.id, note: personalNote, groupId: gid)
             } else {
                 try await store.updateHomeworkInFirestore(
                     id: homework.id,

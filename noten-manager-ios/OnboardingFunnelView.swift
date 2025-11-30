@@ -63,6 +63,7 @@ struct OnboardingFunnelView: View {
     @State private var prevYearSubjects: [Subject] = []
     @State private var selectedPrevSubjects: Set<String> = []
     @State private var isLoadingPrevSubjects: Bool = false
+    @State private var baselineGroupIds: Set<String> = []
     @State private var pendingGroupCodes: Set<String> = []
     @State private var pendingSchoolYearId: String?
     @State private var pendingSchoolType: SchoolType = .bos
@@ -97,6 +98,22 @@ struct OnboardingFunnelView: View {
         accentPrimary.opacity(store.darkMode ? 0.25 : 0.15)
     }
 
+    private var isManualRestart: Bool {
+        !isSchoolYearChange && store.onboardingRequired && (store.activeSchoolYearId != nil || !store.subjects.isEmpty)
+    }
+
+    private var showSignOutButton: Bool {
+        !isSchoolYearChange && !isManualRestart && store.onboardingRequired
+    }
+
+    private var showCloseButton: Bool {
+        isSchoolYearChange || isManualRestart
+    }
+
+    private var canGoBack: Bool {
+        !((!legacyStepRequired && currentStep == .schoolYear) || currentStep == .legacy)
+    }
+
     private var hasSubjects: Bool {
         if isSchoolYearChange {
             return !pendingPrevSubjectNames.isEmpty || !pendingManualSubjects.isEmpty
@@ -108,12 +125,20 @@ struct OnboardingFunnelView: View {
     }
 
     private var hasJoinedGroups: Bool {
-        !store.groupIds.isEmpty
+        !visibleGroupIds.isEmpty
+    }
+
+    private var visibleGroupIds: [String] {
+        if isSchoolYearChange {
+            let newGroups = Set(store.groupIds).subtracting(baselineGroupIds)
+            return Array(newGroups.union(pendingGroupCodes)).sorted()
+        }
+        return store.groupIds
     }
 
     private var uniqueGroupSubjectCount: Int {
         var names: Set<String> = []
-        let existing = Set(store.subjects.map { $0.name.lowercased() })
+        let existing = Set(store.subjects.map { $0.name.lowercased() }).union(legacySubjectLowercased)
         for gid in store.groupIds {
             for subj in store.groupSubjectsByGroup[gid] ?? [] {
                 let trimmed = subj.name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -161,6 +186,15 @@ struct OnboardingFunnelView: View {
         legacyStepRequired ? 4 : 3
     }
 
+    private var legacySubjectLowercased: Set<String> {
+        guard store.legacyImportSelected == true else { return [] }
+        return Set(
+            store.legacySelectedSubjects.map {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            }
+        )
+    }
+
     private var currentStepNumber: Int {
         switch currentStep {
         case .legacy: return 1
@@ -198,7 +232,7 @@ struct OnboardingFunnelView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine")
+                ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         header
@@ -209,47 +243,64 @@ struct OnboardingFunnelView: View {
                                 Text("Daten werden abgerufen …")
                                     .font(.subheadline)
                                     .foregroundStyle(secondaryText)
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 200, alignment: .center)
+                        } else if legacyStepRequired && currentStep == .legacy, let summary = store.legacyMigrationSummary {
+                            legacyDetectedSection(summary: summary)
+                        } else {
+                            contentForCurrentStepContainer
                         }
-                        .frame(maxWidth: .infinity, minHeight: 200, alignment: .center)
-                    } else if legacyStepRequired && currentStep == .legacy, let summary = store.legacyMigrationSummary {
-                        legacyDetectedSection(summary: summary)
-                    } else {
-                        contentForCurrentStepContainer
+
+                        if showSignOutButton {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Button {
+                                    authManager.signOut()
+                                    dismiss()
+                                } label: {
+                                    Text("Abmelden")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(SoftTintButtonStyle(accent: .red))
+
+                                Text("Du kannst den Assistenten jederzeit erneut starten.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.top, 6)
+                        }
                     }
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 24)
-                .padding(.bottom, 40)
-                }
-            }
-            .safeAreaInset(edge: .bottom) {
-                VStack(spacing: 10) {
-                    Color.clear.frame(height: 12)
-                    Button {
-                        authManager.signOut()
-                        dismiss()
-                    } label: {
-                        Text("Abmelden")
-                            .font(.footnote.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundColor(.red)
-                    .background(tileBackground)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(tileStroke, lineWidth: 1)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .padding(.horizontal, 20)
+                    .padding(.top, 24)
+                    .padding(.bottom, 40)
                 }
             }
             .scrollDismissesKeyboard(.interactively)
             .hideKeyboardOnTap()
-            .navigationBarHidden(true)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    if canGoBack {
+                        Button(action: goBack) {
+                            Image(systemName: "chevron.left")
+                                .imageScale(.medium)
+                        }
+                        .accessibilityLabel("Zurück")
+                        .disabled(!canGoBack)
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    if showCloseButton {
+                        Button(action: closeOnboarding) {
+                            Image(systemName: "xmark")
+                                .imageScale(.medium)
+                        }
+                        .accessibilityLabel("Schließen")
+                    }
+                }
+            }
             .onAppear {
                 bootstrapDefaults()
+                baselineGroupIds = Set(store.groupIds)
                 currentStep = legacyStepRequired ? .legacy : .schoolYear
             }
             .sheet(isPresented: $showAddSubjectSheet) {
@@ -257,24 +308,26 @@ struct OnboardingFunnelView: View {
                     .environmentObject(store)
             }
         }
-        .onChange(of: store.legacyMigrationSummary) { summary in
+        .onChange(of: store.legacyMigrationSummary) { _, summary in
             if summary != nil {
                 currentStep = .legacy
             }
         }
         .keyboardDismissToolbar()
-        .interactiveDismissDisabled(!isSchoolYearChange)
-        .onChange(of: store.groupSubjectsByGroup) { _ in
+        .interactiveDismissDisabled(!(isSchoolYearChange || isManualRestart))
+        .presentationDetents([.large])
+        .presentationDragIndicator(showCloseButton ? .visible : .hidden)
+        .onChange(of: store.groupSubjectsByGroup) {
             if currentStep == .subjects && !isSchoolYearChange {
                 prepareGroupSubjectCandidates()
             }
         }
-        .onChange(of: store.subjects) { _ in
+        .onChange(of: store.subjects) {
             if currentStep == .subjects && !isSchoolYearChange {
                 prepareGroupSubjectCandidates()
             }
         }
-        .onChange(of: store.groupIds) { _ in
+        .onChange(of: store.groupIds) {
             if currentStep != .schoolYear && !isSchoolYearChange {
                 prepareGroupSubjectCandidates()
             }
@@ -419,13 +472,8 @@ struct OnboardingFunnelView: View {
                         .foregroundStyle(accent)
                 }
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text(title)
-                            .font(.subheadline.weight(.semibold))
-                        if let badge {
-                            Tag(text: badge, style: .minor)
-                        }
-                    }
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
                     if let subtitle {
                         Text(subtitle)
                             .font(.caption)
@@ -445,6 +493,13 @@ struct OnboardingFunnelView: View {
                         .stroke(accent.opacity(0.15), lineWidth: 1)
                 )
         )
+        .overlay(alignment: .topTrailing) {
+            if let badge {
+                Tag(text: badge, style: .minor)
+                    .padding(.top, 8)
+                    .padding(.trailing, 10)
+            }
+        }
     }
 
     private func selectionRow(title: String, detail: String? = nil, isSelected: Bool, accent: Color, action: @escaping () -> Void) -> some View {
@@ -516,45 +571,21 @@ struct OnboardingFunnelView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                HStack(spacing: 10) {
-                    Button {
-                        goBack()
-                    } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.body.weight(.semibold))
-                            .padding(10)
-                            .background(Color(.secondarySystemBackground))
-                            .clipShape(Circle())
-                    }
-                    .disabled((!legacyStepRequired && currentStep == .schoolYear) || currentStep == .legacy)
-                    if isSchoolYearChange {
-                        Button {
-                            dismiss()
-                            onFinished()
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.body.weight(.semibold))
-                                .padding(10)
-                                .background(Color(.secondarySystemBackground))
-                                .clipShape(Circle())
-                        }
-                    }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(isSchoolYearChange ? "Schuljahrs-Setup" : "Account einrichten")
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(primaryText)
+                    Text(stepSubtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(secondaryText)
                 }
                 Spacer()
                 Text("Schritt \(currentStepNumber)/\(totalSteps)")
                     .font(.footnote.weight(.semibold))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(Color.blue.opacity(0.1))
+                    .background(accentPrimary.opacity(0.12))
                     .clipShape(Capsule())
-            }
-            VStack(alignment: .leading, spacing: 6) {
-                Text(isSchoolYearChange ? "Schuljahrs-Setup" : "Account einrichten")
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(primaryText)
-                Text(stepSubtitle)
-                    .font(.subheadline)
-                    .foregroundStyle(secondaryText)
             }
         }
     }
@@ -564,7 +595,7 @@ struct OnboardingFunnelView: View {
             ForEach(0..<totalSteps, id: \.self) { idx in
                 let isActive = idx == currentStepNumber - 1
                 Circle()
-                    .fill(isActive ? Color.blue : Color.gray.opacity(0.35))
+                    .fill(isActive ? accentPrimary : accentPrimary.opacity(0.25))
                     .frame(width: 10, height: 10)
             }
             Spacer()
@@ -674,7 +705,7 @@ struct OnboardingFunnelView: View {
                 }
                 .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(SoftTintButtonStyle(accent: accentPrimary))
             .padding(.top, 4)
             .disabled(!isValidSchoolYear(schoolYearInput) || !gradeOptionsForSchoolType.contains(gradeSelection) || isSavingSchoolYear)
         }
@@ -711,8 +742,8 @@ struct OnboardingFunnelView: View {
                 }
                 .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(joinCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isJoining)
+            .buttonStyle(SoftTintButtonStyle(accent: accentPrimary))
+            .disabled(normalizeGroupCode(joinCode).isEmpty || isJoining)
             .frame(maxWidth: .infinity)
 
             if let msg = joinInfo {
@@ -730,7 +761,7 @@ struct OnboardingFunnelView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Beigetretene Gruppen")
                         .font(.subheadline.weight(.semibold))
-                    ForEach(store.groupIds, id: \.self) { gid in
+                    ForEach(visibleGroupIds, id: \.self) { gid in
                         VStack(alignment: .leading, spacing: 8) {
                             HStack(alignment: .top) {
                                 VStack(alignment: .leading, spacing: 4) {
@@ -771,14 +802,14 @@ struct OnboardingFunnelView: View {
                 Button("Überspringen") {
                     continueFromGroups()
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(SoftTintButtonStyle(accent: Color(.secondaryLabel)))
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .disabled(isJoining)
 
                 Button("Weiter") {
                     continueFromGroups()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(SoftTintButtonStyle(accent: accentPrimary))
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .disabled(isJoining)
             }
@@ -860,7 +891,7 @@ struct OnboardingFunnelView: View {
                                 }
                                 .frame(maxWidth: .infinity)
                             }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(SoftTintButtonStyle(accent: .blue))
                             .disabled(isImporting || stagedGroupSubjectCount == 0)
                         } else {
                             Text("Auswahl wird beim Abschluss übernommen.")
@@ -917,7 +948,7 @@ struct OnboardingFunnelView: View {
                             }
                             .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(SoftTintButtonStyle(accent: .orange))
                         .disabled(isImportingPrev || selectedPrevSubjects.isEmpty)
                     }
                     if let info = prevImportInfo {
@@ -956,14 +987,14 @@ struct OnboardingFunnelView: View {
                         .disabled(manualIsElective)
 
                         Toggle("Wahlfach / nicht einbringbar", isOn: $manualIsElective)
-                            .onChange(of: manualIsElective) { val in
+                            .onChange(of: manualIsElective) { _, val in
                                 if val { manualType = 0 }
                             }
 
                         Button("Fach vormerken") {
                             addPendingManualSubject()
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(SoftTintButtonStyle(accent: .green))
                         .disabled(manualNameInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                         if let manualError {
@@ -991,7 +1022,7 @@ struct OnboardingFunnelView: View {
                     Button("Fach hinzufügen") {
                         showAddSubjectSheet = true
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(SoftTintButtonStyle(accent: .green))
 
                     if store.subjects.isEmpty {
                         Text("Noch keine Fächer angelegt.")
@@ -1075,7 +1106,7 @@ struct OnboardingFunnelView: View {
                 }
                 .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(SoftTintButtonStyle(accent: accentPrimary))
             .disabled(isFinishing || !hasSubjects)
         }
         .padding(20)
@@ -1128,6 +1159,10 @@ struct OnboardingFunnelView: View {
         return ((start + 1) % 100) == suffix
     }
 
+    private func normalizeGroupCode(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    }
+
     private var gradeOptionsForSchoolType: [Int] {
         selectedSchoolType == .fos ? [11, 12, 13] : [12, 13]
     }
@@ -1176,8 +1211,13 @@ struct OnboardingFunnelView: View {
 
     private func handleJoinGroup() {
         guard !isJoining else { return }
-        let code = joinCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        let code = normalizeGroupCode(joinCode)
         guard !code.isEmpty else { return }
+        if visibleGroupIds.contains(code) {
+            joinInfo = "Gruppe bereits hinzugefügt."
+            joinError = nil
+            return
+        }
 
         joinInfo = nil
         joinError = nil
@@ -1185,6 +1225,38 @@ struct OnboardingFunnelView: View {
 
         Task {
             do {
+                if isSchoolYearChange {
+                    let metadata = await store.groupMetadata(for: code)
+                    if !metadata.exists {
+                        await MainActor.run {
+                            joinError = "Diese Gruppe existiert nicht."
+                            joinInfo = nil
+                            isJoining = false
+                        }
+                        return
+                    }
+                    if let targetYear = pendingSchoolYearId,
+                       let groupYear = metadata.schoolYearId,
+                       !groupYear.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                       groupYear != targetYear {
+                        await MainActor.run {
+                            joinError = "Diese Gruppe gehört zum Schuljahr \(groupYear)."
+                            joinInfo = nil
+                            isJoining = false
+                        }
+                        return
+                    }
+                    await MainActor.run {
+                        pendingGroupCodes.insert(code)
+                        joinCode = ""
+                        joinInfo = "Gruppe wird im neuen Schuljahr verbunden."
+                        joinError = nil
+                    }
+                    await store.loadGroupName(gid: code)
+                    await MainActor.run { isJoining = false }
+                    return
+                }
+
                 let staging = stagingMode
                 try await store.joinExistingSharedGroup(with: code, allowYearCreation: !staging)
                 await MainActor.run {
@@ -1217,6 +1289,17 @@ struct OnboardingFunnelView: View {
         }
     }
 
+    private func closeOnboarding() {
+        if isSchoolYearChange {
+            dismiss()
+            onFinished()
+        } else if isManualRestart {
+            store.onboardingRequired = false
+            dismiss()
+            onFinished()
+        }
+    }
+
     private func goBack() {
         guard currentStep.rawValue > 0 else { return }
         if let prev = Step(rawValue: currentStep.rawValue - 1) {
@@ -1238,6 +1321,14 @@ struct OnboardingFunnelView: View {
 
     private func leaveGroup(_ gid: String) {
         guard !leavingGroupIds.contains(gid) else { return }
+        if isSchoolYearChange {
+            leavingGroupIds.insert(gid)
+            Task { @MainActor in
+                pendingGroupCodes.remove(gid)
+                leavingGroupIds.remove(gid)
+            }
+            return
+        }
         if stagingMode {
             leavingGroupIds.insert(gid)
             Task { @MainActor in
@@ -1260,7 +1351,7 @@ struct OnboardingFunnelView: View {
     }
 
     private func preloadGroupNames() async {
-        for gid in store.groupIds where store.groupNames[gid] == nil {
+        for gid in visibleGroupIds where store.groupNames[gid] == nil {
             await store.loadGroupName(gid: gid)
         }
     }
@@ -1270,7 +1361,8 @@ struct OnboardingFunnelView: View {
             groupSubjectCandidates = []
             return
         }
-        let existing = Set(store.subjects.map { $0.name.lowercased() })
+        let existingSubjects = Set(store.subjects.map { $0.name.lowercased() })
+        let existing = existingSubjects.union(legacySubjectLowercased)
         let previousSelection = groupSubjectCandidates.reduce(into: [String: Bool]()) { dict, item in
             dict[item.name.lowercased()] = item.selected
         }
@@ -1338,9 +1430,12 @@ struct OnboardingFunnelView: View {
 
     private func importGroupSubjects() {
         guard !isImporting else { return }
-        let allowed = Set(selectedGroupSubjectNames.map { $0.lowercased() })
+        var allowed = Set(selectedGroupSubjectNames.map { $0.lowercased() })
+        if !legacySubjectLowercased.isEmpty {
+            allowed.subtract(legacySubjectLowercased)
+        }
         guard !allowed.isEmpty else {
-            importInfo = "Keine Gruppenfächer ausgewählt."
+            importInfo = legacySubjectLowercased.isEmpty ? "Keine Gruppenfächer ausgewählt." : "Ausgewählte Gruppenfächer sind bereits über Web-Daten abgedeckt."
             return
         }
         if stagingMode {
@@ -1432,7 +1527,10 @@ struct OnboardingFunnelView: View {
             }
 
             if !isSchoolYearChange && !selectedGroupSubjectNames.isEmpty {
-                let allowed = Set(selectedGroupSubjectNames.map { $0.lowercased() })
+                var allowed = Set(selectedGroupSubjectNames.map { $0.lowercased() })
+                if !legacySubjectLowercased.isEmpty {
+                    allowed.subtract(legacySubjectLowercased)
+                }
                 _ = await store.importSubjectsFromGroups(groupIds: nil, allowedNames: allowed)
             }
 
