@@ -37,7 +37,6 @@ struct ExamCountdownWidgetLiveActivity: Widget {
                 .activityBackgroundTint(.black)
                 .widgetURL(deepLinkURL(for: context.attributes))
         } dynamicIsland: { context in
-            let accent = accentGradient(for: context.attributes)
             let accentColor = accentColorForTheme(context.attributes.accent)
             let countdownRange = countdownRange(for: context.state)
             return DynamicIsland {
