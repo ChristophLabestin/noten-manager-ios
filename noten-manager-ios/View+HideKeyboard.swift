@@ -26,15 +26,15 @@ struct KeyboardAccessoryBar: View {
     let label: String?
 
     private var foreground: Color {
-        colorScheme == .dark ? .white : Color.black.opacity(0.85)
+        colorScheme == .dark ? Color.white.opacity(0.92) : Color.black.opacity(0.82)
     }
 
     private var baseBackground: Color {
-        colorScheme == .dark ? Color.white.opacity(0.32) : Color.black.opacity(0.24)
+        colorScheme == .dark ? Color(white: 0.1).opacity(0.9) : Color(white: 0.97).opacity(0.94)
     }
 
     private var strokeColor: Color {
-        colorScheme == .dark ? Color.white.opacity(0.25) : Color.black.opacity(0.15)
+        colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.08)
     }
 
     var body: some View {
@@ -74,7 +74,7 @@ struct KeyboardAccessoryBar: View {
             RoundedRectangle(cornerRadius: KeyboardToolbarMetrics.cornerRadius, style: .continuous)
                 .stroke(strokeColor, lineWidth: KeyboardToolbarMetrics.hairlineWidth)
         )
-        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.12), radius: 14, y: 6)
+        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.22 : 0.08), radius: 12, y: 5)
         .padding(.bottom, KeyboardToolbarMetrics.bottomGap)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(label ?? "Tastaturleiste")
@@ -264,6 +264,7 @@ private struct KeyboardToolbarOverlay<Bar: View>: ViewModifier {
     let height: CGFloat
     let bar: () -> Bar
     @State private var isKeyboardVisible = false
+    @State private var keyboardHeight: CGFloat = 0
 
     func body(content: Content) -> some View {
         content
@@ -284,12 +285,48 @@ private struct KeyboardToolbarOverlay<Bar: View>: ViewModifier {
                 }
             }
             .animation(.easeOut(duration: 0.18), value: isKeyboardVisible)
-            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { notification in
                 isKeyboardVisible = true
+                keyboardHeight = extractedKeyboardHeight(from: notification)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
+                let newHeight = extractedKeyboardHeight(from: notification)
+                // Sobald die Tastaturhöhe schrumpft (z. B. durch Scrollen), direkt komplett schließen,
+                // damit sie nicht "gehalten" werden kann.
+                if newHeight + 8 < keyboardHeight {
+                    dismissKeyboard()
+                    isKeyboardVisible = false
+                    keyboardHeight = 0
+                } else {
+                    keyboardHeight = newHeight
+                    isKeyboardVisible = newHeight > 0
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
                 isKeyboardVisible = false
+                keyboardHeight = 0
             }
+    }
+
+    private func extractedKeyboardHeight(from notification: Notification) -> CGFloat {
+        guard
+            let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+            let window = keyWindow()
+        else { return 0 }
+        let converted = window.convert(frame, from: nil)
+        let intersection = window.bounds.intersection(converted)
+        return intersection.isNull ? 0 : intersection.height
+    }
+
+    private func keyWindow() -> UIWindow? {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first { $0.isKeyWindow }
+    }
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 }
 #endif
