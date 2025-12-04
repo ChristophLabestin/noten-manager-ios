@@ -15,6 +15,7 @@ struct MainView: View {
     let onLogout: () -> Void
     @Binding var incomingHomeworkShare: HomeworkShareLinkPayload?
     @Binding var incomingExamId: String?
+    @Binding var deeplinkDestination: DeeplinkDestination?
     @StateObject private var gradesStore = GradesStore()
     @State private var currentTab: BottomNavView.Tab = .home
     @EnvironmentObject private var offlineManager: OfflineModeManager
@@ -39,6 +40,8 @@ struct MainView: View {
     @State private var navigateToAbiturExam: Bool = false
     @State private var deeplinkExamId: String? = nil
     @State private var deeplinkExam: Exam? = nil
+    @State private var showExamListSheet: Bool = false
+    @State private var showHomeworkListSheet: Bool = false
 
     var body: some View {
         let base = ZStack {
@@ -88,6 +91,9 @@ struct MainView: View {
                     self.currentTab = .home
                 }
                 self.handleDeeplinkExam()
+            }
+            .onChange(of: deeplinkDestination) { _, destination in
+                handleDeeplinkDestination(destination)
             }
             .onChange(of: gradesStore.allExams) {
                 self.handleDeeplinkExam()
@@ -145,6 +151,18 @@ struct MainView: View {
             }
 
         overlays
+            .sheet(isPresented: $showExamListSheet, onDismiss: {
+                deeplinkDestination = nil
+            }) {
+                ExamListView()
+                    .environmentObject(gradesStore)
+            }
+            .sheet(isPresented: $showHomeworkListSheet, onDismiss: {
+                deeplinkDestination = nil
+            }) {
+                HomeworkListView()
+                    .environmentObject(gradesStore)
+            }
             .sheet(item: $deeplinkExam) { exam in
                 ExamDetailSheet(exam: exam, onEdit: { _ in })
                     .environmentObject(gradesStore)
@@ -636,6 +654,18 @@ struct MainView: View {
             self.deeplinkExam = exam
             self.deeplinkExamId = nil
         }
+    }
+
+    private func handleDeeplinkDestination(_ destination: DeeplinkDestination?) {
+        guard let destination else { return }
+        currentTab = .home
+        switch destination {
+        case .examList:
+            showExamListSheet = true
+        case .homeworkList:
+            showHomeworkListSheet = true
+        }
+        deeplinkDestination = nil
     }
 
     private var themedBackground: some View {

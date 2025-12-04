@@ -22,8 +22,8 @@ struct ExamSelectionEntity: AppEntity, Identifiable {
 
     var displayRepresentation: DisplayRepresentation {
         DisplayRepresentation(
-            title: "\(title)",
-            subtitle: subtitle.map { DisplayRepresentation.Title($0) }
+            title: LocalizedStringResource(stringLiteral: title),
+            subtitle: subtitle.map { LocalizedStringResource(stringLiteral: $0) }
         )
     }
 
