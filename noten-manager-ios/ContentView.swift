@@ -9,6 +9,11 @@ import SwiftUI
 import FirebaseAuth
 import LocalAuthentication
 
+enum DeeplinkDestination: Equatable {
+    case examList
+    case homeworkList
+}
+
 @MainActor
 struct ContentView: View {
     @StateObject private var authManager = AuthManager()
@@ -23,6 +28,7 @@ struct ContentView: View {
     @State private var isRequestingBiometric: Bool = false
     @State private var incomingHomeworkShare: HomeworkShareLinkPayload?
     @State private var incomingExamId: String?
+    @State private var deeplinkDestination: DeeplinkDestination?
 
     var body: some View {
         ZStack {
@@ -35,7 +41,7 @@ struct ContentView: View {
                     } else {
                         MainView(onLogout: {
                             authManager.signOut()
-                        }, incomingHomeworkShare: $incomingHomeworkShare, incomingExamId: $incomingExamId)
+                        }, incomingHomeworkShare: $incomingHomeworkShare, incomingExamId: $incomingExamId, deeplinkDestination: $deeplinkDestination)
                         .environmentObject(authManager)
                         .environmentObject(offlineManager)
                         .environmentObject(biometricManager)
@@ -322,11 +328,20 @@ struct ContentView: View {
             incomingHomeworkShare = payload
         }
         if url.scheme?.lowercased() == "notenmanager",
-           url.host?.lowercased() == "exam" {
-            let components = url.pathComponents.filter { $0 != "/" }
-            if let id = components.first {
-                incomingExamId = id
-                NotificationCenter.default.post(name: .openExamDetail, object: id)
+           let host = url.host?.lowercased() {
+            switch host {
+            case "exam":
+                let components = url.pathComponents.filter { $0 != "/" }
+                if let id = components.first {
+                    incomingExamId = id
+                    NotificationCenter.default.post(name: .openExamDetail, object: id)
+                }
+            case "exams":
+                deeplinkDestination = .examList
+            case "homework":
+                deeplinkDestination = .homeworkList
+            default:
+                break
             }
         }
     }

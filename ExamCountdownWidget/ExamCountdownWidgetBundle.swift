@@ -15,7 +15,9 @@ struct ExamCountdownWidgetBundle: WidgetBundle {
         RemainingYearExamsWidget()
         GeneralEventsWidget()
         OpenHomeworkWidget()
-        ExamCountdownWidget()
+        if #available(iOS 17.0, *) {
+            ExamCountdownWidget()
+        }
         if #available(iOS 16.2, *) {
             ExamCountdownWidgetLiveActivity()
         }

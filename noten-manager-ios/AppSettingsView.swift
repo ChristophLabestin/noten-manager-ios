@@ -442,7 +442,6 @@ struct AppSettingsView: View {
                 Text("Möchtest du diese Gruppe wirklich verlassen?")
             }
         }
-        .keyboardDismissToolbar()
     }
 
     private var generalCard: some View {

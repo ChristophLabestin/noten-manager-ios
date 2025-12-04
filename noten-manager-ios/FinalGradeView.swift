@@ -32,10 +32,13 @@ struct FinalGradeView: View {
     @State private var finalGradeTapState: Int = 0 // 0 -> 1 Nachkommastelle, 1 -> 2, 2 -> 3
     @State private var showHomeworkSheet: Bool = false
     @State private var showExamSheet: Bool = false
+    @State private var showWhatIfGradesSheet: Bool = false
+    @State private var showWhatIfExamSheet: Bool = false
     @State private var showSeminarSheet: Bool = false
     @State private var showStatusDetails: Bool = false
     @State private var previousYearSnapshot: SchoolYearSnapshot?
     @State private var isLoadingPreviousYear: Bool = false
+    @State private var simulatedExamPoints: [String: Double] = [:]
 
     private struct SubjectHandle: Identifiable, Hashable {
         let id: String
@@ -135,6 +138,14 @@ struct FinalGradeView: View {
     private var isDark: Bool { store.darkMode }
     private var schoolType: SchoolType { store.schoolType }
     private var gradeYear: Int { store.gradeYear ?? 12 }
+    private var hasExamSimulation: Bool { !simulatedExamPoints.isEmpty }
+    private var activeExamPointsBySubject: [String: Double?] {
+        var merged = examPointsBySubject
+        for (key, value) in simulatedExamPoints {
+            merged[key] = value
+        }
+        return merged
+    }
 
     private var chipForegroundColor: Color {
         if isFeminine {
@@ -256,6 +267,33 @@ struct FinalGradeView: View {
             ExamListView()
                 .environmentObject(store)
         }
+        .sheet(isPresented: $showWhatIfGradesSheet) {
+            WhatIfModeView()
+                .environmentObject(store)
+        }
+        .sheet(isPresented: $showWhatIfExamSheet) {
+            FinalGradeWhatIfView(
+                subjectNames: examSubjectHandles.map { $0.subject.name }.sorted(),
+                existingPoints: examPointsBySubject,
+                existingSimulation: simulatedExamPoints,
+                baselineGradeText: baselineFinalGradeText,
+                baselineGradeValue: baselineFinalGradeValue,
+                computePreview: { overrides in
+                    let merged = mergedExamPoints(base: examPointsBySubject, overrides: overrides)
+                    let text = finalGradeText(for: merged)
+                    let value = finalGradeValue(using: merged)
+                    return (text, value)
+                },
+                gradeColor: finalGradeColor(_:),
+                onApply: { overrides in
+                    simulatedExamPoints = overrides
+                },
+                onReset: {
+                    simulatedExamPoints = [:]
+                }
+            )
+            .environmentObject(store)
+        }
         .sheet(isPresented: $showSeminarSheet) {
             SeminarPerformanceView()
                 .environmentObject(store)
@@ -288,6 +326,7 @@ struct FinalGradeView: View {
         .onChange(of: store.activeSchoolYearId) { _, _ in
             syncDropSelectionsFromData()
             recomputeMaxDroppedHalfYears()
+            simulatedExamPoints = [:]
             Task { await loadExamPoints() }
             Task { await loadPreviousYearSnapshotIfNeeded() }
         }
@@ -343,6 +382,9 @@ struct FinalGradeView: View {
             statusCard
                 .padding(.horizontal, 16)
                 .softFadeIn(enabled: animationsOn, delay: 0.08, offset: 12)
+            whatIfCard
+                .padding(.horizontal, 16)
+                .softFadeIn(enabled: animationsOn, delay: 0.10, offset: 12)
             HelpCenterLink(
                 title: "Hilfe zur Abschlussnote",
                 subtitle: "Regeln, Gewichtung & Beispiele nach BayFOBOSO",
@@ -350,34 +392,34 @@ struct FinalGradeView: View {
                 accent: .indigo
             )
             .padding(.horizontal, 16)
-            .softFadeIn(enabled: animationsOn, delay: 0.10, offset: 12)
+            .softFadeIn(enabled: animationsOn, delay: 0.12, offset: 12)
             abiturOverviewCard
                 .padding(.horizontal, 16)
-                .softFadeIn(enabled: animationsOn, delay: 0.12, offset: 12)
+                .softFadeIn(enabled: animationsOn, delay: 0.14, offset: 12)
             if hasSeminarRequirement || seminarPerformanceForDisplay != nil {
                 seminarCard
                     .padding(.horizontal, 16)
-                    .softFadeIn(enabled: animationsOn, delay: 0.14, offset: 12)
+                    .softFadeIn(enabled: animationsOn, delay: 0.16, offset: 12)
             }
             if schoolType == .fos && gradeYear <= 12 {
                 practicalPerformanceCard
                     .padding(.horizontal, 16)
-                    .softFadeIn(enabled: animationsOn, delay: 0.16, offset: 12)
+                    .softFadeIn(enabled: animationsOn, delay: 0.18, offset: 12)
             }
             if fobosoSummary.maxPoints > 0 {
                 pointsCard
                     .padding(.horizontal, 16)
-                    .softFadeIn(enabled: animationsOn, delay: 0.20, offset: 12)
+                    .softFadeIn(enabled: animationsOn, delay: 0.22, offset: 12)
             }
             subjectCountRow
                 .padding(.horizontal)
-                .softFadeIn(enabled: animationsOn, delay: 0.22, offset: 12)
+                .softFadeIn(enabled: animationsOn, delay: 0.24, offset: 12)
             droppedHalfYearsCard
                 .padding(.horizontal, 16)
-                .softFadeIn(enabled: animationsOn, delay: 0.25, offset: 12)
+                .softFadeIn(enabled: animationsOn, delay: 0.27, offset: 12)
             subjectListSection
                 .padding(.horizontal)
-                .softFadeIn(enabled: animationsOn, delay: 0.28, offset: 12)
+                .softFadeIn(enabled: animationsOn, delay: 0.30, offset: 12)
             if maxDroppedHalfYears > 0 && limitReached {
                 Text("Du hast bereits die maximal erlaubte Anzahl an gestrichenen Halbjahren ausgewählt. Entferne zuerst eine Auswahl, um ein weiteres Halbjahr zu streichen.")
                     .font(.footnote)
@@ -468,6 +510,77 @@ struct FinalGradeView: View {
                         Text("antippen")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        if hasExamSimulation {
+                            PillBadge(
+                                text: "Simulation aktiv",
+                                systemImage: "wand.and.stars",
+                                foreground: .pink,
+                                background: Color.pink.opacity(0.16)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var whatIfCard: some View {
+        SettingsCard(
+            title: "Was-wäre-wenn",
+            subtitle: "Abschlussnote & Abiturnoten simulieren",
+            systemImage: "wand.and.stars",
+            accent: .pink
+        ) {
+            if examSubjectHandles.isEmpty {
+                Text("Lege zuerst Abiturfächer an, um Prüfungsnoten simulieren zu können.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 10) {
+                        StatChip(title: "Aktuell", value: baselineFinalGradeText, accent: .indigo)
+                        StatChip(title: "Simulation", value: finalGradeText, accent: .pink)
+                        StatChip(title: "Δ", value: formatFinalGradeDelta(base: baselineFinalGradeValue, simulated: simulatedFinalGradeValue), accent: .orange)
+                    }
+                    Text(hasExamSimulation ? "Simulation aktiv: Eingaben werden nicht gespeichert und gelten nur hier." : "Füge fiktive Prüfungsnoten hinzu oder teste zusätzliche Noten – alles bleibt lokal.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    HStack(spacing: 10) {
+                        Button {
+                            showWhatIfGradesSheet = true
+                        } label: {
+                            Label("Noten simulieren", systemImage: "plus.circle")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(SoftTintButtonStyle(accent: .indigo))
+
+                        Button {
+                            showWhatIfExamSheet = true
+                        } label: {
+                            Label("Abitur simulieren", systemImage: "wand.and.stars")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(SoftTintButtonStyle(accent: .pink))
+                    }
+
+                    if hasExamSimulation {
+                        Button {
+                            simulatedExamPoints = [:]
+                        } label: {
+                            Label("Simulation zurücksetzen", systemImage: "arrow.counterclockwise")
+                                .font(.caption.weight(.semibold))
+                                .padding(.vertical, 8)
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.top, 4)
+                        .padding(.horizontal, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(Color.pink.opacity(0.10))
+                        )
                     }
                 }
             }
@@ -1029,6 +1142,19 @@ struct FinalGradeView: View {
         return formatter.string(from: date)
     }
 
+    private func examPoint(for subjectName: String, points: [String: Double?]? = nil) -> Double? {
+        let source = points ?? activeExamPointsBySubject
+        return source[subjectName] ?? nil
+    }
+
+    private func mergedExamPoints(base: [String: Double?], overrides: [String: Double]) -> [String: Double?] {
+        var merged = base
+        for (key, value) in overrides {
+            merged[key] = value
+        }
+        return merged
+    }
+
     @ViewBuilder
     private func seminarComponentRow(title: String, value: Double?) -> some View {
         HStack {
@@ -1045,21 +1171,31 @@ struct FinalGradeView: View {
     }
 
     private var finalGradeValueForColor: Double? {
-        fobosoSummary.grade ?? finalAverage
+        finalGradeValue(using: activeExamPointsBySubject)
     }
 
     private var finalGradeText: String {
-        if fobosoSummary.maxPoints > 0 {
-            let decimals = max(1, min(3, finalGradeToFixed))
-            if let raw = fobosoSummary.gradeRaw {
-                let rawDisplay = max(1, raw)
-                return String(format: "%.\(decimals)f", rawDisplay)
-            }
-            if let g = fobosoSummary.grade {
-                return String(format: "%.\(decimals)f", g)
-            }
-        }
-        return formatAverage(finalAverage)
+        finalGradeText(for: activeExamPointsBySubject)
+    }
+
+    private var baselineFinalGradeText: String {
+        finalGradeText(for: examPointsBySubject)
+    }
+
+    private var baselineFinalGradeValue: Double? {
+        finalGradeValue(using: examPointsBySubject)
+    }
+
+    private var simulatedFinalGradeValue: Double? {
+        finalGradeValue(using: activeExamPointsBySubject)
+    }
+
+    private func formatFinalGradeDelta(base: Double?, simulated: Double?) -> String {
+        guard let base, let simulated else { return "-" }
+        let delta = simulated - base
+        if abs(delta) < 0.005 { return "0.00" }
+        let prefix = delta > 0 ? "+" : ""
+        return "\(prefix)\(String(format: "%.2f", delta))"
     }
 
     private func gradeColor(_ value: Double?) -> Color {
@@ -1084,6 +1220,26 @@ struct FinalGradeView: View {
         if v <= 3.4 { return "Stabiler Schnitt" }
         if v <= 4.4 { return "Ausreichender Schnitt - Dran bleiben!"}
         return "Achtung: Schnitt im roten Bereich"
+    }
+
+    private func finalGradeValue(using points: [String: Double?]) -> Double? {
+        let summary = makeFobosoSummary(examPoints: points)
+        return summary.grade ?? abiturFinalAverage(points: points) ?? gradesOnlyFinalAverage
+    }
+
+    private func finalGradeText(for points: [String: Double?]) -> String {
+        let summary = makeFobosoSummary(examPoints: points)
+        let decimals = max(1, min(3, finalGradeToFixed))
+        if summary.maxPoints > 0 {
+            if let raw = summary.gradeRaw {
+                let rawDisplay = max(1, raw)
+                return String(format: "%.\(decimals)f", rawDisplay)
+            }
+            if let g = summary.grade {
+                return String(format: "%.\(decimals)f", g)
+            }
+        }
+        return formatAverage(abiturFinalAverage(points: points) ?? gradesOnlyFinalAverage)
     }
 
     private func roundedExamPoints(_ value: Double?) -> Double? {
@@ -1256,14 +1412,13 @@ struct FinalGradeView: View {
         return total / totalWeight
     }
 
-    private var abiturFinalAverage: Double? {
+    private func abiturFinalAverage(points: [String: Double?]? = nil) -> Double? {
         let es = examSubjectHandles
         guard !es.isEmpty else { return nil }
         var subjectFinals: [Double] = []
         let examWeight = examWeightFactor
-
         for handle in es {
-            let examPoints = examPointsBySubject[handle.subject.name] ?? nil
+            let examPoints = examPoint(for: handle.subject.name, points: points)
             guard let rawExam = examPoints else { continue }
             let ep = roundedExamPoints(rawExam) ?? rawExam
 
@@ -1290,12 +1445,12 @@ struct FinalGradeView: View {
         return sum / Double(subjectFinals.count)
     }
 
-    private var finalAverage: Double? {
-        abiturFinalAverage ?? gradesOnlyFinalAverage
+    private var abiturFinalAverageValue: Double? {
+        abiturFinalAverage(points: nil)
     }
 
-    private var examSubjectsWithPoints: [SubjectHandle] {
-        examSubjectHandles.filter { (examPointsBySubject[$0.subject.name] ?? nil) != nil }
+    private var finalAverage: Double? {
+        abiturFinalAverageValue ?? gradesOnlyFinalAverage
     }
 
     private var statusDetailReasons: [String] {
@@ -1417,20 +1572,20 @@ struct FinalGradeView: View {
         return total / Double(sortedPracticalGrades.count)
     }
 
-    private var fobosoSummary: (examCount: Int,
-                                halfYearCount: Int,
-                                examPointsDouble: Double,
-                                halfYearPoints: Double,
-                                seminarPointsDouble: Double,
-                                totalPoints: Double,
-                                maxPoints: Int,
-                                grade: Double?,
-                                gradeRaw: Double?) {
-        let examCount = examSubjectsWithPoints.count
+    private func makeFobosoSummary(examPoints: [String: Double?]? = nil) -> (examCount: Int,
+                                                                              halfYearCount: Int,
+                                                                              examPointsDouble: Double,
+                                                                              halfYearPoints: Double,
+                                                                              seminarPointsDouble: Double,
+                                                                              totalPoints: Double,
+                                                                              maxPoints: Int,
+                                                                              grade: Double?,
+                                                                              gradeRaw: Double?) {
+        let examCount = examSubjectsWithPoints(using: examPoints).count
         let examWeightDouble = examWeightFactor
         var examPointsDouble = 0.0
-        for s in examSubjectsWithPoints {
-            if let raw = examPointsBySubject[s.subject.name] ?? nil {
+        for s in examSubjectsWithPoints(using: examPoints) {
+            if let raw = examPoint(for: s.subject.name, points: examPoints) {
                 let v = roundedExamPoints(raw) ?? raw
                 examPointsDouble += v * examWeightDouble
             }
@@ -1460,48 +1615,47 @@ struct FinalGradeView: View {
         return (examCount, halfYearCount, examPointsDouble, halfYearPoints, seminarPoints, totalPoints, maxPoints, grade, gradeRaw)
     }
 
-    private var subjectFinalResults: [(handle: SubjectHandle, finalPoints: Double?)] {
-        let es = examSubjectHandles
-        guard !es.isEmpty else { return [] }
-        var results: [(SubjectHandle, Double?)] = []
-        let examWeight = examWeightFactor
-        for handle in es {
-            let rawExamPoints = examPointsBySubject[handle.subject.name] ?? nil
-            let examPoints = rawExamPoints.flatMap { roundedExamPoints($0) ?? $0 }
-            let dropOption = dropSelections[handle.id] ?? .none
-            let isHalfYear1Dropped = (dropOption == .one)
-            let isHalfYear2Dropped = (dropOption == .two)
-            let first = isHalfYear1Dropped ? nil : calculateHalfYearAverageForSubject(handle.grades, handle.subject.type, 1)
-            let second = isHalfYear2Dropped ? nil : calculateHalfYearAverageForSubject(handle.grades, handle.subject.type, 2)
-            var components: [(Double, Double)] = []
-            if let f = first { components.append((f, 1)) }
-            if let sec = second { components.append((sec, 1)) }
-            if let ep = examPoints { components.append((ep, examWeight)) }
-            if components.isEmpty {
-                results.append((handle, nil))
-                continue
-            }
-            let totalWeight = components.reduce(0) { $0 + $1.1 }
-            let totalValue = components.reduce(0) { $0 + $1.0 * $1.1 }
-            results.append((handle, totalValue / totalWeight))
-        }
-        return results
+    private var fobosoSummary: (examCount: Int,
+                                halfYearCount: Int,
+                                examPointsDouble: Double,
+                                halfYearPoints: Double,
+                                seminarPointsDouble: Double,
+                                totalPoints: Double,
+                                maxPoints: Int,
+                                grade: Double?,
+                                gradeRaw: Double?) {
+        makeFobosoSummary(examPoints: nil)
     }
 
-    private var hasAllExamPoints: Bool {
+    private var baselineFobosoSummary: (examCount: Int,
+                                        halfYearCount: Int,
+                                        examPointsDouble: Double,
+                                        halfYearPoints: Double,
+                                        seminarPointsDouble: Double,
+                                        totalPoints: Double,
+                                        maxPoints: Int,
+                                        grade: Double?,
+                                        gradeRaw: Double?) {
+        makeFobosoSummary(examPoints: examPointsBySubject)
+    }
+
+    private func hasAllExamPoints(using points: [String: Double?]? = nil) -> Bool {
         let es = examSubjectHandles
         guard es.count >= requiredExamCount else { return false }
-        return es.allSatisfy { (examPointsBySubject[$0.subject.name] ?? nil) != nil }
+        return es.allSatisfy { examPoint(for: $0.subject.name, points: points) != nil }
     }
 
-    private var examAveragePoints: Double? {
-        guard hasAllExamPoints else { return nil }
+    private var hasAllExamPointsActive: Bool { hasAllExamPoints(using: nil) }
+    private var hasAllExamPoints: Bool { hasAllExamPointsActive }
+
+    private func examAveragePoints(using points: [String: Double?]? = nil) -> Double? {
+        guard hasAllExamPoints(using: points) else { return nil }
         let es = examSubjectHandles
         guard !es.isEmpty else { return nil }
         var total = 0.0
         var count = 0
         for handle in es {
-            if let v = examPointsBySubject[handle.subject.name] ?? nil {
+            if let v = examPoint(for: handle.subject.name, points: points) {
                 total += v
                 count += 1
             }
@@ -1510,8 +1664,12 @@ struct FinalGradeView: View {
         return total / Double(count)
     }
 
+    private var examAveragePoints: Double? {
+        examAveragePoints(using: nil)
+    }
+
     private var weakExamCounts: (weighted: Int, raw: Int, zeros: Int) {
-        guard hasAllExamPoints else { return (0, 0, 0) }
+        guard hasAllExamPointsActive else { return (0, 0, 0) }
         var weighted = 0
         var raw = 0
         var zeros = 0
@@ -1617,11 +1775,23 @@ struct FinalGradeView: View {
         }
     }
 
-    private var examSubjectFinals: [(handle: SubjectHandle, final: Double?)] {
-        examSubjectsWithPoints.map { handle in
-            let ep = examPointsBySubject[handle.subject.name] ?? nil
+    private func examSubjectsWithPoints(using points: [String: Double?]? = nil) -> [SubjectHandle] {
+        examSubjectHandles.filter { examPoint(for: $0.subject.name, points: points) != nil }
+    }
+
+    private var examSubjectsWithPoints: [SubjectHandle] {
+        examSubjectsWithPoints(using: nil)
+    }
+
+    private func examSubjectFinals(using points: [String: Double?]? = nil) -> [(handle: SubjectHandle, final: Double?)] {
+        examSubjectsWithPoints(using: points).map { handle in
+            let ep = examPoint(for: handle.subject.name, points: points)
             return (handle, ep)
         }
+    }
+
+    private var examSubjectFinals: [(handle: SubjectHandle, final: Double?)] {
+        examSubjectFinals(using: nil)
     }
 
     private var abiturExamAverage: Double? {
