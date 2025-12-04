@@ -28,6 +28,8 @@ struct HomeworkDetailSheet: View {
         let fmt = DateFormatter()
         fmt.dateStyle = .full
         fmt.timeStyle = .none
+        fmt.locale = .autoupdatingCurrent
+        fmt.calendar = .autoupdatingCurrent
         return fmt.string(from: due)
     }
 
@@ -36,6 +38,8 @@ struct HomeworkDetailSheet: View {
         let fmt = DateFormatter()
         fmt.dateStyle = .medium
         fmt.timeStyle = .short
+        fmt.locale = .autoupdatingCurrent
+        fmt.calendar = .autoupdatingCurrent
         return fmt.string(from: reminder)
     }
 
@@ -59,6 +63,8 @@ struct HomeworkDetailSheet: View {
         let fmt = DateFormatter()
         fmt.dateStyle = .medium
         fmt.timeStyle = .none
+        fmt.locale = .autoupdatingCurrent
+        fmt.calendar = .autoupdatingCurrent
         return "\(fmt.string(from: homework.createdAt))"
     }
 

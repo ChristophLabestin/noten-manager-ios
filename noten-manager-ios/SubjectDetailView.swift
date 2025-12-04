@@ -800,6 +800,8 @@ struct SubjectDetailView: View {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = exam.hasTime ? .short : .none
+        formatter.locale = .autoupdatingCurrent
+        formatter.calendar = .autoupdatingCurrent
         let dateString = formatter.string(from: exam.date)
         return "Geschrieben am \(dateString)"
     }

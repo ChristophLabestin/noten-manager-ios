@@ -299,6 +299,15 @@ struct PraktikumDetailView: View {
         return "Praktikum"
     }
 
+    private var dateFormatter: DateFormatter {
+        let df = DateFormatter()
+        df.dateStyle = .medium
+        df.timeStyle = .none
+        df.locale = .autoupdatingCurrent
+        df.calendar = .autoupdatingCurrent
+        return df
+    }
+
     private func gradeColor(_ value: Double?) -> Color {
         guard let v = value else { return .secondary }
         if v >= 7 { return .green }
@@ -346,13 +355,6 @@ struct PraktikumDetailView: View {
             isWorking = false
             showDeleteAllAlert = false
         }
-    }
-
-    private var dateFormatter: DateFormatter {
-        let df = DateFormatter()
-        df.dateStyle = .medium
-        df.timeStyle = .none
-        return df
     }
 
     private func actionButton(icon: String, tint: Color, label: String, action: @escaping () -> Void) -> some View {

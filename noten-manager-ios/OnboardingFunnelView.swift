@@ -252,7 +252,7 @@ struct OnboardingFunnelView: View {
                         }
 
                         if showSignOutButton {
-                            VStack(alignment: .leading, spacing: 8) {
+                            VStack(alignment: .center, spacing: 8) {
                                 Button {
                                     authManager.signOut()
                                     dismiss()
@@ -265,6 +265,7 @@ struct OnboardingFunnelView: View {
                                 Text("Du kannst den Assistenten jederzeit erneut starten.")
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.center)
                             }
                             .padding(.top, 6)
                         }

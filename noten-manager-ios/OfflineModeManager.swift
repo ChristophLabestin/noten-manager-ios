@@ -129,11 +129,10 @@ final class OfflineModeManager: ObservableObject {
     }
 
     func availableSnapshot() -> OfflineSnapshot? {
-        if let snapshot = cachedSnapshot ?? (try? loadSnapshotFromDisk()) {
-            cachedSnapshot = snapshot
+        if let snapshot = cachedSnapshot {
             return snapshot
         }
-        return nil
+        return try? loadSnapshotFromDisk()
     }
 
     func activateOfflineMode(manual: Bool = false) {

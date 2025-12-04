@@ -46,6 +46,8 @@ struct GradeDetailSheet: View {
         let fmt = DateFormatter()
         fmt.dateStyle = .full
         fmt.timeStyle = .none
+        fmt.locale = .autoupdatingCurrent
+        fmt.calendar = .autoupdatingCurrent
         return fmt.string(from: grade.date)
     }
 
