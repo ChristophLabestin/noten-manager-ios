@@ -2,6 +2,7 @@ import AppIntents
 import Foundation
 import WidgetKit
 
+@available(iOS 17.0, *)
 struct SelectedExamIntent: WidgetConfigurationIntent {
     static var title: LocalizedStringResource { "Termin auswählen" }
     static var description: IntentDescription { "Zeigt einen Termin oder eine Klausur aus deiner Liste." }
@@ -10,6 +11,7 @@ struct SelectedExamIntent: WidgetConfigurationIntent {
     var exam: ExamSelectionEntity?
 }
 
+@available(iOS 17.0, *)
 struct ExamSelectionEntity: AppEntity, Identifiable {
     static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "Termin")
     static var defaultQuery = ExamQuery()
@@ -45,6 +47,7 @@ struct ExamSelectionEntity: AppEntity, Identifiable {
     }
 }
 
+@available(iOS 17.0, *)
 struct ExamQuery: EntityQuery {
     func entities(for identifiers: [ExamSelectionEntity.ID]) async throws -> [ExamSelectionEntity] {
         let exams = loadExams()

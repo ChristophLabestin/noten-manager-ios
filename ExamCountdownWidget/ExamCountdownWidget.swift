@@ -326,6 +326,7 @@ private struct GeneralEventsView: View {
 
 // MARK: - Termin auswählen
 
+@available(iOS 17.0, *)
 struct ExamCountdownWidget: Widget {
     let kind: String = "de.christophlabestin.noten-manager-ios.exam-countdown"
 
@@ -339,12 +340,14 @@ struct ExamCountdownWidget: Widget {
     }
 }
 
+@available(iOS 17.0, *)
 struct SelectedExamEntry: TimelineEntry {
     let date: Date
     let exam: WidgetExam?
     let configuration: SelectedExamIntent
 }
 
+@available(iOS 17.0, *)
 struct SelectedExamProvider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> SelectedExamEntry {
         let sample = WidgetDataSource.placeholderSnapshot().allExams.first
@@ -376,6 +379,7 @@ struct SelectedExamProvider: AppIntentTimelineProvider {
     }
 }
 
+@available(iOS 17.0, *)
 private struct SelectedExamView: View {
     let entry: SelectedExamEntry
     @Environment(\.widgetFamily) private var family
@@ -451,15 +455,23 @@ private struct WidgetCard<Content: View>: View {
     }
 
     var body: some View {
-        content()
+        let base = content()
             .padding(.vertical, family == .systemSmall ? 10 : 12)
             .padding(.horizontal, family == .systemSmall ? 4 : 6)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .containerBackground(for: .widget) {
+            .foregroundStyle(.white)
+
+        if #available(iOS 17.0, *) {
+            base.containerBackground(for: .widget) {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(gradient)
             }
-            .foregroundStyle(.white)
+        } else {
+            base.background(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(gradient)
+            )
+        }
     }
 
     private var cornerRadius: CGFloat {
