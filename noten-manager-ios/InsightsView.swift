@@ -5,6 +5,7 @@ struct InsightsView: View {
 
     @State private var showHomeworkSheet: Bool = false
     @State private var showExamSheet: Bool = false
+    @State private var showWhatIfMode: Bool = false
 
     private var subjectsWithoutFachreferat: [Subject] {
         store.sortedSubjectsForDisplay(store.subjects.filter { $0.name != "Fachreferat" })
@@ -192,6 +193,27 @@ struct InsightsView: View {
                 }
                 .softFadeIn(enabled: animationsOn, delay: 0.03, offset: 12)
 
+                SettingsCard(
+                    title: "Was-wäre-wenn",
+                    subtitle: "Schnitt mit fiktiven Noten testen",
+                    systemImage: "wand.and.stars",
+                    accent: .pink
+                ) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Trage hypothetische Noten ein und sieh sofort, wie sich dein Schnitt verändert. Alles bleibt lokal und wird nicht gespeichert.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Button {
+                            showWhatIfMode = true
+                        } label: {
+                            Label("Was-wäre-wenn-Modus öffnen", systemImage: "sparkles")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(SoftTintButtonStyle(accent: .pink))
+                    }
+                }
+                .softFadeIn(enabled: animationsOn, delay: 0.06, offset: 12)
+
                 // Halbjahresvergleich
                 let hj1 = halfYearAverage(1)
                 let hj2 = halfYearAverage(2)
@@ -332,6 +354,10 @@ struct InsightsView: View {
         }
         .sheet(isPresented: $showExamSheet) {
             ExamListView()
+                .environmentObject(store)
+        }
+        .sheet(isPresented: $showWhatIfMode) {
+            WhatIfModeView()
                 .environmentObject(store)
         }
         .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
