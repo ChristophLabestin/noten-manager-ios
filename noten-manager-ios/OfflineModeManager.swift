@@ -2,6 +2,7 @@ import Foundation
 import Network
 import Combine
 import FirebaseFirestore
+import WidgetKit
 
 struct OfflineSnapshot: Codable {
     let userId: String
@@ -69,6 +70,7 @@ final class OfflineModeManager: ObservableObject {
     private let manualOfflineKey = "offline_manual_mode_active"
     private let snapshotFileName = "offline-cache.json"
     private let offlineWindow: TimeInterval = 60 * 60 * 24 * 3 // 3 Tage
+    private let appGroupId = "group.de.christophlabestin.noten-manager-ios"
 
     init() {
         let enc = JSONEncoder()
@@ -173,13 +175,19 @@ final class OfflineModeManager: ObservableObject {
         do {
             let data = try encoder.encode(snapshot)
             try data.write(to: snapshotURL(), options: .atomic)
+            persistSnapshotToSharedContainer(data)
             cachedSnapshot = snapshot
+            refreshWidgets()
         } catch {
             // optional: logging
         }
     }
 
     private func loadSnapshotFromDisk() throws -> OfflineSnapshot {
+        if let sharedURL = sharedSnapshotURL(),
+           let sharedData = try? Data(contentsOf: sharedURL) {
+            return try decoder.decode(OfflineSnapshot.self, from: sharedData)
+        }
         let data = try Data(contentsOf: snapshotURL())
         return try decoder.decode(OfflineSnapshot.self, from: data)
     }
@@ -187,6 +195,28 @@ final class OfflineModeManager: ObservableObject {
     private func snapshotURL() -> URL {
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         return dir.appendingPathComponent(snapshotFileName)
+    }
+
+    private func sharedSnapshotURL() -> URL? {
+        FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: appGroupId)?
+            .appendingPathComponent(snapshotFileName)
+    }
+
+    private func persistSnapshotToSharedContainer(_ data: Data) {
+        guard let target = sharedSnapshotURL() else { return }
+        do {
+            try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try data.write(to: target, options: .atomic)
+        } catch {
+            // optional: logging
+        }
+    }
+
+    private func refreshWidgets() {
+        if #available(iOS 14.0, *) {
+            WidgetCenter.shared.reloadAllTimelines()
+        }
     }
 
     private func setManualOfflinePinned(_ active: Bool) {

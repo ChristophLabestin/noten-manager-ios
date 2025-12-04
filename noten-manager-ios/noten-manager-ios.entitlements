@@ -13,5 +13,9 @@
 		<string>applinks:fosbos-notenmanager.de</string>
 		<string>applinks:www.fosbos-notenmanager.de</string>
 	</array>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.de.christophlabestin.noten-manager-ios</string>
+	</array>
 </dict>
 </plist>

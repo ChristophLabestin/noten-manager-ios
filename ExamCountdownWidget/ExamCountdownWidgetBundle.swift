@@ -11,8 +11,11 @@ import SwiftUI
 @main
 struct ExamCountdownWidgetBundle: WidgetBundle {
     var body: some Widget {
+        UpcomingExamsWidget()
+        RemainingYearExamsWidget()
+        GeneralEventsWidget()
+        OpenHomeworkWidget()
         ExamCountdownWidget()
-        ExamCountdownWidgetControl()
         if #available(iOS 16.2, *) {
             ExamCountdownWidgetLiveActivity()
         }
