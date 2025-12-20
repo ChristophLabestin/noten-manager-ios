@@ -185,6 +185,7 @@ struct AddFachreferatView: View {
             try await store.setFachreferatToFirestore(subjectName: subjectName, grade: grade, date: date, note: note.isEmpty ? nil : note, using: key)
             dismiss()
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             self.error = error.localizedDescription
         }
         isSaving = false

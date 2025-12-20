@@ -112,6 +112,7 @@ struct BurgerMenuView: View {
                 }
             }
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             displayName = ""
         }
     }
@@ -146,6 +147,7 @@ struct LogoutButtonView: View {
             try Auth.auth().signOut()
             OfflineModeManager.shared.clearOfflineData()
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // Optional: Fehler anzeigen
         }
     }

@@ -293,6 +293,7 @@ struct GroupSubjectManagementView: View {
             attachSelection.removeAll()
             syncSelections()
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             errorMessage = error.localizedDescription
         }
     }
@@ -330,6 +331,7 @@ struct GroupSubjectManagementView: View {
             try await store.deleteGroupSubject(groupId: groupId, subjectId: gs.id)
             infoMessage = "\"\(gs.name)\" entfernt."
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             errorMessage = error.localizedDescription
         }
     }

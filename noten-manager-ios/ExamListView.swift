@@ -585,6 +585,7 @@ struct ExamListView: View {
                 )
             }
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // Optional: Fehlerbehandlung oder Logging
         }
     }

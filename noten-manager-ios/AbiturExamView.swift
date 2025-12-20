@@ -601,6 +601,7 @@ struct AbiturExamView: View {
                 return s
             }
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional: Fehlerbehandlung
         }
     }

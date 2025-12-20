@@ -390,6 +390,7 @@ struct HomeworkListView: View {
                 )
             }
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // Optional: Fehlerbehandlung oder Logging
         }
     }
@@ -586,6 +587,7 @@ private struct LocalHomeworkReminderSheet: View {
             }
             dismiss()
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             self.error = error.localizedDescription
         }
         isSaving = false

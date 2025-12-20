@@ -9,7 +9,7 @@ import AuthenticationServices
 
 enum AuthField: Hashable {
     case loginEmail, loginPassword
-    case registerName, registerEmail, registerPassword, registerConfirm
+    case registerName, registerEmail, registerPassword
 }
 
 struct AuthView: View {
@@ -24,7 +24,6 @@ struct AuthView: View {
 
     @State private var loginEmail: String = ""
     @State private var loginPassword: String = ""
-    @State private var rememberMe: Bool = true
     @State private var enableBiometricLogin: Bool = false
     @State private var applyBiometricAfterLogin: Bool = false
     @State private var biometricOptionAvailable: Bool = false
@@ -33,8 +32,6 @@ struct AuthView: View {
     @State private var registerName: String = ""
     @State private var registerEmail: String = ""
     @State private var registerPassword: String = ""
-    @State private var registerPasswordConfirm: String = ""
-
     @State private var resetEmail: String = ""
     @State private var showResetSheet: Bool = false
     @State private var resetInfo: String?
@@ -44,7 +41,6 @@ struct AuthView: View {
 
     // Farben aus variables.scss
     private var primaryColor: Color { Color(hex: "#1e3a8a") }
-    private var primaryHoverColor: Color { Color(hex: "#2563eb") }
     private var primaryDarkColor: Color { Color(hex: "#3b82f6") }
     private var textDarkColor: Color { Color(hex: "#111827") }
     private var textDarkDark: Color { Color(hex: "#f9fafb") }
@@ -53,8 +49,6 @@ struct AuthView: View {
     private var errorColor: Color { Color(hex: "#dc2626") }
 
     private var accentPrimary: Color { colorScheme == .dark ? primaryDarkColor : primaryColor }
-    private var accentSecondary: Color { colorScheme == .dark ? primaryDarkColor.opacity(0.85) : primaryHoverColor }
-
     private var labelColor: Color { colorScheme == .dark ? textDarkDark : textDarkColor }
     private var subLabelColor: Color { colorScheme == .dark ? textMediumDark : textMediumColor }
 
@@ -97,30 +91,6 @@ struct AuthView: View {
         }
     }
 
-    private var cardBackground: LinearGradient {
-        LinearGradient(
-            colors: [
-                Color.white.opacity(colorScheme == .dark ? 0.08 : 0.95),
-                Color.white.opacity(colorScheme == .dark ? 0.02 : 0.85)
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-    }
-
-    private var cardStroke: LinearGradient {
-        LinearGradient(
-            colors: [
-                Color.white.opacity(colorScheme == .dark ? 0.12 : 0.35),
-                accentPrimary.opacity(colorScheme == .dark ? 0.18 : 0.20)
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-    }
-
-    private var cardShadow: Color { colorScheme == .dark ? Color.black.opacity(0.65) : Color.black.opacity(0.16) }
-
     private var pillBackground: Color { colorScheme == .dark ? Color.white.opacity(0.08) : Color.white.opacity(0.82) }
 
     private var inputBackground: LinearGradient {
@@ -137,7 +107,7 @@ struct AuthView: View {
     private var currentFields: [AuthField] {
         isLoginTab
         ? [.loginEmail, .loginPassword]
-        : [.registerName, .registerEmail, .registerPassword, .registerConfirm]
+        : [.registerName, .registerEmail, .registerPassword]
     }
 
     var body: some View {
@@ -146,12 +116,12 @@ struct AuthView: View {
                 .ignoresSafeArea()
 
             ScrollView(.vertical, showsIndicators: false) {
-                VStack(spacing: 22) {
+                VStack(spacing: 16) {
                     formCard
                 }
-                .padding(.horizontal, 18)
-                .padding(.top, 14)
-                .padding(.bottom, 30)
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 24)
             }
             .hideKeyboardOnTap()
             .scrollDismissesKeyboard(.interactively)
@@ -192,45 +162,8 @@ struct AuthView: View {
     }
 
     private var formCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center, spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    accentPrimary.opacity(0.92),
-                                    accentSecondary.opacity(0.86)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 48, height: 48)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(Color.white.opacity(0.30), lineWidth: 1)
-                        )
-
-                    Image(systemName: "lock.shield.fill")
-                        .font(.system(size: 20, weight: .bold))
-                        .foregroundStyle(Color.white)
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(isLoginTab ? "Willkommen zurück" : "Neuer Account")
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundStyle(labelColor)
-                    Text(isLoginTab
-                         ? "Melde dich an und synchronisiere deine Noten."
-                         : "Erstelle dein Konto, sichere deine Leistungen.")
-                    .font(.subheadline)
-                    .foregroundStyle(subLabelColor)
-                }
-
-                Spacer()
-            }
-
+        VStack(alignment: .leading, spacing: 14) {
+            authHeader
             tabs
 
             if isLoginTab {
@@ -265,16 +198,72 @@ struct AuthView: View {
                     .foregroundStyle(subLabelColor)
             }
         }
-        .padding(14)
         .frame(maxWidth: 520)
         .frame(maxWidth: .infinity)
-        .background(cardBackground)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .stroke(cardStroke, lineWidth: 1)
-        )
-        .shadow(color: cardShadow, radius: 30, x: 0, y: 14)
+    }
+
+    private var authHeader: some View {
+        VStack(spacing: 10) {
+            authHero
+            Text(isLoginTab ? "Willkommen zurück" : "Neuer Account")
+                .font(.title2.weight(.bold))
+                .foregroundStyle(labelColor)
+                .multilineTextAlignment(.center)
+            Text(isLoginTab
+                 ? "Melde dich an und synchronisiere deine Noten."
+                 : "Erstelle dein Konto, sichere deine Leistungen.")
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(subLabelColor)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 18)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.bottom, 2)
+    }
+
+    private var authHero: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.indigo.opacity(colorScheme == .dark ? 0.55 : 0.35),
+                            Color.cyan.opacity(colorScheme == .dark ? 0.28 : 0.22),
+                            Color.clear
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 110, height: 110)
+                .rotationEffect(.degrees(colorScheme == .dark ? 2 : -2))
+
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(colorScheme == .dark ? 0.22 : 0.38),
+                            Color.white.opacity(0.05)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 1.1
+                )
+                .frame(width: 98, height: 98)
+
+            Image("AppIconPreviewDefault")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 82, height: 82)
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .shadow(
+                    color: Color.black.opacity(colorScheme == .dark ? 0.35 : 0.18),
+                    radius: 10,
+                    x: 0,
+                    y: 6
+                )
+        }
     }
 
     private var tabs: some View {
@@ -296,7 +285,7 @@ struct AuthView: View {
     }
 
     private var loginForm: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 8) {
             InputField(
                 title: "E-Mail",
                 placeholder: "example@email.com",
@@ -328,20 +317,8 @@ struct AuthView: View {
             )
 
             VStack(spacing: 8) {
-                toggleRow(
-                    title: "Eingeloggt bleiben",
-                    subtitle: "Wir merken uns deine Session auf diesem Gerät.",
-                    systemImage: "clock.arrow.circlepath",
-                    binding: $rememberMe
-                )
-
                 if biometricOptionAvailable {
-                    toggleRow(
-                        title: "\(biometricManager.biometryName()) zum Entsperren",
-                        subtitle: "Nutze Biometrie nach dem ersten Login.",
-                        systemImage: biometricManager.biometryType == .faceID ? "faceid" : "touchid",
-                        binding: $enableBiometricLogin
-                    )
+                    biometricToggleRow
                 }
 
                 if loginFailedAttempts >= 2 {
@@ -384,7 +361,7 @@ struct AuthView: View {
     }
 
     private var registerForm: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 8) {
             InputField(
                 title: "Anzeigename",
                 placeholder: "Name",
@@ -431,35 +408,14 @@ struct AuthView: View {
                 textContentType: .newPassword
             )
 
-            InputField(
-                title: "Passwort bestätigen",
-                placeholder: "********",
-                text: $registerPasswordConfirm,
-                icon: "checkmark.shield.fill",
-                isSecure: true,
-                background: inputBackground,
-                labelColor: subLabelColor,
-                textColor: labelColor,
-                accent: accentPrimary,
-                field: .registerConfirm,
-                focus: $activeField,
-                allowsReveal: true,
-                textContentType: .newPassword
-            )
-
             PrimaryButton(
                 title: "Registrieren",
                 isLoading: authManager.isLoading,
                 disabled: authManager.isLoading ||
                           registerName.isEmpty ||
                           registerEmail.isEmpty ||
-                          registerPassword.isEmpty ||
-                          registerPasswordConfirm.isEmpty
+                          registerPassword.isEmpty
             ) {
-                guard registerPassword == registerPasswordConfirm else {
-                    authManager.errorMessage = "Passwörter stimmen nicht überein."
-                    return
-                }
                 Task {
                     await authManager.signUp(
                         name: registerName,
@@ -649,48 +605,26 @@ struct AuthView: View {
         .buttonStyle(.plain)
     }
 
-    private func toggleRow(
-        title: String,
-        subtitle: String? = nil,
-        systemImage: String,
-        binding: Binding<Bool>
-    ) -> some View {
-        HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(accentPrimary.opacity(colorScheme == .dark ? 0.16 : 0.12))
-                    .frame(width: 40, height: 40)
-                Image(systemName: systemImage)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(accentPrimary)
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(labelColor)
-                if let subtitle, !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(.caption2)
-                        .foregroundStyle(subLabelColor)
-                }
-            }
-
+    private var biometricToggleRow: some View {
+        HStack(spacing: 10) {
+            Text("\(biometricManager.biometryName()) aktivieren")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(labelColor)
             Spacer()
-
-            Toggle("", isOn: binding)
+            Toggle("", isOn: $enableBiometricLogin)
                 .labelsHidden()
                 .toggleStyle(SwitchToggleStyle(tint: accentPrimary))
+                .scaleEffect(0.85)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
         .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.92))
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(colorScheme == .dark ? 0.04 : 0.75))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.black.opacity(colorScheme == .dark ? 0.14 : 0.06), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.black.opacity(colorScheme == .dark ? 0.16 : 0.06), lineWidth: 1)
         )
     }
 }

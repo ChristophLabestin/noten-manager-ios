@@ -178,6 +178,7 @@ final class OfflineModeManager: ObservableObject {
             cachedSnapshot = snapshot
             refreshWidgets()
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional: logging
         }
     }
@@ -208,6 +209,7 @@ final class OfflineModeManager: ObservableObject {
             try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
             try data.write(to: target, options: .atomic)
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional: logging
         }
     }

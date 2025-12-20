@@ -1294,6 +1294,7 @@ struct OnboardingFunnelView: View {
                     prepareGroupSubjectCandidates()
                 }
             } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
                 await MainActor.run {
                     joinError = error.localizedDescription
                 }

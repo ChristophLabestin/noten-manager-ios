@@ -174,6 +174,7 @@ struct EditPraktikumGradeView: View {
             )
             dismiss()
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             self.error = error.localizedDescription
         }
         isSaving = false

@@ -1022,6 +1022,7 @@ struct HelpCenterView: View {
             contactMessage = ""
         } catch {
             ticketError = "Ticket konnte nicht angelegt werden: \(error.localizedDescription)"
+            await ErrorLoggingService.logError(error, context: ["flow": "createSupportTicket"])
         }
         isSendingTicket = false
     }

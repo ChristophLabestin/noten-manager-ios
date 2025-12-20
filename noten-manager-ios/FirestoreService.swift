@@ -1,6 +1,6 @@
 // FirestoreService.swift
 import Foundation
-import FirebaseFirestore
+@preconcurrency import FirebaseFirestore
 
 final class FirestoreService {
     static let shared = FirestoreService()
@@ -43,5 +43,10 @@ final class FirestoreService {
             data["email"] = email
         }
         try await db.collection("supportTickets").addDocument(data: data)
+    }
+
+    func createAnonymousErrorLog(payload: AnonymousErrorLogPayload) {
+        let data = payload.firestoreData()
+        _ = db.collection("anonymousErrorLogs").addDocument(data: data)
     }
 }

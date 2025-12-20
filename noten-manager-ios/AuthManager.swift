@@ -60,6 +60,7 @@ final class AuthManager: ObservableObject {
                 self.errorMessage = self.mapAuthError(error)
                 self.isLoading = false
             }
+            await ErrorLoggingService.logError(error, context: ["flow": "signIn"])
             return outcome
         }
     }
@@ -84,6 +85,7 @@ final class AuthManager: ObservableObject {
                 self.errorMessage = self.mapAuthError(error)
                 self.isLoading = false
             }
+            await ErrorLoggingService.logError(error, context: ["flow": "signUp"])
         }
     }
 
@@ -93,6 +95,7 @@ final class AuthManager: ObservableObject {
             try await user.sendEmailVerification()
             return nil
         } catch {
+            await ErrorLoggingService.logError(error, context: ["flow": "sendVerificationEmail"])
             return mapAuthError(error)
         }
     }
@@ -109,6 +112,7 @@ final class AuthManager: ObservableObject {
                 self.errorMessage = self.mapAuthError(error)
                 self.isLoading = false
             }
+            await ErrorLoggingService.logError(error, context: ["flow": "resetPassword"])
         }
     }
 
@@ -153,6 +157,7 @@ final class AuthManager: ObservableObject {
                 self.errorMessage = self.mapAuthError(error)
                 self.isLoading = false
             }
+            await ErrorLoggingService.logError(error, context: ["flow": "signInWithGoogle"])
             return .failure
         }
     }
@@ -194,6 +199,7 @@ final class AuthManager: ObservableObject {
             } else {
                 errorMessage = mapAuthError(error)
             }
+            await ErrorLoggingService.logError(error, context: ["flow": "signInWithApple"])
             return .failure
         }
     }
@@ -310,6 +316,7 @@ final class AuthManager: ObservableObject {
         } catch {
             isLoading = false
             errorMessage = mapAuthError(error)
+            await ErrorLoggingService.logError(error, context: ["flow": "completeAppleSignIn"])
             return .failure
         }
     }

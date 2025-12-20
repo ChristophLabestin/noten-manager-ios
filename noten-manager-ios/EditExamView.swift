@@ -186,6 +186,7 @@ struct EditExamView: View {
                                             Text("Fach für das Fachreferat")
                                                 .font(.subheadline)
                                             Picker("Fachreferat-Fach", selection: $fachreferatSubjectName) {
+                                                Text("Bitte wählen").tag("")
                                                 ForEach(subjects, id: \.name) { s in
                                                     Text(s.name).tag(s.name)
                                                 }
@@ -208,6 +209,7 @@ struct EditExamView: View {
                                         Text("Fach")
                                             .font(.headline)
                                         Picker("Fach", selection: $subjectName) {
+                                            Text("Bitte wählen").tag("")
                                             ForEach(subjects, id: \.name) { s in
                                                 Text(s.name).tag(s.name)
                                             }
@@ -637,6 +639,7 @@ struct EditExamView: View {
             }
             dismiss()
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             self.error = error.localizedDescription
         }
         isSaving = false

@@ -4,6 +4,8 @@ import FirebaseFirestore
 
 struct HomeView: View {
     @EnvironmentObject var store: GradesStore
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     enum HalfYearFilter: Equatable {
         case all
@@ -29,6 +31,7 @@ struct HomeView: View {
     @State private var greetingAnimationSeed: UUID = UUID()
     @State private var greetingVisible: Bool = false
     @State private var upcomingHoliday: HolidayWindow?
+    @State private var animateDecorations: Bool = false
 
     private var subjectsWithoutFachreferat: [Subject] {
         store.subjects.filter { $0.name != "Fachreferat" }
@@ -44,6 +47,79 @@ struct HomeView: View {
     }
 
     private var animationsOn: Bool { store.animationsEnabled }
+    private var homePrimary: Color { store.theme == "feminine" ? Color(hex: "#ec4899") : Color(hex: "#1e3a8a") }
+    private var homeSecondary: Color { store.theme == "feminine" ? Color(hex: "#f472b6") : Color(hex: "#38bdf8") }
+    private var homeGlow: Color { store.theme == "feminine" ? Color(hex: "#f0abfc") : Color(hex: "#60a5fa") }
+    private var homeBackgroundGradient: LinearGradient {
+        LinearGradient(
+            colors: [
+                homePrimary.opacity(store.darkMode ? 0.32 : 0.16),
+                Color(hex: "#0b1021").opacity(store.darkMode ? 0.82 : 0.12),
+                Color(hex: "#eef2ff").opacity(store.darkMode ? 0.12 : 0.96)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    private var homeBackgroundLayers: some View {
+        ZStack {
+            homeBackgroundGradient
+
+            Circle()
+                .fill(homeSecondary.opacity(store.darkMode ? 0.35 : 0.18))
+                .frame(width: 360, height: 360)
+                .blur(radius: 150)
+                .offset(
+                    x: animateDecorations ? -160 : -120,
+                    y: animateDecorations ? -240 : -200
+                )
+
+            Circle()
+                .fill(homePrimary.opacity(store.darkMode ? 0.28 : 0.14))
+                .frame(width: 300, height: 300)
+                .blur(radius: 140)
+                .offset(
+                    x: animateDecorations ? 200 : 150,
+                    y: animateDecorations ? 160 : 120
+                )
+
+            Circle()
+                .fill(homeGlow.opacity(store.darkMode ? 0.22 : 0.12))
+                .frame(width: 240, height: 240)
+                .blur(radius: 130)
+                .offset(
+                    x: animateDecorations ? 30 : 10,
+                    y: animateDecorations ? -120 : -90
+                )
+
+            RoundedRectangle(cornerRadius: 48, style: .continuous)
+                .stroke(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(store.darkMode ? 0.12 : 0.28),
+                            Color.white.opacity(0.05)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+                .frame(width: 260, height: 260)
+                .rotationEffect(.degrees(animateDecorations ? 10 : -8))
+                .offset(x: animateDecorations ? -130 : -90, y: animateDecorations ? 240 : 200)
+
+            LinearGradient(
+                colors: [
+                    Color.white.opacity(store.darkMode ? 0.04 : 0.3),
+                    Color.clear
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .blendMode(.screen)
+        }
+    }
 
     // MARK: - Data preparation
 
@@ -408,118 +484,178 @@ struct HomeView: View {
 
     // MARK: - Header & Overview
 
+    private var homeHeroIcon: some View {
+        HomePanelIcon(systemName: "hand.wave.fill", accent: homePrimary)
+    }
+
+    private var homeHeroDecorations: some View {
+        ZStack {
+            Circle()
+                .fill(homeSecondary.opacity(colorScheme == .dark ? 0.22 : 0.16))
+                .frame(width: 200, height: 200)
+                .blur(radius: 24)
+                .offset(x: 120, y: -120)
+
+            Circle()
+                .fill(homeGlow.opacity(colorScheme == .dark ? 0.2 : 0.14))
+                .frame(width: 120, height: 120)
+                .blur(radius: 18)
+                .offset(x: -80, y: 100)
+
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.white.opacity(colorScheme == .dark ? 0.18 : 0.32), lineWidth: 1)
+                .frame(width: 110, height: 110)
+                .rotationEffect(.degrees(animateDecorations ? 10 : -8))
+                .offset(x: 110, y: 120)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+        .allowsHitTesting(false)
+    }
+
     private var compactOverview: some View {
-        SettingsCard(
-            title: greeting.isEmpty ? "Willkommen" : greeting,
-            subtitle: displayName.isEmpty ? nil : displayName,
-            systemImage: "hand.wave.fill",
-            accent: .indigo,
-            trailing: {
+        HomePanel(accent: homePrimary, decoration: { homeHeroDecorations }) {
+            HStack(alignment: .center, spacing: 14) {
+                homeHeroIcon
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(greeting.isEmpty ? "Willkommen" : greeting)
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(.primary)
+                    if !displayName.isEmpty {
+                        Text(displayName)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("Deine Noten im Blick.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
                 if let year = store.activeSchoolYearId {
                     PillBadge(
                         text: year,
                         systemImage: "calendar",
-                        foreground: Color.cyan,
-                        background: Color.cyan.opacity(0.14)
+                        foreground: homeSecondary,
+                        background: homeSecondary.opacity(colorScheme == .dark ? 0.24 : 0.16)
                     )
                 }
             }
-        ) {
-            VStack(alignment: .leading, spacing: 10) {
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                    StatChip(title: "Gesamt-Ø", value: formatAverage(overallComputed), accent: .indigo)
-                    StatChip(title: "Fächer", value: "\(subjectsWithoutFachreferat.count)", accent: .cyan)
-                    StatChip(title: "Noten", value: "\(totalGradesCountComputed)", accent: .orange)
-                }
 
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        if overdueHomeworksCount > 0 {
-                            PillBadge(
-                                text: countLabel(overdueHomeworksCount, singular: "Hausaufgabe fällig", plural: "Hausaufgaben fällig"),
-                                systemImage: "exclamationmark.triangle.fill",
-                                foreground: .orange,
-                                background: Color.orange.opacity(0.16)
-                            )
-                        }
-                        if homeworkDueTomorrowCount > 0 {
-                            PillBadge(
-                                text: countLabel(homeworkDueTomorrowCount, singular: "Hausaufgabe morgen", plural: "Hausaufgaben morgen"),
-                                systemImage: "clock.badge.exclamationmark",
-                                foreground: .yellow,
-                                background: Color.yellow.opacity(0.16)
-                            )
-                        }
-                        if upcomingExamsNextTwoWeeksCount > 0 {
-                            PillBadge(
-                                text: countLabel(upcomingExamsNextTwoWeeksCount, singular: "Klausur steht an", plural: "Klausuren stehen an"),
-                                systemImage: "calendar.badge.clock",
-                                foreground: .red,
-                                background: Color.red.opacity(0.12)
-                            )
-                        }
-                        if overdueHomeworksCount == 0 && homeworkDueTomorrowCount == 0 && upcomingExamsNextTwoWeeksCount == 0 {
-                            PillBadge(
-                                text: "Alles im Plan",
-                                systemImage: "checkmark.circle.fill",
-                                foreground: .green,
-                                background: Color.green.opacity(0.14)
-                            )
-                        }
-                    }
-                    .padding(.vertical, 2)
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                HomeStatTile(title: "Gesamt-Ø", value: formatAverage(overallComputed), accent: homePrimary)
+                HomeStatTile(title: "Fächer", value: "\(subjectsWithoutFachreferat.count)", accent: homeSecondary)
+                HomeStatTile(title: "Noten", value: "\(totalGradesCountComputed)", accent: .orange)
+            }
+
+            alertPills
+        }
+    }
+
+    private var alertPills: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                if overdueHomeworksCount > 0 {
+                    PillBadge(
+                        text: countLabel(overdueHomeworksCount, singular: "Hausaufgabe fällig", plural: "Hausaufgaben fällig"),
+                        systemImage: "exclamationmark.triangle.fill",
+                        foreground: .orange,
+                        background: Color.orange.opacity(colorScheme == .dark ? 0.22 : 0.16)
+                    )
+                }
+                if homeworkDueTomorrowCount > 0 {
+                    PillBadge(
+                        text: countLabel(homeworkDueTomorrowCount, singular: "Hausaufgabe morgen", plural: "Hausaufgaben morgen"),
+                        systemImage: "clock.badge.exclamationmark",
+                        foreground: .yellow,
+                        background: Color.yellow.opacity(colorScheme == .dark ? 0.22 : 0.16)
+                    )
+                }
+                if upcomingExamsNextTwoWeeksCount > 0 {
+                    PillBadge(
+                        text: countLabel(upcomingExamsNextTwoWeeksCount, singular: "Klausur steht an", plural: "Klausuren stehen an"),
+                        systemImage: "calendar.badge.clock",
+                        foreground: .red,
+                        background: Color.red.opacity(colorScheme == .dark ? 0.2 : 0.12)
+                    )
+                }
+                if overdueHomeworksCount == 0 && homeworkDueTomorrowCount == 0 && upcomingExamsNextTwoWeeksCount == 0 {
+                    PillBadge(
+                        text: "Alles im Plan",
+                        systemImage: "checkmark.circle.fill",
+                        foreground: .green,
+                        background: Color.green.opacity(colorScheme == .dark ? 0.2 : 0.14)
+                    )
                 }
             }
+            .padding(.vertical, 2)
         }
     }
 
     private var subjectsControlCard: some View {
-        SettingsCard(
-            title: "Fächer & Noten",
-            subtitle: "Filter und Reihenfolge",
-            systemImage: "text.book.closed",
-            accent: .cyan,
-            trailing: {
+        HomePanel(accent: homeSecondary) {
+            HStack(alignment: .center, spacing: 12) {
+                HomePanelIcon(systemName: "text.book.closed", accent: homeSecondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Fächer & Noten")
+                        .font(.headline.weight(.semibold))
+                    Text("Filter und Reihenfolge")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
                 if enableDrag {
-                    Button {
-                        toggleEditMode(sortedNames: sortedSubjectsComputed.map { $0.name })
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.up.arrow.down")
-                            Text(isEditingOrder ? "Fertig" : "Sortieren")
-                        }
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 8)
-                            .background(Color.cyan.opacity(0.16))
-                            .foregroundStyle(Color.cyan)
-                            .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
+                    sortButton
                 }
             }
-        ) {
-            VStack(alignment: .leading, spacing: 6) {
-                HalfYearFilterRow(halfYear: $halfYear)
-                Text("Ein Fach antippen, um Details und Noten zu öffnen.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+
+            HalfYearFilterRow(halfYear: $halfYear)
+                .padding(.top, 4)
+
+            Text("Ein Fach antippen, um Details und Noten zu öffnen.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    private func holidayNoticeCard(info: HolidayWindow) -> some View {
-        SettingsCard(
-            title: "Ferien voraus",
-            subtitle: holidaySubtitle(info: info),
-            systemImage: "sun.max.fill",
-            accent: .orange
-        ) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(holidayMessage(info: info))
-                    .font(.body)
+    private var sortButton: some View {
+        Button {
+            toggleEditMode(sortedNames: sortedSubjectsComputed.map { $0.name })
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.up.arrow.down")
+                Text(isEditingOrder ? "Fertig" : "Sortieren")
             }
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .foregroundStyle(homeSecondary)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(homeSecondary.opacity(colorScheme == .dark ? 0.24 : 0.16))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(homeSecondary.opacity(0.35), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func holidayNoticeCard(info: HolidayWindow) -> some View {
+        HomePanel(accent: .orange) {
+            HStack(alignment: .center, spacing: 12) {
+                HomePanelIcon(systemName: "sun.max.fill", accent: .orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Ferien voraus")
+                        .font(.headline.weight(.semibold))
+                    Text(holidaySubtitle(info: info))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Text(holidayMessage(info: info))
+                .font(.subheadline)
+                .foregroundStyle(.primary)
         }
     }
 
@@ -568,160 +704,179 @@ struct HomeView: View {
     // MARK: - Body
 
     var body: some View {
-        List {
-            if store.isLoading {
-                Section {
-                    SettingsCard(
-                        title: "Sync läuft...",
-                        subtitle: store.loadingLabel,
-                        systemImage: "arrow.triangle.2.circlepath",
-                        accent: .cyan
-                    ) {
-                        ProgressView(value: store.progress, total: 100)
+        ZStack {
+            homeBackgroundLayers
+                .ignoresSafeArea()
+
+            List {
+                if store.isLoading {
+                    Section {
+                        HomePanel(accent: homeSecondary) {
+                            HStack(alignment: .center, spacing: 12) {
+                                HomePanelIcon(systemName: "arrow.triangle.2.circlepath", accent: homeSecondary)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Sync läuft...")
+                                        .font(.headline.weight(.semibold))
+                                    Text(store.loadingLabel)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                            }
+                            ProgressView(value: store.progress, total: 100)
+                        }
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        .listRowBackground(Color.clear)
                     }
-                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                    .listRowBackground(Color.clear)
+                    .listSectionSeparator(.hidden)
+                }
+
+                Section {
+                    compactOverview
+                        .id(greetingAnimationSeed)
+                        .opacity((greetingVisible || !animationsOn) ? 1 : 0)
+                        .offset(y: (greetingVisible || !animationsOn) ? 0 : 12)
+                        .onAppear { startGreetingAnimation() }
+                        .onChange(of: greetingAnimationSeed) { _, _ in startGreetingAnimation() }
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    if let upcomingHoliday {
+                        holidayNoticeCard(info: upcomingHoliday)
+                            .softFadeIn(enabled: animationsOn, delay: 0.05, offset: 10)
+                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
+                    subjectsControlCard
+                        .softFadeIn(enabled: animationsOn, delay: 0.08, offset: 12)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
+                .listSectionSeparator(.hidden)
+
+                Section {
+                    if isEditingOrder && enableDrag {
+                        ForEach(customOrderWorkingCopy, id: \.self) { name in
+                            SubjectRowView(
+                                subject: subjectByNameComputed[name] ?? Subject(name: name, type: 0, date: Date()),
+                                grades: subjectGradesComputed[name] ?? [],
+                                fachreferatSubjectName: store.fachreferat?.subjectName
+                            )
+                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                        }
+                        .onMove { indices, newOffset in
+                            customOrderWorkingCopy.move(fromOffsets: indices, toOffset: newOffset)
+                        }
+                    } else {
+                        ForEach(Array(sortedSubjectsComputed.enumerated()), id: \.element.name) { entry in
+                            let subject = entry.element
+                            let delay = 0.12 + Double(entry.offset) * 0.04
+                            subjectRowAny(
+                                subject: subject,
+                                subjectGrades: subjectGradesComputed,
+                                fachreferatSubjectName: store.fachreferat?.subjectName
+                            )
+                            .softFadeIn(enabled: animationsOn, delay: delay, offset: 14)
+                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                        }
+                    }
                 }
                 .listSectionSeparator(.hidden)
             }
-
-            Section {
-                compactOverview
-                    .id(greetingAnimationSeed)
-                    .opacity((greetingVisible || !animationsOn) ? 1 : 0)
-                    .offset(y: (greetingVisible || !animationsOn) ? 0 : 12)
-                    .onAppear { startGreetingAnimation() }
-                    .onChange(of: greetingAnimationSeed) { _, _ in startGreetingAnimation() }
-                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                if let upcomingHoliday {
-                    holidayNoticeCard(info: upcomingHoliday)
-                        .softFadeIn(enabled: animationsOn, delay: 0.05, offset: 10)
-                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
+            .environment(\.editMode, .constant(editModeBinding))
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .listRowSeparator(.hidden)
+            .listSectionSpacing(0)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    ToolbarTitleView(title: "Übersicht", subtitle: "Fächer & Noten")
                 }
-                subjectsControlCard
-                    .softFadeIn(enabled: animationsOn, delay: 0.08, offset: 12)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-            }
-            .listSectionSeparator(.hidden)
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    HStack(spacing: 0) {
+                        Button {
+                            showExamSheet = true
+                        } label: {
+                            ToolbarIcon(symbol: "calendar.badge.clock", showDot: hasOverdueExams)
+                        }
+                        .accessibilityLabel("Klausurtermine anzeigen")
 
-            Section {
-                if isEditingOrder && enableDrag {
-                    ForEach(customOrderWorkingCopy, id: \.self) { name in
-                        SubjectRowView(
-                            subject: subjectByNameComputed[name] ?? Subject(name: name, type: 0, date: Date()),
-                            grades: subjectGradesComputed[name] ?? [],
-                            fachreferatSubjectName: store.fachreferat?.subjectName
-                        )
-                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
+                        Button {
+                            showHomeworkSheet = true
+                        } label: {
+                            ToolbarIcon(symbol: "checklist", showDot: hasOverdueHomeworks || hasHomeworkDueTomorrow)
+                        }
+                        .accessibilityLabel("Aktive Hausaufgaben anzeigen")
                     }
-                    .onMove { indices, newOffset in
-                        customOrderWorkingCopy.move(fromOffsets: indices, toOffset: newOffset)
+                }
+            }
+            .navigationDestination(isPresented: $subjectLinkActive) {
+                if let subject = selectedSubject {
+                    if subject.name == "Fachreferat" {
+                        FachreferatDetailView(subject: subject)
+                            .environmentObject(store)
+                    } else {
+                        SubjectDetailView(subject: subject)
+                            .environmentObject(store)
                     }
                 } else {
-                    ForEach(Array(sortedSubjectsComputed.enumerated()), id: \.element.name) { entry in
-                        let subject = entry.element
-                        let delay = 0.12 + Double(entry.offset) * 0.04
-                        subjectRowAny(
-                            subject: subject,
-                            subjectGrades: subjectGradesComputed,
-                            fachreferatSubjectName: store.fachreferat?.subjectName
-                        )
-                        .softFadeIn(enabled: animationsOn, delay: delay, offset: 14)
-                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                    }
+                    EmptyView()
                 }
             }
-            .listSectionSeparator(.hidden)
-        }
-        .environment(\.editMode, .constant(editModeBinding))
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .listRowSeparator(.hidden)
-        .listSectionSpacing(0)
-        .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                ToolbarTitleView(title: "Übersicht", subtitle: "Fächer & Noten")
+            .navigationDestination(isPresented: $showPraktikumDetail) {
+                PraktikumDetailView()
+                    .environmentObject(store)
             }
-            ToolbarItem(placement: .navigationBarTrailing) {
-                HStack(spacing: 0) {
-                    Button {
-                        showExamSheet = true
-                    } label: {
-                        ToolbarIcon(symbol: "calendar.badge.clock", showDot: hasOverdueExams)
-                    }
-                    .accessibilityLabel("Klausurtermine anzeigen")
-
-                    Button {
-                        showHomeworkSheet = true
-                    } label: {
-                        ToolbarIcon(symbol: "checklist", showDot: hasOverdueHomeworks || hasHomeworkDueTomorrow)
-                    }
-                    .accessibilityLabel("Aktive Hausaufgaben anzeigen")
-                }
+            .navigationDestination(isPresented: $navigateToSettings) {
+                AppSettingsView().environmentObject(store)
             }
-        }
-        .navigationDestination(isPresented: $subjectLinkActive) {
-            if let subject = selectedSubject {
-                if subject.name == "Fachreferat" {
-                    FachreferatDetailView(subject: subject)
-                        .environmentObject(store)
-                } else {
-                    SubjectDetailView(subject: subject)
-                        .environmentObject(store)
-                }
-            } else {
-                EmptyView()
+            .navigationDestination(isPresented: $navigateToFinalGrade) {
+                AbiturExamView().environmentObject(store)
             }
-        }
-        .navigationDestination(isPresented: $showPraktikumDetail) {
-            PraktikumDetailView()
-                .environmentObject(store)
-        }
-        .navigationDestination(isPresented: $navigateToSettings) {
-            AppSettingsView().environmentObject(store)
-        }
-        .navigationDestination(isPresented: $navigateToFinalGrade) {
-            AbiturExamView().environmentObject(store)
-        }
-        .sheet(isPresented: $showHomeworkSheet) {
-            HomeworkListView()
-                .environmentObject(store)
-        }
-        .sheet(isPresented: $showExamSheet) {
-            ExamListView()
-                .environmentObject(store)
-        }
-        .onAppear {
-            computeGreeting()
-            greetingAnimationSeed = UUID()
-            Task { await loadUserDisplayName() }
-            Task { await loadUpcomingHolidayNotice() }
-        }
-        .onChange(of: displayName) { _, _ in
-            greetingAnimationSeed = UUID()
-        }
-        .onChange(of: store.showHolidayHints) { _, enabled in
-            if enabled {
+            .sheet(isPresented: $showHomeworkSheet) {
+                HomeworkListView()
+                    .environmentObject(store)
+            }
+            .sheet(isPresented: $showExamSheet) {
+                ExamListView()
+                    .environmentObject(store)
+            }
+            .onAppear {
+                computeGreeting()
+                greetingAnimationSeed = UUID()
+                Task { await loadUserDisplayName() }
                 Task { await loadUpcomingHolidayNotice() }
-            } else {
-                upcomingHoliday = nil
+                if !animateDecorations {
+                    if reduceMotion || !animationsOn {
+                        animateDecorations = true
+                    } else {
+                        withAnimation(.easeInOut(duration: 6).repeatForever(autoreverses: true)) {
+                            animateDecorations = true
+                        }
+                    }
+                }
             }
-        }
-        .onChange(of: subjectLinkActive) { _, active in
-            if !active {
-                selectedSubject = nil
+            .onChange(of: displayName) { _, _ in
+                greetingAnimationSeed = UUID()
+            }
+            .onChange(of: store.showHolidayHints) { _, enabled in
+                if enabled {
+                    Task { await loadUpcomingHolidayNotice() }
+                } else {
+                    upcomingHoliday = nil
+                }
+            }
+            .onChange(of: subjectLinkActive) { _, active in
+                if !active {
+                    selectedSubject = nil
+                }
             }
         }
     }
@@ -865,6 +1020,7 @@ struct SubjectRowView: View {
     let subject: Subject
     let grades: [Grade]
     let fachreferatSubjectName: String?
+    private let rowCornerRadius: CGFloat = 22
 
     private func avg(_ subject: Subject) -> Double? {
         guard !grades.isEmpty else { return nil }
@@ -896,18 +1052,17 @@ struct SubjectRowView: View {
         return .red
     }
 
-    private func descriptor(for average: Double?, gradesCount: Int, isFachreferat: Bool, isPraktikum: Bool) -> String {
+    private func subtitleText(gradesCount: Int, isFachreferat: Bool, isPraktikum: Bool) -> String {
         if isFachreferat {
-            return gradesCount == 0 ? "Fachreferat noch nicht hinterlegt" : "Einmalige Bewertung gespeichert"
+            return gradesCount == 0 ? "Noch keine Bewertung" : "Bewertung gespeichert"
         }
         if gradesCount == 0 {
-            return isPraktikum ? "Noch keine Noten erfasst" : "Noch keine Noten erfasst"
+            return "Noch keine Noten erfasst"
         }
-        guard let avg = average else { return "Noch keine Noten erfasst" }
-        if avg >= 10 { return "Sehr starker Schnitt" }
-        if avg >= 7 { return "Stabiler Schnitt" }
-        if avg >= 4 { return "Ausbaufähig – dranbleiben" }
-        return "Roter Bereich – Schritt für Schritt"
+        if isPraktikum {
+            return gradesCount == 1 ? "1 Praktikumsnote erfasst" : "\(gradesCount) Praktikumsnoten erfasst"
+        }
+        return gradesCount == 1 ? "1 Note erfasst" : "\(gradesCount) Noten erfasst"
     }
 
     private func progress(for average: Double) -> Double {
@@ -960,17 +1115,27 @@ struct SubjectRowView: View {
     }
 
     private func backgroundTile(accent: SubjectAccent) -> some View {
-        RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .fill(
-                LinearGradient(
-                    colors: [
-                        accent.primary.opacity(colorScheme == .dark ? 0.20 : 0.12),
-                        Color(.secondarySystemBackground)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
+        ZStack {
+            RoundedRectangle(cornerRadius: rowCornerRadius, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            accent.primary.opacity(colorScheme == .dark ? 0.22 : 0.16),
+                            Color.white.opacity(colorScheme == .dark ? 0.04 : 0.82),
+                            Color.white.opacity(colorScheme == .dark ? 0.02 : 0.6)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
                 )
-            )
+
+            Circle()
+                .fill(accent.secondary.opacity(colorScheme == .dark ? 0.2 : 0.14))
+                .frame(width: 120, height: 120)
+                .blur(radius: 22)
+                .offset(x: 110, y: -70)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: rowCornerRadius, style: .continuous))
     }
 
     var body: some View {
@@ -981,7 +1146,6 @@ struct SubjectRowView: View {
         let isPraktikum = subject.name == "Praktikum"
         let isSport = subject.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "sport"
         let accent = accent(for: subject)
-
         let displayName: String = {
             if isFachreferat, let frName = fachreferatSubjectName, !frName.isEmpty {
                 return "Fachreferat in \(frName)"
@@ -1005,9 +1169,9 @@ struct SubjectRowView: View {
             return Tag(text: subject.type == 1 ? "Hauptfach" : "Nebenfach", style: subject.type == 1 ? .main : .minor)
         }()
 
-        HStack(alignment: .center, spacing: 10) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
                     Text(displayName)
                         .font(.headline.weight(.semibold))
                         .lineLimit(1)
@@ -1017,17 +1181,17 @@ struct SubjectRowView: View {
                     }
                 }
 
-                Text(descriptor(for: average, gradesCount: gradesCount, isFachreferat: isFachreferat, isPraktikum: isPraktikum))
+                Text(subtitleText(gradesCount: gradesCount, isFachreferat: isFachreferat, isPraktikum: isPraktikum))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .lineLimit(1)
 
                 if let avg = average {
                     GeometryReader { geo in
                         let ratio = progress(for: avg)
                         ZStack(alignment: .leading) {
                             Capsule()
-                                .fill(Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.08))
+                                .fill(Color.white.opacity(colorScheme == .dark ? 0.08 : 0.45))
                             Capsule()
                                 .fill(
                                     LinearGradient(
@@ -1039,38 +1203,33 @@ struct SubjectRowView: View {
                                 .frame(width: geo.size.width * ratio)
                         }
                     }
-                    .frame(height: 6)
+                    .frame(height: 5)
                     .padding(.trailing, 8)
-                    .padding(.top, 2)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            Spacer(minLength: 8)
-
-            VStack(alignment: .trailing, spacing: 8) {
+            VStack(alignment: .trailing, spacing: 6) {
                 Text(formatAverage(average))
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
                     .monospacedDigit()
                     .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(gradeClassColor(average).opacity(colorScheme == .dark ? 0.24 : 0.14))
+                    .padding(.vertical, 6)
+                    .background(gradeClassColor(average).opacity(colorScheme == .dark ? 0.22 : 0.14))
                     .foregroundStyle(gradeClassColor(average))
                     .clipShape(Capsule())
             }
         }
-        .padding(16)
+        .padding(14)
         .background(backgroundTile(accent: accent))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(
-                    accent.primary.opacity(colorScheme == .dark ? 0.26 : 0.16),
-                    lineWidth: 1
-                )
+            RoundedRectangle(cornerRadius: rowCornerRadius, style: .continuous)
+                .stroke(Color.white.opacity(colorScheme == .dark ? 0.1 : 0.32), lineWidth: 1)
         )
+        .clipShape(RoundedRectangle(cornerRadius: rowCornerRadius, style: .continuous))
         .shadow(
             color: accent.primary.opacity(colorScheme == .dark ? 0.22 : 0.12),
-            radius: 8,
+            radius: 10,
             x: 0,
             y: 6
         )
@@ -1238,5 +1397,132 @@ private struct ToolbarTitleView: View {
         .frame(maxWidth: .infinity)
         .multilineTextAlignment(.center)
         .allowsHitTesting(false)
+    }
+}
+
+private struct HomePanel<Content: View, Decoration: View>: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let accent: Color
+    let decoration: Decoration?
+    let content: Content
+
+    init(accent: Color, @ViewBuilder content: () -> Content) where Decoration == EmptyView {
+        self.accent = accent
+        self.decoration = nil
+        self.content = content()
+    }
+
+    init(accent: Color, @ViewBuilder decoration: () -> Decoration, @ViewBuilder content: () -> Content) {
+        self.accent = accent
+        self.decoration = decoration()
+        self.content = content()
+    }
+
+    private var backgroundGradient: LinearGradient {
+        LinearGradient(
+            colors: [
+                accent.opacity(colorScheme == .dark ? 0.18 : 0.12),
+                Color.white.opacity(colorScheme == .dark ? 0.04 : 0.78),
+                Color.white.opacity(colorScheme == .dark ? 0.02 : 0.6)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    private var borderColor: Color {
+        Color.white.opacity(colorScheme == .dark ? 0.08 : 0.32)
+    }
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .fill(backgroundGradient)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                        .stroke(borderColor, lineWidth: 1)
+                )
+
+            if let decoration {
+                decoration
+                    .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                content
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(18)
+        }
+        .shadow(
+            color: accent.opacity(colorScheme == .dark ? 0.22 : 0.12),
+            radius: 14,
+            x: 0,
+            y: 8
+        )
+    }
+}
+
+private struct HomePanelIcon: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let systemName: String
+    let accent: Color
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(accent.opacity(colorScheme == .dark ? 0.22 : 0.16))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(accent.opacity(colorScheme == .dark ? 0.3 : 0.2), lineWidth: 1)
+                )
+            Image(systemName: systemName)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(accent)
+        }
+        .frame(width: 38, height: 38)
+    }
+}
+
+private struct HomeStatTile: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let title: String
+    let value: String
+    let accent: Color
+
+    private var tileGradient: LinearGradient {
+        LinearGradient(
+            colors: [
+                accent.opacity(colorScheme == .dark ? 0.28 : 0.18),
+                Color.white.opacity(colorScheme == .dark ? 0.05 : 0.7)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.title3.weight(.bold))
+                .foregroundStyle(.primary)
+                .monospacedDigit()
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(tileGradient)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(accent.opacity(colorScheme == .dark ? 0.3 : 0.2), lineWidth: 1)
+        )
     }
 }

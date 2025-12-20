@@ -203,6 +203,7 @@ enum ExamNotificationManager {
                     .document(id)
                 try await docRef.updateData(["isCompleted": true])
             } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
                 // optional: Fehler ignorieren, Notification trotzdem entfernen
             }
 

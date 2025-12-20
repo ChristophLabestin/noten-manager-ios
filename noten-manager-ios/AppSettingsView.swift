@@ -943,6 +943,7 @@ struct AppSettingsView: View {
                                     groupNameInput = ""
                                     selectedSubjectsForNewGroup = []
                                 } catch {
+                                    ErrorLoggingService.logErrorIfEnabled(error)
                                     groupErrorMessage = error.localizedDescription
                                 }
                             }
@@ -975,6 +976,7 @@ struct AppSettingsView: View {
                                     try await store.joinSharedGroup(with: groupJoinCode)
                                     groupInfoMessage = "Erfolgreich der Gruppe beigetreten."
                                 } catch {
+                                    ErrorLoggingService.logErrorIfEnabled(error)
                                     groupErrorMessage = error.localizedDescription
                                 }
                             }
@@ -1489,6 +1491,7 @@ struct AppSettingsView: View {
                 verificationMessage = nil
             }
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             await MainActor.run {
                 isEmailVerified = nil
                 verificationMessage = "E-Mail-Status konnte nicht aktualisiert werden."
@@ -1598,6 +1601,7 @@ struct AppSettingsView: View {
                     }
                 }
             } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
                 // optional: ignore fetch error
             }
         }
@@ -1632,6 +1636,7 @@ struct AppSettingsView: View {
                 resetAccountSlideDone = false
                 resetAccountError = nil
             } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
                 resetAccountError = error.localizedDescription
             }
         }
@@ -1652,6 +1657,7 @@ struct AppSettingsView: View {
                 store.stopListening()
                 authManager.signOut()
             } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
                 deleteError = error.localizedDescription
             }
         }
@@ -1712,6 +1718,7 @@ struct AppSettingsView: View {
                 changeEmailError = nil
             }
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             await MainActor.run {
                 isUpdatingEmail = false
                 changeEmailError = mapAuthErrorMessage(error)
@@ -1769,6 +1776,7 @@ struct AppSettingsView: View {
                 changePasswordError = nil
             }
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             await MainActor.run {
                 isUpdatingPassword = false
                 changePasswordError = mapAuthErrorMessage(error)
@@ -2603,6 +2611,7 @@ struct SchoolYearEditView: View {
                 showResetSheet = false
                 dismiss()
             } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
                 resetError = error.localizedDescription
             }
         }
@@ -2622,6 +2631,7 @@ struct SchoolYearEditView: View {
                 showDeleteSheet = false
                 dismiss()
             } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
                 deleteError = error.localizedDescription
             }
         }

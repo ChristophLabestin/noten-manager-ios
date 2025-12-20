@@ -330,6 +330,7 @@ struct PraktikumDetailView: View {
                 entryToDelete = nil
             }
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             await MainActor.run {
                 self.error = error.localizedDescription
             }
@@ -347,6 +348,7 @@ struct PraktikumDetailView: View {
         do {
             try await store.deletePracticalPerformance()
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             await MainActor.run {
                 self.error = error.localizedDescription
             }

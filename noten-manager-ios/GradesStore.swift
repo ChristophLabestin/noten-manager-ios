@@ -480,6 +480,7 @@ final class GradesStore: ObservableObject {
 
         // 1) User-Dokument live beobachten (Einstellungen + encryptionSalt)
         userDocListener = db.collection("users").document(uid).addSnapshotListener { [weak self] snapshot, error in
+            ErrorLoggingService.logErrorIfEnabled(error)
             Task { @MainActor in
                 guard let self else { return }
                 if let data = snapshot?.data() {
@@ -796,6 +797,7 @@ final class GradesStore: ObservableObject {
                 subjectNames: subjectNames
             )
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             if hasLegacyFields {
                 return LegacyMigrationSummary(
                     subjectCount: 0,
@@ -908,7 +910,8 @@ final class GradesStore: ObservableObject {
     private func startSchoolYearsListener(uid: String) {
         if schoolYearsCollectionListener != nil { return }
         schoolYearsCollectionListener = db.collection("users").document(uid).collection("schoolYears")
-            .addSnapshotListener { [weak self] snapshot, _ in
+            .addSnapshotListener { [weak self] snapshot, error in
+                ErrorLoggingService.logErrorIfEnabled(error)
                 Task { @MainActor in
                     guard let self else { return }
                     let docs = snapshot?.documents ?? []
@@ -954,6 +957,7 @@ final class GradesStore: ObservableObject {
                 loadingLabel = "Fertig"
             }
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional loggen
         }
     }
@@ -983,6 +987,7 @@ final class GradesStore: ObservableObject {
             await ensureSecondaryListeners(uid: uid, userData: [:])
             return id
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             return nil
         }
     }
@@ -1135,6 +1140,7 @@ final class GradesStore: ObservableObject {
             activeSchoolYearId = context.id
             await ensureSecondaryListeners(uid: uid, userData: freshData)
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // Account wurde bereinigt; Neuaufbau kann später erfolgen
         }
     }
@@ -1236,6 +1242,7 @@ final class GradesStore: ObservableObject {
             let data = snap.data() ?? [:]
             applySchoolYearSettings(from: data, uid: uid, fallbackUserData: userData)
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             applySchoolYearSettings(from: [:], uid: uid, fallbackUserData: userData)
         }
         setupSchoolYearListener(uid: uid, schoolYearId: schoolYearId, ref: yearRef)
@@ -1246,6 +1253,7 @@ final class GradesStore: ObservableObject {
             loadingLabel = "Fächer verbinden …"
             subjectsListener = yearRef.collection("subjects")
                 .addSnapshotListener { [weak self] snapshot, error in
+                    ErrorLoggingService.logErrorIfEnabled(error)
                     Task { @MainActor in
                         guard let self else { return }
                         let docs = snapshot?.documents ?? []
@@ -1313,6 +1321,7 @@ final class GradesStore: ObservableObject {
             loadingLabel = "Fachreferat verbinden …"
             fachreferatListener = yearRef.collection("fachreferat").document("current")
                 .addSnapshotListener { [weak self] snapshot, error in
+                    ErrorLoggingService.logErrorIfEnabled(error)
                     Task { @MainActor in
                         guard let self else { return }
                         guard let snap = snapshot, snap.exists, let data = snap.data() else {
@@ -1335,6 +1344,7 @@ final class GradesStore: ObservableObject {
                                     self.fachreferat = nil
                                 }
                             } catch {
+                                ErrorLoggingService.logErrorIfEnabled(error)
                                 self.fachreferat = nil
                             }
                         } else {
@@ -1354,7 +1364,8 @@ final class GradesStore: ObservableObject {
 
         if seminarPerformanceListener == nil {
             seminarPerformanceListener = yearRef.collection("seminar").document("current")
-                .addSnapshotListener { [weak self] snapshot, _ in
+                .addSnapshotListener { [weak self] snapshot, error in
+                    ErrorLoggingService.logErrorIfEnabled(error)
                     Task { @MainActor in
                         guard let self else { return }
                         guard let snap = snapshot, snap.exists, let data = snap.data() else {
@@ -1382,7 +1393,8 @@ final class GradesStore: ObservableObject {
         // Praktikums-Jahresleistung (11. Klasse FOS)
         if practicalPerformanceListener == nil {
             practicalPerformanceListener = yearRef.collection("practicalPerformance").document("current")
-                .addSnapshotListener { [weak self] snapshot, _ in
+                .addSnapshotListener { [weak self] snapshot, error in
+                    ErrorLoggingService.logErrorIfEnabled(error)
                     Task { @MainActor in
                         guard let self else { return }
                         guard let snap = snapshot, snap.exists, let data = snap.data() else {
@@ -1407,6 +1419,7 @@ final class GradesStore: ObservableObject {
                 .collection("homeworks")
                 .order(by: "createdAt", descending: false)
                 .addSnapshotListener { [weak self] snapshot, error in
+                    ErrorLoggingService.logErrorIfEnabled(error)
                     Task { @MainActor in
                         guard let self else { return }
                         let docs = snapshot?.documents ?? []
@@ -1451,6 +1464,7 @@ final class GradesStore: ObservableObject {
                 .collection("exams")
                 .order(by: "createdAt", descending: false)
                 .addSnapshotListener { [weak self] snapshot, error in
+                    ErrorLoggingService.logErrorIfEnabled(error)
                     Task { @MainActor in
                         guard let self else { return }
                         let docs = snapshot?.documents ?? []
@@ -1511,6 +1525,7 @@ final class GradesStore: ObservableObject {
             sharedExamUserSettingsListener = yearRef
                 .collection("examGroupReminders")
                 .addSnapshotListener { [weak self] snapshot, error in
+                    ErrorLoggingService.logErrorIfEnabled(error)
                     Task { @MainActor in
                         guard let self else { return }
                         let docs = snapshot?.documents ?? []
@@ -1531,7 +1546,8 @@ final class GradesStore: ObservableObject {
         if sharedExamUserNotesListener == nil {
             sharedExamUserNotesListener = yearRef
                 .collection("examGroupNotes")
-                .addSnapshotListener { [weak self] snapshot, _ in
+                .addSnapshotListener { [weak self] snapshot, error in
+                    ErrorLoggingService.logErrorIfEnabled(error)
                     Task { @MainActor in
                         guard let self else { return }
                         let docs = snapshot?.documents ?? []
@@ -1551,6 +1567,7 @@ final class GradesStore: ObservableObject {
 
         if sharedExamUserCompletedListener == nil {
             sharedExamUserCompletedListener = yearRef.collection("examGroupCompleted").addSnapshotListener { [weak self] snapshot, error in
+                ErrorLoggingService.logErrorIfEnabled(error)
                 Task { @MainActor in
                     guard let self else { return }
                     let docs = snapshot?.documents ?? []
@@ -1572,6 +1589,7 @@ final class GradesStore: ObservableObject {
 
         if sharedHomeworkUserSettingsListener == nil {
             sharedHomeworkUserSettingsListener = yearRef.collection("homeworkGroupReminders").addSnapshotListener { [weak self] snapshot, error in
+                ErrorLoggingService.logErrorIfEnabled(error)
                 Task { @MainActor in
                     guard let self else { return }
                     let docs = snapshot?.documents ?? []
@@ -1590,7 +1608,8 @@ final class GradesStore: ObservableObject {
         }
 
         if sharedHomeworkUserNotesListener == nil {
-            sharedHomeworkUserNotesListener = yearRef.collection("homeworkGroupNotes").addSnapshotListener { [weak self] snapshot, _ in
+            sharedHomeworkUserNotesListener = yearRef.collection("homeworkGroupNotes").addSnapshotListener { [weak self] snapshot, error in
+                ErrorLoggingService.logErrorIfEnabled(error)
                 Task { @MainActor in
                     guard let self else { return }
                     let docs = snapshot?.documents ?? []
@@ -1610,6 +1629,7 @@ final class GradesStore: ObservableObject {
         
         if sharedHomeworkUserCompletedListener == nil {
             sharedHomeworkUserCompletedListener = yearRef.collection("homeworkGroupCompleted").addSnapshotListener { [weak self] snapshot, error in
+                ErrorLoggingService.logErrorIfEnabled(error)
                 Task { @MainActor in
                     guard let self else { return }
                     let docs = snapshot?.documents ?? []
@@ -1677,6 +1697,7 @@ final class GradesStore: ObservableObject {
             }
             homeworks = list
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             success = false
         }
 
@@ -1726,6 +1747,7 @@ final class GradesStore: ObservableObject {
             }
             exams = list
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             success = false
         }
 
@@ -1775,6 +1797,7 @@ final class GradesStore: ObservableObject {
             }
             await MainActor.run { self.homeworks = list }
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional loggen
             }
         }
@@ -1827,6 +1850,7 @@ final class GradesStore: ObservableObject {
                 }
                 await MainActor.run { self.exams = list }
             } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
                 // optional loggen
             }
         }
@@ -1879,6 +1903,7 @@ final class GradesStore: ObservableObject {
                     }
                     await MainActor.run { self.groupExamsByGroup[gid] = list }
                 } catch {
+                    ErrorLoggingService.logErrorIfEnabled(error)
                     // optional loggen
                 }
             }
@@ -1917,6 +1942,7 @@ final class GradesStore: ObservableObject {
                     }
                     await MainActor.run { self.groupHomeworksByGroup[gid] = list }
                 } catch {
+                    ErrorLoggingService.logErrorIfEnabled(error)
                     // optional loggen
                 }
             }
@@ -1930,7 +1956,8 @@ final class GradesStore: ObservableObject {
     private func setupSchoolYearListener(uid: String, schoolYearId: String, ref: DocumentReference) {
         if schoolYearListenerId == schoolYearId, schoolYearListener != nil { return }
         schoolYearListener?.remove()
-        schoolYearListener = ref.addSnapshotListener { [weak self] snap, _ in
+        schoolYearListener = ref.addSnapshotListener { [weak self] snap, error in
+            ErrorLoggingService.logErrorIfEnabled(error)
             Task { @MainActor in
                 guard let self else { return }
                 let data = snap?.data() ?? [:]
@@ -1946,6 +1973,7 @@ final class GradesStore: ObservableObject {
             if gradesListeners[sid] != nil { continue }
             let listener = schoolYearRef.collection("subjects").document(sid).collection("grades")
                 .addSnapshotListener { [weak self] snapshot, error in
+                    ErrorLoggingService.logErrorIfEnabled(error)
                     Task { @MainActor in
                         guard let self else { return }
                         let docs = snapshot?.documents ?? []
@@ -2371,6 +2399,7 @@ final class GradesStore: ObservableObject {
                     self.decryptAllCachedGradesIfPossible()
                 }
             } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
                 self.encryptionKey = nil
                 encryptionSalt = nil
                 // Ohne Key bleiben Noten leer
@@ -2460,6 +2489,7 @@ final class GradesStore: ObservableObject {
             do {
                 try await UIApplication.shared.setAlternateIconName(targetName)
             } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
                 print("AppIcon switch failed for \(targetName ?? "primary"): \(error)")
                 let resolved = selection(forAlternateIconName: UIApplication.shared.alternateIconName)
                 appIcon = resolved
@@ -2468,6 +2498,7 @@ final class GradesStore: ObservableObject {
         } else {
             UIApplication.shared.setAlternateIconName(targetName) { error in
                 guard let error else { return }
+                ErrorLoggingService.logErrorIfEnabled(error)
                 print("AppIcon switch failed for \(targetName ?? "primary"): \(error)")
                 Task { @MainActor in
                     let resolved = self.selection(forAlternateIconName: UIApplication.shared.alternateIconName)
@@ -2684,6 +2715,7 @@ final class GradesStore: ObservableObject {
             pendingLegacyUserData = nil
             legacySelectedSubjects = []
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional: Logging
         }
     }
@@ -2747,6 +2779,7 @@ final class GradesStore: ObservableObject {
                 try await ref.setData(payload, merge: true)
                 remainingGrades.append(pending) // bis Listener updatedAt bestätigt
             } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
                 remainingGrades.append(pending)
             }
         }
@@ -2772,6 +2805,7 @@ final class GradesStore: ObservableObject {
                     ], merge: true)
                 }
             } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
                 // bleibt pending
             }
         }
@@ -2815,6 +2849,7 @@ final class GradesStore: ObservableObject {
                     try await ref.setData(payload, merge: true)
                 }
             } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
                 // bleibt pending
             }
         }
@@ -2868,6 +2903,7 @@ final class GradesStore: ObservableObject {
             .collection("exams")
             .order(by: "createdAt", descending: false)
             .addSnapshotListener { [weak self] snapshot, error in
+                ErrorLoggingService.logErrorIfEnabled(error)
                 Task { @MainActor in
                     guard let self else { return }
                     let docs = snapshot?.documents ?? []
@@ -2930,7 +2966,8 @@ final class GradesStore: ObservableObject {
         sharedHomeworksGroupId = nil
         sharedHomeworks = []
         sharedHomeworksGroupId = gid
-        sharedHomeworksListener = db.collection("homeworkGroups").document(gid).collection("subjects").addSnapshotListener { [weak self] snap, _ in
+        sharedHomeworksListener = db.collection("homeworkGroups").document(gid).collection("subjects").addSnapshotListener { [weak self] snap, error in
+            ErrorLoggingService.logErrorIfEnabled(error)
             Task { @MainActor in
                 guard let self else { return }
                 let docs = snap?.documents ?? []
@@ -2945,6 +2982,7 @@ final class GradesStore: ObservableObject {
             }
         }
         sharedHomeworksListener = db.collection("homeworkGroups").document(gid).collection("homeworks").order(by: "createdAt", descending: false).addSnapshotListener { [weak self] snapshot, error in
+            ErrorLoggingService.logErrorIfEnabled(error)
             Task { @MainActor in
                 guard let self else { return }
                 let docs = snapshot?.documents ?? []
@@ -3181,6 +3219,7 @@ final class GradesStore: ObservableObject {
             let snap = try await db.collection("groups").document(gid).getDocument()
             examGroupName = snap.data()?["name"] as? String
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             examGroupName = nil
         }
     }
@@ -3201,6 +3240,7 @@ final class GradesStore: ObservableObject {
                 "homeworkGroupIds": FieldValue.arrayRemove([target])
             ])
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional loggen
         }
 
@@ -3218,6 +3258,7 @@ final class GradesStore: ObservableObject {
                     "homeworkGroupId": newActive
                 ])
             } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
                 // optional loggen
             }
             examGroupId = newActive
@@ -3229,6 +3270,7 @@ final class GradesStore: ObservableObject {
                     "homeworkGroupId": FieldValue.delete()
                 ])
             } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
                 // optional loggen
             }
             examGroupId = nil
@@ -3271,6 +3313,7 @@ final class GradesStore: ObservableObject {
                     "homeworkGroupId": code
                 ])
             } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
                 // optional loggen
             }
             examGroupId = code
@@ -3299,6 +3342,7 @@ final class GradesStore: ObservableObject {
             let snap = try await db.collection("groups").document(gid).getDocument()
             homeworkGroupName = snap.data()?["name"] as? String
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             homeworkGroupName = nil
         }
     }
@@ -3310,6 +3354,7 @@ final class GradesStore: ObservableObject {
                 await MainActor.run { groupNames[gid] = name }
             }
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional loggen
         }
     }
@@ -3320,6 +3365,7 @@ final class GradesStore: ObservableObject {
             let year = snap.data()?["schoolYearId"] as? String
             return (snap.exists, year)
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             return (false, nil)
         }
     }
@@ -3420,6 +3466,7 @@ final class GradesStore: ObservableObject {
                         subjects = subjects.map { $0.name == trimmedName ? newSubject : $0 }
                     }
                 } catch {
+                    ErrorLoggingService.logErrorIfEnabled(error)
                     // optional loggen
                     continue
                 }
@@ -3434,6 +3481,7 @@ final class GradesStore: ObservableObject {
                     self.groupSubjectMappings[gid] = map
                 }
             } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
                 // optional loggen
             }
         }
@@ -3539,6 +3587,7 @@ final class GradesStore: ObservableObject {
                     practical = decodePracticalPerformance(data: data, key: key)
                 }
             } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
                 // optional loggen
             }
 
@@ -3548,6 +3597,7 @@ final class GradesStore: ObservableObject {
                     seminar = decodeSeminarPerformance(data: data, key: key)
                 }
             } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
                 // optional loggen
             }
 
@@ -3563,6 +3613,7 @@ final class GradesStore: ObservableObject {
             schoolYearSnapshotCache[schoolYearId] = snapshot
             return snapshot
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             return nil
         }
     }
@@ -3621,6 +3672,7 @@ final class GradesStore: ObservableObject {
                 )
             }
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             return []
         }
     }
@@ -3659,6 +3711,7 @@ final class GradesStore: ObservableObject {
                 imported += 1
                 existing.insert(subj.name)
             } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
                 continue
             }
         }
@@ -3753,6 +3806,7 @@ final class GradesStore: ObservableObject {
             await deleteExamFromFirestore(id: examId)
             return true
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             return false
         }
     }
@@ -3830,6 +3884,7 @@ final class GradesStore: ObservableObject {
             await deleteHomeworkFromFirestore(id: homeworkId)
             return true
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             return false
         }
     }
@@ -3852,6 +3907,7 @@ final class GradesStore: ObservableObject {
             do {
                 try await yearRef.collection("homeworks").document().setData(payload)
             } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
                 // optional loggen, aber trotzdem Unsharing versuchen
             }
         }
@@ -4123,6 +4179,7 @@ final class GradesStore: ObservableObject {
                 sharedExamUserNotes.removeValue(forKey: compoundId(gid: gid, docId: examId))
             }
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional loggen
         }
     }
@@ -4144,6 +4201,7 @@ final class GradesStore: ObservableObject {
             applySharedExamUserCompletion()
             rescheduleLocalNotifications()
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional loggen
         }
     }
@@ -4173,6 +4231,7 @@ final class GradesStore: ObservableObject {
                 "isCompleted": completed
             ])
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional loggen
         }
     }
@@ -4192,6 +4251,7 @@ final class GradesStore: ObservableObject {
                 sharedHomeworkUserNotes.removeValue(forKey: compoundId(gid: gid, docId: homeworkId))
             }
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional loggen
         }
     }
@@ -4213,6 +4273,7 @@ final class GradesStore: ObservableObject {
             applySharedHomeworkUserCompletion()
             rescheduleLocalNotifications()
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional loggen
         }
     }
@@ -4228,6 +4289,7 @@ final class GradesStore: ObservableObject {
                 "isCompleted": completed
             ])
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional loggen
         }
     }
@@ -4434,6 +4496,7 @@ final class GradesStore: ObservableObject {
         do {
             try await yearRef.collection("fachreferat").document("current").delete()
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional loggen
         }
         offlinePendingFachreferat = nil
@@ -4457,6 +4520,7 @@ final class GradesStore: ObservableObject {
         do {
             try await yearRef.collection("seminar").document("current").delete()
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional loggen
         }
         offlinePendingSeminar = nil
@@ -4637,6 +4701,7 @@ final class GradesStore: ObservableObject {
                 return PracticalPerformance(id: "current", grades: sortedPracticalGrades(entries))
             }
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             return nil
         }
 
@@ -4765,6 +4830,7 @@ final class GradesStore: ObservableObject {
         do {
             try await docRef.delete()
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional loggen
         }
     }
@@ -4782,6 +4848,7 @@ final class GradesStore: ObservableObject {
                 "subjectSortOrder": order
             ])
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional loggen
         }
     }
@@ -4932,6 +4999,7 @@ final class GradesStore: ObservableObject {
                 "displayName": name
             ])
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional loggen
         }
     }
@@ -4984,6 +5052,7 @@ final class GradesStore: ObservableObject {
         do {
             try await db.collection("users").document(uid).updateData(payload)
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional rollback/loggen
         }
 
@@ -5005,6 +5074,7 @@ final class GradesStore: ObservableObject {
                     "appIcon": resolvedIcon
                 ], merge: true)
             } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
                 // optional loggen
             }
         }
@@ -5029,6 +5099,7 @@ final class GradesStore: ObservableObject {
                     "homeworkReminderMinute": mn
                 ], merge: true)
             } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
                 // optional loggen
             }
         }
@@ -5049,6 +5120,7 @@ final class GradesStore: ObservableObject {
                     "standardRemindersEnabled": enabled
                 ], merge: true)
             } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
                 // optional loggen
             }
         }
@@ -5100,6 +5172,7 @@ final class GradesStore: ObservableObject {
                 "gradeYear": year
             ])
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional loggen
         }
 
@@ -5115,6 +5188,7 @@ final class GradesStore: ObservableObject {
                 "schoolType": type.rawValue
             ])
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional loggen
         }
 
@@ -5133,6 +5207,7 @@ final class GradesStore: ObservableObject {
             ], merge: true)
             schoolYearNames[sid] = trimmed
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional loggen
         }
     }
@@ -5147,6 +5222,7 @@ final class GradesStore: ObservableObject {
                 "legacyDecisionPending": false
             ], merge: true)
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional loggen
         }
         onboardingRequired = false
@@ -5216,6 +5292,7 @@ final class GradesStore: ObservableObject {
                 return s
             }
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional loggen
         }
     }
@@ -5261,6 +5338,7 @@ final class GradesStore: ObservableObject {
                 }
             }
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional loggen
         }
     }
@@ -5274,6 +5352,7 @@ final class GradesStore: ObservableObject {
         do {
             try await docRef.delete()
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional loggen
         }
     }
@@ -5287,6 +5366,7 @@ final class GradesStore: ObservableObject {
         do {
             try await docRef.delete()
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional loggen
         }
     }
@@ -5296,6 +5376,7 @@ final class GradesStore: ObservableObject {
         do {
             try await docRef.delete()
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional loggen
         }
     }
@@ -5305,6 +5386,7 @@ final class GradesStore: ObservableObject {
         do {
             try await docRef.delete()
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional loggen
         }
     }
@@ -5426,6 +5508,7 @@ final class GradesStore: ObservableObject {
                 self.encryptedGradesCache.removeValue(forKey: subjectName)
             }
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional: Fehlerbehandlung oder Logging
         }
     }
@@ -5446,6 +5529,7 @@ final class GradesStore: ObservableObject {
                 return GroupSubject(id: doc.documentID, name: name, type: type, alias: alias)
             }
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             return []
         }
     }
@@ -5471,7 +5555,8 @@ final class GradesStore: ObservableObject {
         }
         if examGroupSubjectsListener != nil { return }
         examGroupSubjectsGid = gid
-        examGroupSubjectsListener = db.collection("examGroups").document(gid).collection("subjects").addSnapshotListener { [weak self] snap, _ in
+        examGroupSubjectsListener = db.collection("examGroups").document(gid).collection("subjects").addSnapshotListener { [weak self] snap, error in
+            ErrorLoggingService.logErrorIfEnabled(error)
             Task { @MainActor in
                 guard let self else { return }
                 let docs = snap?.documents ?? []
@@ -5498,7 +5583,8 @@ final class GradesStore: ObservableObject {
         }
         if homeworkGroupSubjectsListener != nil { return }
         homeworkGroupSubjectsGid = gid
-        homeworkGroupSubjectsListener = db.collection("homeworkGroups").document(gid).collection("subjects").addSnapshotListener { [weak self] snap, _ in
+        homeworkGroupSubjectsListener = db.collection("homeworkGroups").document(gid).collection("subjects").addSnapshotListener { [weak self] snap, error in
+            ErrorLoggingService.logErrorIfEnabled(error)
             Task { @MainActor in
                 guard let self else { return }
                 let docs = snap?.documents ?? []
@@ -5523,7 +5609,8 @@ final class GradesStore: ObservableObject {
         }
         if examSubjectMappingListener != nil { return }
         examSubjectMappingGid = gid
-        examSubjectMappingListener = schoolYearRef(uid: uid, id: schoolYearId).collection("subjectMappings").document(gid).addSnapshotListener { [weak self] snap, _ in
+        examSubjectMappingListener = schoolYearRef(uid: uid, id: schoolYearId).collection("subjectMappings").document(gid).addSnapshotListener { [weak self] snap, error in
+            ErrorLoggingService.logErrorIfEnabled(error)
             Task { @MainActor in
                 guard let self else { return }
                 let data = snap?.data() ?? [:]
@@ -5542,7 +5629,8 @@ final class GradesStore: ObservableObject {
         }
         if homeworkSubjectMappingListener != nil { return }
         homeworkSubjectMappingGid = gid
-        homeworkSubjectMappingListener = schoolYearRef(uid: uid, id: schoolYearId).collection("subjectMappings").document(gid).addSnapshotListener { [weak self] snap, _ in
+        homeworkSubjectMappingListener = schoolYearRef(uid: uid, id: schoolYearId).collection("subjectMappings").document(gid).addSnapshotListener { [weak self] snap, error in
+            ErrorLoggingService.logErrorIfEnabled(error)
             Task { @MainActor in
                 guard let self else { return }
                 let data = snap?.data() ?? [:]
@@ -5587,7 +5675,8 @@ final class GradesStore: ObservableObject {
 
     private func startGroupSubjectsListener(for gid: String) {
         if groupSubjectsListeners[gid] != nil { return }
-        groupSubjectsListeners[gid] = db.collection("groups").document(gid).collection("subjects").addSnapshotListener { [weak self] snap, _ in
+        groupSubjectsListeners[gid] = db.collection("groups").document(gid).collection("subjects").addSnapshotListener { [weak self] snap, error in
+            ErrorLoggingService.logErrorIfEnabled(error)
             Task { @MainActor in
                 guard let self else { return }
                 let docs = snap?.documents ?? []
@@ -5606,7 +5695,8 @@ final class GradesStore: ObservableObject {
 
     private func startGroupMappingsListener(for gid: String, uid: String, schoolYearId: String) {
         if groupMappingsListeners[gid] != nil { return }
-        groupMappingsListeners[gid] = schoolYearRef(uid: uid, id: schoolYearId).collection("groupMappings").document(gid).addSnapshotListener { [weak self] snap, _ in
+        groupMappingsListeners[gid] = schoolYearRef(uid: uid, id: schoolYearId).collection("groupMappings").document(gid).addSnapshotListener { [weak self] snap, error in
+            ErrorLoggingService.logErrorIfEnabled(error)
             Task { @MainActor in
                 guard let self else { return }
                 let data = snap?.data() ?? [:]
@@ -5619,7 +5709,8 @@ final class GradesStore: ObservableObject {
 
     private func startGroupNameListener(for gid: String) {
         if groupNameListeners[gid] != nil { return }
-        groupNameListeners[gid] = db.collection("groups").document(gid).addSnapshotListener { [weak self] snap, _ in
+        groupNameListeners[gid] = db.collection("groups").document(gid).addSnapshotListener { [weak self] snap, error in
+            ErrorLoggingService.logErrorIfEnabled(error)
             Task { @MainActor in
                 guard let self else { return }
                 if let data = snap?.data() {
@@ -5643,7 +5734,8 @@ final class GradesStore: ObservableObject {
 
     private func startGroupExamsListener(for gid: String) {
         if groupExamsListeners[gid] != nil { return }
-        groupExamsListeners[gid] = db.collection("groups").document(gid).collection("exams").order(by: "createdAt", descending: false).addSnapshotListener { [weak self] snap, _ in
+        groupExamsListeners[gid] = db.collection("groups").document(gid).collection("exams").order(by: "createdAt", descending: false).addSnapshotListener { [weak self] snap, error in
+            ErrorLoggingService.logErrorIfEnabled(error)
             Task { @MainActor in
                 guard let self else { return }
                 let docs = snap?.documents ?? []
@@ -5691,7 +5783,8 @@ final class GradesStore: ObservableObject {
 
     private func startGroupHomeworksListener(for gid: String) {
         if groupHomeworksListeners[gid] != nil { return }
-        groupHomeworksListeners[gid] = db.collection("groups").document(gid).collection("homeworks").order(by: "createdAt", descending: false).addSnapshotListener { [weak self] snap, _ in
+        groupHomeworksListeners[gid] = db.collection("groups").document(gid).collection("homeworks").order(by: "createdAt", descending: false).addSnapshotListener { [weak self] snap, error in
+            ErrorLoggingService.logErrorIfEnabled(error)
             Task { @MainActor in
                 guard let self else { return }
                 let docs = snap?.documents ?? []
@@ -5802,6 +5895,7 @@ final class GradesStore: ObservableObject {
             }
             if let owner { return owner == uid }
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional loggen
         }
         return false
@@ -5842,6 +5936,7 @@ final class GradesStore: ObservableObject {
             try await yearRef.collection("groupMappings").document(groupId).setData(["map": map], merge: true)
             await MainActor.run { self.groupSubjectMappings[groupId] = map }
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional loggen
         }
     }

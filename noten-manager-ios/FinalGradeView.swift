@@ -1948,6 +1948,7 @@ struct FinalGradeView: View {
                         examPoints = nil
                     }
                 } catch {
+                    ErrorLoggingService.logErrorIfEnabled(error)
                     examPoints = nil
                 }
             }

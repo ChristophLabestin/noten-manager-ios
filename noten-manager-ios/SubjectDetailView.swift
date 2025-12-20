@@ -569,7 +569,8 @@ struct SubjectDetailView: View {
         } message: {
             Text("Dieses Fach und alle zugehörigen Noten werden dauerhaft gelöscht.")
         }
-        .sheetNavigationTitle(subjectTitle)
+        .navigationTitle(subjectTitle)
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 0) {
@@ -1187,6 +1188,7 @@ private func statusBadge(_ text: String, color: Color) -> some View {
             noteEditGradeId = nil
             noteEditText = ""
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // Optional: Fehler anzeigen
         }
     }
@@ -1195,6 +1197,7 @@ private func statusBadge(_ text: String, color: Color) -> some View {
         do {
             try await store.deleteGradeFromFirestore(subjectId: currentSubjectName, gradeId: gradeId)
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // Optional: Fehler anzeigen
         }
         deleteConfirmGradeId = nil
@@ -1296,6 +1299,7 @@ private func statusBadge(_ text: String, color: Color) -> some View {
 
             cancelEditSubject()
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // Optional: Fehler anzeigen
         }
     }
@@ -1309,6 +1313,7 @@ private func statusBadge(_ text: String, color: Color) -> some View {
             try Auth.auth().signOut()
             OfflineModeManager.shared.clearOfflineData()
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             // optional: Fehlerbehandlung
         }
     }

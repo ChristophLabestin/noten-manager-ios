@@ -445,6 +445,7 @@ struct EditGradeView: View {
                 dismiss()
             }
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             self.error = error.localizedDescription
         }
 
@@ -459,6 +460,7 @@ struct EditGradeView: View {
             try await store.deleteGradeFromFirestore(subjectId: subjectName, gradeId: grade.id)
             await MainActor.run { dismiss() }
         } catch let err {
+            ErrorLoggingService.logErrorIfEnabled(err)
             self.error = err.localizedDescription
         }
         isDeleting = false

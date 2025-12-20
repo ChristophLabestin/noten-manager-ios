@@ -469,6 +469,7 @@ struct MainView: View {
                 hideEmailBanner()
             }
         } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
             needsEmailVerification = false
             hideEmailBanner()
         }
