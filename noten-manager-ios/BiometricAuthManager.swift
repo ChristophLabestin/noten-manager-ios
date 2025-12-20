@@ -60,29 +60,58 @@ final class BiometricAuthManager: ObservableObject {
     }
 
     func authenticate(reason: String) async -> Bool {
-        let context = LAContext()
-        context.localizedCancelTitle = "Abbrechen"
-        context.localizedFallbackTitle = "Code verwenden"
+        let biometricContext = LAContext()
+        biometricContext.localizedCancelTitle = "Abbrechen"
+        biometricContext.localizedFallbackTitle = "Code verwenden"
         var error: NSError?
 
-        // deviceOwnerAuthentication erlaubt Face/Touch ID mit Passcode-Fallback
+        let canUseBiometrics = biometricContext.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error)
+        biometricsAvailable = canUseBiometrics
+        biometryType = biometricContext.biometryType
+
+        if canUseBiometrics {
+            let (success, evalError) = await evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics,
+                                                           context: biometricContext,
+                                                           reason: reason)
+            if success {
+                return true
+            }
+
+            if let nsError = evalError as NSError?,
+               let code = LAError.Code(rawValue: nsError.code),
+               code == .userFallback || code == .biometryLockout {
+                return await authenticateWithPasscode(reason: reason)
+            }
+
+            return false
+        }
+
+        return await authenticateWithPasscode(reason: reason)
+    }
+
+    private func key(for uid: String) -> String {
+        "\(keyPrefix)\(uid)"
+    }
+
+    private func authenticateWithPasscode(reason: String) async -> Bool {
+        let context = LAContext()
+        context.localizedCancelTitle = "Abbrechen"
+        var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
             biometricsAvailable = false
             biometryType = context.biometryType
             return false
         }
 
-        biometricsAvailable = true
-        biometryType = context.biometryType
-
-        return await withCheckedContinuation { continuation in
-            context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) { success, _ in
-                continuation.resume(returning: success)
-            }
-        }
+        let (success, _) = await evaluatePolicy(.deviceOwnerAuthentication, context: context, reason: reason)
+        return success
     }
 
-    private func key(for uid: String) -> String {
-        "\(keyPrefix)\(uid)"
+    private func evaluatePolicy(_ policy: LAPolicy, context: LAContext, reason: String) async -> (Bool, Error?) {
+        await withCheckedContinuation { continuation in
+            context.evaluatePolicy(policy, localizedReason: reason) { success, error in
+                continuation.resume(returning: (success, error))
+            }
+        }
     }
 }

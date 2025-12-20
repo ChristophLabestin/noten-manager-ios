@@ -2,6 +2,7 @@ import SwiftUI
 
 struct BottomNavView: View {
     @EnvironmentObject var store: GradesStore
+    @Namespace private var namespace
 
     enum Tab {
         case home
@@ -21,7 +22,9 @@ struct BottomNavView: View {
 
     var quickAddPreselectedSubjectName: String? = nil
 
-    @State private var isOpen: Bool = false
+    // Sheet States
+    @State private var showCreationMenu: Bool = false
+    
     @State private var showAddSubject: Bool = false
     @State private var showAddGrade: Bool = false
     @State private var showAddFachreferat: Bool = false
@@ -30,7 +33,6 @@ struct BottomNavView: View {
     @State private var showAddExam: Bool = false
     @State private var showPractical: Bool = false
     @State private var showSeminar: Bool = false
-    @State private var fabPressed: Bool = false
 
     private var isFirstSubject: Bool { store.subjects.isEmpty }
     private var disableAddGrade: Bool { store.encryptionKey == nil || store.subjects.isEmpty }
@@ -53,682 +55,324 @@ struct BottomNavView: View {
         gradeYear >= 12 || store.seminarPerformance != nil
     }
 
-    private let fabWidth: CGFloat = 84
-    private let fabHeight: CGFloat = 46
-    private let barHeight: CGFloat = 60
-    private let navCornerRadius: CGFloat = 999
-
     private var isFeminine: Bool { store.theme == "feminine" }
     private var isDark: Bool { store.darkMode }
-
-    private var colorPrimary: Color { Color(hex: "#1e3a8a") }
-    private var colorPrimaryHover: Color { Color(hex: "#2563eb") }
-    private var colorPrimaryDark: Color { Color(hex: "#3b82f6") }
-    private var colorPrimaryHoverDark: Color { Color(hex: "#60a5fa") }
-    private var colorPrimaryFem: Color { Color(hex: "#ec4899") }
-    private var colorPrimaryFemHover: Color { Color(hex: "#f472b6") }
-
-    private var colorTextDark: Color { Color(hex: "#111827") }
-    private var colorTextDarkDark: Color { Color(hex: "#f9fafb") }
-    private var colorTextMedium: Color { Color(hex: "#6b7280") }
-    private var colorTextMediumDark: Color { Color(hex: "#d1d5db") }
-
-    private var accentPrimary: Color {
-        if isFeminine { return isDark ? colorPrimaryFemHover : colorPrimaryFem }
-        return isDark ? colorPrimaryDark : colorPrimary
-    }
-
-    private var accentSecondary: Color {
-        if isFeminine { return colorPrimaryFemHover }
-        return isDark ? colorPrimaryHoverDark : colorPrimaryHover
-    }
-
-    private var labelPrimary: Color { isDark ? colorTextDarkDark : colorTextDark }
-    private var labelSecondary: Color { isDark ? colorTextMediumDark : colorTextMedium }
-
-    private var surface: Color {
-        isDark ? Color(red: 0.07, green: 0.09, blue: 0.14) : Color.white
-    }
-
-    private var navStroke: Color {
-        isDark ? Color.white.opacity(0.16) : Color.black.opacity(0.06)
-    }
-
-    private var navShadow: Color {
-        isDark ? Color.black.opacity(0.65) : Color.black.opacity(0.18)
-    }
-
-    private var activeIconGlow: Color {
-        accentPrimary.opacity(isDark ? 0.45 : 0.18)
-    }
-
-    private var navBackground: some View {
-        RoundedRectangle(cornerRadius: navCornerRadius, style: .continuous)
-            .fill(
-                LinearGradient(
-                    colors: [
-                        surface.opacity(isDark ? 0.9 : 0.94),
-                        accentPrimary.opacity(isDark ? 0.18 : 0.12),
-                        accentSecondary.opacity(isDark ? 0.16 : 0.1),
-                        surface.opacity(isDark ? 0.82 : 0.9)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .background(
-                RoundedRectangle(cornerRadius: navCornerRadius, style: .continuous)
-                    .fill(.regularMaterial)
-                    .opacity(0.82)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: navCornerRadius, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(isDark ? 0.03 : 0.16),
-                                Color.clear
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: navCornerRadius, style: .continuous)
-                    .stroke(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(isDark ? 0.32 : 0.56),
-                                accentPrimary.opacity(isDark ? 0.4 : 0.32)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1.6
-                    )
-            )
-    }
-
-    private var activeIconBackground: LinearGradient {
-        LinearGradient(
-            colors: [
-                accentPrimary,
-                accentSecondary.opacity(isDark ? 0.9 : 0.82)
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-    }
-
-    private var inactiveIconBackground: LinearGradient {
-        LinearGradient(
-            colors: [
-                surface.opacity(isDark ? 0.8 : 0.94),
-                surface.opacity(isDark ? 0.68 : 0.86)
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
+    
+    private var activeColor: Color {
+        if isFeminine {
+            return isDark ? Color(hex: "#f472b6") : Color(hex: "#ec4899")
+        }
+        return isDark ? Color(hex: "#60a5fa") : Color(hex: "#2563eb")
     }
 
     var body: some View {
-        GeometryReader { geo in
-            let bottomInset = geo.safeAreaInsets.bottom
-            let barWidth = min(geo.size.width - 40, 500)
-            let bottomPadding = bottomInset == 0 ? 2 : max(0, bottomInset - 14)
-
-            ZStack(alignment: .bottom) {
-                HStack(spacing: 8) {
-                    navItem(icon: "house.fill", label: "Home", tab: .home, disabled: false) { onOpenHome?() }
-                    navItem(icon: "chart.bar.fill", label: "Insights", tab: .insights, disabled: isFirstSubject) { onOpenInsights?() }
-
-                    fabButton
-
-                    navItem(icon: "book.fill", label: "Abschluss", tab: .final, disabled: isFirstSubject) { onOpenFinalGrade?() }
-                    navItem(icon: "gearshape.fill", label: "Einstellungen", tab: .settings, disabled: false) { onOpenSettings?() }
-                }
-                .padding(.horizontal, 0)
-                .padding(.vertical, -4)
-                .frame(width: barWidth, height: barHeight)
-                .background(navBackground)
-                .overlay(
-                    RoundedRectangle(cornerRadius: navCornerRadius, style: .continuous)
-                        .stroke(
-                            LinearGradient(
-                                colors: [
-                                    accentPrimary.opacity(isDark ? 0.55 : 0.38),
-                                    Color.white.opacity(isDark ? 0.28 : 0.48)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1.6
-                        )
-                )
-                .clipShape(RoundedRectangle(cornerRadius: navCornerRadius, style: .continuous))
-                .shadow(color: navShadow.opacity(0.25), radius: 8, x: 0, y: 6)
-                .padding(.bottom, bottomPadding)
-                .overlay(alignment: .top) {
-                    if isFirstSubject && !isOpen {
-                        hintBubble
-                            .offset(y: -76)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-            .overlay(
-                Group {
-                    if isOpen {
-                        actionsOverlay(bottomInset: bottomInset)
-                    }
-                }
+        HStack(spacing: 0) {
+            navButton(tab: .home, icon: "house.fill", action: onOpenHome)
+            Spacer()
+            navButton(tab: .insights, icon: "chart.bar.fill", action: onOpenInsights)
+            Spacer()
+            addButton
+            Spacer()
+            navButton(tab: .final, icon: "graduationcap.fill", action: onOpenFinalGrade)
+            Spacer()
+            navButton(tab: .settings, icon: "gearshape.fill", action: onOpenSettings)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .shadow(color: Color.black.opacity(isDark ? 0.4 : 0.1), radius: 16, x: 0, y: 8)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.white.opacity(isDark ? 0.1 : 0.5), lineWidth: 1)
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, -10)
+        .sheet(isPresented: $showCreationMenu) {
+            CreationMenuView(
+                onAction: handleCreationAction,
+                isFirstSubject: isFirstSubject,
+                disableAddGrade: disableAddGrade,
+                showPractical: showPracticalTab,
+                showFachreferat: showFachreferatAction,
+                hasFachreferat: hasFachreferat,
+                showSeminar: showSeminarAction,
+                encryptionKeyLoaded: store.encryptionKey != nil
             )
-            .ignoresSafeArea(edges: .bottom)
-            .sheet(isPresented: $showAddSubject) {
-                AddSubjectView()
-                    .environmentObject(store)
-            }
-            .sheet(isPresented: $showAddGrade) {
-                AddGradeView(preselectedSubjectName: quickAddPreselectedSubjectName)
-                    .environmentObject(store)
-            }
-            .sheet(isPresented: $showAddFachreferat) {
-                AddFachreferatView(preselectedSubjectName: quickAddPreselectedSubjectName)
-                    .environmentObject(store)
-            }
-            .sheet(isPresented: $showFachreferatDetail) {
-                NavigationStack {
-                    FachreferatDetailView(subject: Subject(name: "Fachreferat", type: 0, date: Date()))
-                        .environmentObject(store)
-                }
-            }
-            .sheet(isPresented: $showAddHomework) {
-                AddHomeworkView(preselectedSubjectName: quickAddPreselectedSubjectName)
-                    .environmentObject(store)
-            }
-            .sheet(isPresented: $showAddExam) {
-                AddExamView(preselectedSubjectName: quickAddPreselectedSubjectName)
-                    .environmentObject(store)
-            }
-            .sheet(isPresented: $showPractical) {
-                NavigationStack {
-                    PraktikumDetailView()
-                        .environmentObject(store)
-                }
-            }
-            .sheet(isPresented: $showSeminar) {
-                SeminarPerformanceView()
-                    .environmentObject(store)
-            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showAddSubject) { AddSubjectView().environmentObject(store) }
+        .sheet(isPresented: $showAddGrade) { AddGradeView(preselectedSubjectName: quickAddPreselectedSubjectName).environmentObject(store) }
+        .sheet(isPresented: $showAddFachreferat) { AddFachreferatView(preselectedSubjectName: quickAddPreselectedSubjectName).environmentObject(store) }
+        .sheet(isPresented: $showFachreferatDetail) { NavigationStack { FachreferatDetailView(subject: Subject(name: "Fachreferat", type: 0, date: Date())).environmentObject(store) } }
+        .sheet(isPresented: $showAddHomework) { AddHomeworkView(preselectedSubjectName: quickAddPreselectedSubjectName).environmentObject(store) }
+        .sheet(isPresented: $showAddExam) { AddExamView(preselectedSubjectName: quickAddPreselectedSubjectName).environmentObject(store) }
+        .sheet(isPresented: $showPractical) { NavigationStack { PraktikumDetailView().environmentObject(store) } }
+        .sheet(isPresented: $showSeminar) { SeminarPerformanceView().environmentObject(store) }
     }
 
-    // MARK: - Subviews
-
-    private func navItem(icon: String, label: String, tab: Tab, disabled: Bool, action: @escaping () -> Void) -> some View {
-        let active = (currentTab == tab)
-        return Button(action: action) {
-            VStack(spacing: 4) {
-                ZStack {
-                    Circle()
-                        .fill(
-                            active
-                            ? AnyShapeStyle(
-                                LinearGradient(
-                                    colors: [
-                                        accentPrimary.opacity(isDark ? 0.32 : 0.22),
-                                        accentSecondary.opacity(isDark ? 0.28 : 0.18)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            : AnyShapeStyle(Color.clear)
-                        )
-                        .overlay(
-                            Circle()
-                                .stroke(active ? accentPrimary.opacity(isDark ? 0.9 : 0.7) : Color.clear, lineWidth: 1)
-                        )
-                        .shadow(color: active ? accentPrimary.opacity(isDark ? 0.24 : 0.14) : Color.clear,
-                                radius: active ? 8 : 0,
-                                x: 0,
-                                y: active ? 5 : 0)
-                        .frame(width: 46, height: 46)
-
-                    Image(systemName: icon)
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(
-                            active
-                            ? Color.white
-                            : accentPrimary.opacity(disabled ? 0.35 : 0.9)
-                        )
-                        .padding(.horizontal, 4)
-                }
+    private func navButton(tab: Tab, icon: String, action: (() -> Void)?) -> some View {
+        let isSelected = currentTab == tab
+        return Button {
+            if !isSelected {
+                let generator = UIImpactFeedbackGenerator(style: .light)
+                generator.impactOccurred()
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 0)
-            .opacity(disabled ? 0.55 : 1)
-            .scaleEffect(active ? 1.02 : 1.0)
-            .animation(.easeOut(duration: 0.15), value: active)
-        }
-        .buttonStyle(.plain)
-        .disabled(disabled)
-        .accessibilityLabel(label)
-    }
-
-    private var fabButton: some View {
-        Button {
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
-                isOpen.toggle()
-            }
+            action?()
         } label: {
             ZStack {
-                RoundedRectangle(cornerRadius: fabHeight / 2, style: .continuous)
-                    .fill(accentPrimary.opacity(isDark ? 0.16 : 0.12))
-                    .frame(width: fabWidth + 12, height: fabHeight + 10)
-                    .blur(radius: 3)
-
-                RoundedRectangle(cornerRadius: fabHeight / 2, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                accentPrimary,
-                                accentSecondary.opacity(isDark ? 0.92 : 0.82)
-                            ],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: fabHeight / 2, style: .continuous)
-                            .stroke(Color.white.opacity(isDark ? 0.16 : 0.32), lineWidth: 1.1)
-                    )
-                    .frame(width: fabWidth, height: fabHeight)
-                    .shadow(color: Color.black.opacity(isDark ? 0.3 : 0.12),
-                            radius: fabPressed ? 6 : 8,
-                            x: 0,
-                            y: fabPressed ? 4 : 6)
-
-                Image(systemName: isOpen ? "xmark" : "plus")
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundStyle(Color.white)
-                    .scaleEffect(isOpen ? 0.96 : 1.05)
-            }
-        }
-        .frame(width: fabWidth, height: barHeight)
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in withAnimation(.easeOut(duration: 0.08)) { fabPressed = true } }
-                .onEnded { _ in withAnimation(.easeOut(duration: 0.12)) { fabPressed = false } }
-        )
-        .scaleEffect(fabPressed ? 0.97 : 1.0)
-        .accessibilityLabel("Schnelle Aktionen öffnen")
-    }
-
-    private var hintBubble: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Noch kein Fach?")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(labelPrimary)
-            Text("Lege dein erstes Fach an, dann kannst du sofort Noten hinzufügen.")
-                .font(.system(size: 13))
-                .foregroundStyle(labelSecondary)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            surface.opacity(isDark ? 0.92 : 0.98),
-                            accentPrimary.opacity(isDark ? 0.18 : 0.14)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .overlay(
+                if isSelected {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(navStroke, lineWidth: 1)
-                )
-        )
-        .shadow(color: Color.black.opacity(isDark ? 0.55 : 0.16), radius: 12, x: 0, y: 6)
-        .frame(maxWidth: 260, alignment: .leading)
+                        .fill(activeColor.opacity(0.15))
+                        .matchedGeometryEffect(id: "TAB_BG", in: namespace)
+                }
+                Image(systemName: icon)
+                    .font(.system(size: 20, weight: isSelected ? .bold : .medium))
+                    .foregroundStyle(isSelected ? activeColor : .secondary)
+                    .scaleEffect(isSelected ? 1.05 : 1.0)
+            }
+            .frame(width: 56, height: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(ScaleButtonStyle())
     }
 
-    private func actionsOverlay(bottomInset: CGFloat) -> some View {
-        GeometryReader { _ in
+    private var addButton: some View {
+        Button {
+            let generator = UIImpactFeedbackGenerator(style: .medium)
+            generator.impactOccurred()
+            showCreationMenu = true
+        } label: {
             ZStack {
-                Color.black.opacity(0.38)
-                    .ignoresSafeArea()
-                    .onTapGesture {
-                        withAnimation(.easeOut(duration: 0.3)) { isOpen = false }
-                    }
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(activeColor)
+                    .shadow(color: activeColor.opacity(0.3), radius: 6, x: 0, y: 3)
+                
+                Image(systemName: "plus")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: 52, height: 44)
+        }
+        .buttonStyle(ScaleButtonStyle())
+    }
 
-                VStack(spacing: 0) {
-                    Spacer()
-                    VStack(alignment: .leading, spacing: 16) {
-                        HStack(alignment: .center, spacing: 12) {
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(activeIconBackground)
-                                .frame(width: 34, height: 34)
-                                .overlay(
-                                    Image(systemName: "wand.and.stars")
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .foregroundStyle(Color.white)
-                                )
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Schnelle Aktionen")
-                                    .font(.system(size: 17, weight: .semibold))
-                                    .foregroundStyle(labelPrimary)
-                                Text("Leg sofort los, ohne die Seite zu verlassen.")
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(labelSecondary)
-                            }
-                            Spacer()
-                            Button {
-                                withAnimation(.easeOut(duration: 0.2)) { isOpen = false }
-                            } label: {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 13, weight: .bold))
-                                    .foregroundStyle(labelSecondary)
-                                    .padding(10)
-                                    .background(
-                                        Circle()
-                                            .fill(Color.white.opacity(isDark ? 0.08 : 0.92))
-                                            .overlay(
-                                                Circle()
-                                                    .stroke(navStroke, lineWidth: 1)
-                                            )
-                                    )
-                            }
-                            .buttonStyle(.plain)
-                        }
-
-                        VStack(spacing: 10) {
-                            ActionButton(
-                                iconContent: AnyView(Image(systemName: "checklist").font(.system(size: 17, weight: .semibold))),
-                                label: "Hausaufgabe",
-                                description: "Aufgabe mit Fach & Termin",
-                                disabled: store.subjects.isEmpty,
-                                title: store.subjects.isEmpty ? "Lege zuerst ein Fach an" : ""
-                            ) {
-                                isOpen = false
-                                showAddHomework = true
-                            }
-
-                            ActionButton(
-                                iconContent: AnyView(Image(systemName: "list.bullet.rectangle.portrait.fill").font(.system(size: 17, weight: .semibold))),
-                                label: "Note",
-                                description: "Einzelne Leistung eintragen",
-                                disabled: disableAddGrade,
-                                title: addGradeTitle
-                            ) {
-                                isOpen = false
-                                showAddGrade = true
-                            }
-
-                            ActionButton(
-                                iconContent: AnyView(Image(systemName: "calendar.badge.clock").font(.system(size: 17, weight: .semibold))),
-                                label: "Klausurtermin",
-                                description: "Termin & Fach wählen",
-                                disabled: store.subjects.isEmpty,
-                                title: store.subjects.isEmpty ? "Lege zuerst ein Fach an" : ""
-                            ) {
-                                isOpen = false
-                                showAddExam = true
-                            }
-
-                            ActionButton(
-                                iconContent: AnyView(Image(systemName: "folder.badge.plus").font(.system(size: 17, weight: .semibold))),
-                                label: "Fach",
-                                description: "Neues Fach anlegen",
-                                disabled: false,
-                                title: ""
-                            ) {
-                                isOpen = false
-                                showAddSubject = true
-                            }
-
-                            if showPracticalTab {
-                                ActionButton(
-                                    iconContent: AnyView(Image(systemName: "briefcase.fill").font(.system(size: 17, weight: .semibold))),
-                                    label: "Praktikum",
-                                    description: "Fachpraktische Ausbildung",
-                                    disabled: false,
-                                    title: ""
-                                ) {
-                                    isOpen = false
-                                    showPractical = true
-                                    onOpenPractical?()
-                                }
-                            }
-
-                            if showFachreferatAction {
-                            ActionButton(
-                                iconContent: AnyView(
-                                    Group {
-                                        if hasFachreferat {
-                                            Image(systemName: "slider.horizontal.3")
-                                                .font(.system(size: 17, weight: .semibold))
-                                        } else {
-                                            Image(systemName: "doc.text.fill")
-                                                .font(.system(size: 17, weight: .semibold))
-                                        }
-                                    }
-                                ),
-                                label: hasFachreferat ? "Fachreferat anzeigen" : "Fachreferat",
-                                description: hasFachreferat ? "Gespeicherte Fachreferatsnote" : "Fachreferatsnote anlegen",
-                                disabled: store.encryptionKey == nil || isFirstSubject,
-                                title: store.encryptionKey == nil ? "Lade Schlüssel..." : (isFirstSubject ? "Lege zuerst ein Fach an" : "")
-                            ) {
-                                isOpen = false
-                                if hasFachreferat {
-                                    showFachreferatDetail = true
-                                } else {
-                                    showAddFachreferat = true
-                                }
-                            }
-                        }
-
-                            if showSeminarAction {
-                                ActionButton(
-                                    iconContent: AnyView(Image(systemName: "doc.text.magnifyingglass").font(.system(size: 17, weight: .semibold))),
-                                    label: "Seminarfach",
-                                    description: "Teilnoten & Termine",
-                                    disabled: store.encryptionKey == nil,
-                                    title: store.encryptionKey == nil ? "Lade Schlüssel..." : ""
-                                ) {
-                                    isOpen = false
-                                    showSeminar = true
-                                }
-                            }
-
-                            ActionButton(
-                                iconContent: AnyView(Image(systemName: "graduationcap.fill").font(.system(size: 17, weight: .semibold))),
-                                label: "Abitur",
-                                description: "Abschlussprüfung eintragen",
-                                disabled: isFirstSubject,
-                                title: isFirstSubject ? "Lege zuerst ein Fach an" : ""
-                            ) {
-                                isOpen = false
-                                onOpenAbitur?()
-                            }
-                        }
-                    }
-                    .padding(16)
-                    .background(
-                        RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        surface,
-                                        surface
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .stroke(navStroke.opacity(isDark ? 0.9 : 1), lineWidth: 1)
-                    )
-                    .shadow(color: Color.black.opacity(isDark ? 0.8 : 0.2), radius: isDark ? 28 : 16, x: 0, y: isDark ? 18 : 10)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, bottomInset + fabHeight + 34)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .animation(.easeOut(duration: 0.3), value: isOpen)
-                }
+    private func handleCreationAction(_ action: CreationAction) {
+        showCreationMenu = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            switch action {
+            case .homework: showAddHomework = true
+            case .grade: showAddGrade = true
+            case .exam: showAddExam = true
+            case .subject: showAddSubject = true
+            case .practical: 
+                showPractical = true
+                onOpenPractical?()
+            case .fachreferat:
+                if hasFachreferat { showFachreferatDetail = true }
+                else { showAddFachreferat = true }
+            case .seminar: showSeminar = true
+            case .abitur: onOpenAbitur?()
             }
         }
-        .ignoresSafeArea(edges: .bottom)
     }
 }
 
-private struct ActionButton: View {
-    let iconContent: AnyView
-    let label: String
-    let description: String
-    let disabled: Bool
-    let title: String
-    let onTap: () -> Void
+enum CreationAction {
+    case homework, grade, exam, subject, practical, fachreferat, seminar, abitur
+}
 
+struct CreationMenuView: View {
+    let onAction: (CreationAction) -> Void
+    let isFirstSubject: Bool
+    let disableAddGrade: Bool
+    let showPractical: Bool
+    let showFachreferat: Bool
+    let hasFachreferat: Bool
+    let showSeminar: Bool
+    let encryptionKeyLoaded: Bool
+    
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var store: GradesStore
 
     private var isFeminine: Bool { store.theme == "feminine" }
     private var isDark: Bool { store.darkMode }
-
-    private var colorPrimary: Color { Color(hex: "#1e3a8a") }
-    private var colorPrimaryDark: Color { Color(hex: "#3b82f6") }
-    private var colorPrimaryFem: Color { Color(hex: "#ec4899") }
-    private var colorPrimaryFemHover: Color { Color(hex: "#f472b6") }
-
-    private var colorTextDark: Color { Color(hex: "#111827") }
-    private var colorTextDarkDark: Color { Color(hex: "#f9fafb") }
-    private var colorTextMedium: Color { Color(hex: "#6b7280") }
-    private var colorTextMediumDark: Color { Color(hex: "#d1d5db") }
-
-    private var accentPrimary: Color {
-        if isFeminine { return isDark ? colorPrimaryFemHover : colorPrimaryFem }
-        return isDark ? colorPrimaryDark : colorPrimary
-    }
-
-    private var accentSecondary: Color {
-        if isFeminine { return colorPrimaryFemHover }
+    
+    private var accentColor: Color {
+        if isFeminine {
+            return isDark ? Color(hex: "#f472b6") : Color(hex: "#ec4899")
+        }
         return isDark ? Color(hex: "#60a5fa") : Color(hex: "#2563eb")
     }
 
-    private var labelColor: Color { isDark ? colorTextDarkDark : colorTextDark }
-    private var descriptionColor: Color { isDark ? colorTextMediumDark : colorTextMedium }
-
     var body: some View {
-        Button {
-            onTap()
-        } label: {
-            HStack(alignment: .top, spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(iconGradient)
-                        .frame(width: 40, height: 40)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(Color.white.opacity(isDark ? 0.22 : 0.4), lineWidth: 1)
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 24) {
+                    // Quick Actions Grid
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
+                        quickActionCard(
+                            title: "Hausaufgabe",
+                            icon: "checklist",
+                            color: .cyan,
+                            disabled: isFirstSubject,
+                            action: .homework
                         )
-                    iconContent
-                        .foregroundStyle(Color.white)
+                        quickActionCard(
+                            title: "Note",
+                            icon: "list.bullet.rectangle.portrait.fill",
+                            color: .indigo,
+                            disabled: disableAddGrade,
+                            action: .grade
+                        )
+                        quickActionCard(
+                            title: "Klausur",
+                            icon: "calendar.badge.clock",
+                            color: .orange,
+                            disabled: isFirstSubject,
+                            action: .exam
+                        )
+                        quickActionCard(
+                            title: "Fach",
+                            icon: "folder.badge.plus",
+                            color: .blue,
+                            action: .subject
+                        )
+                    }
+                    
+                    // More Options List
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Weitere Optionen")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 4)
+                        
+                        VStack(spacing: 0) {
+                            if showPractical {
+                                listActionRow(title: "Praktikum", icon: "briefcase.fill", color: .mint, action: .practical)
+                                Divider().padding(.leading, 52)
+                            }
+                            if showFachreferat {
+                                listActionRow(title: hasFachreferat ? "Fachreferat anzeigen" : "Fachreferat", icon: hasFachreferat ? "slider.horizontal.3" : "doc.text.fill", color: .pink, disabled: !encryptionKeyLoaded || isFirstSubject, action: .fachreferat)
+                                Divider().padding(.leading, 52)
+                            }
+                            if showSeminar {
+                                listActionRow(title: "Seminarfach", icon: "doc.text.magnifyingglass", color: .purple, disabled: !encryptionKeyLoaded, action: .seminar)
+                                Divider().padding(.leading, 52)
+                            }
+                            listActionRow(title: "Abitur", icon: "graduationcap.fill", color: .red, disabled: isFirstSubject, action: .abitur)
+                        }
+                        .background(
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                .fill(Color(uiColor: .secondarySystemGroupedBackground))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                        .shadow(color: Color.black.opacity(store.darkMode ? 0.2 : 0.05), radius: 8, x: 0, y: 4)
+                    }
                 }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(label)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(labelColor)
-                    Text(title.isEmpty ? description : title)
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(descriptionColor)
-                        .lineLimit(2)
-                }
-                Spacer()
-                Circle()
-                    .fill(descriptionColor.opacity(0.15))
-                    .frame(width: 26, height: 26)
-                    .overlay(
-                        Image(systemName: "arrow.right")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(descriptionColor.opacity(0.9))
-                    )
+                .padding(20)
             }
-            .padding(.vertical, 12)
-            .padding(.horizontal, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
+            .navigationTitle("Erstellen")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") { dismiss() }
+                }
+            }
+        }
+    }
+    
+    private func quickActionCard(title: String, icon: String, color: Color, disabled: Bool = false, action: CreationAction) -> some View {
+        Button {
+            onAction(action)
+        } label: {
+            VStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(color.opacity(0.15))
+                        .frame(width: 52, height: 52)
+                    Image(systemName: icon)
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(color)
+                }
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(primaryText)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 20)
             .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(buttonBackground)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .stroke(buttonBorder, lineWidth: 1)
-                    )
-                    .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(
                         LinearGradient(
                             colors: [
-                                accentPrimary.opacity(isDark ? 0.25 : 0.18),
-                                Color.clear
+                                color.opacity(store.darkMode ? 0.12 : 0.08),
+                                Color(uiColor: .secondarySystemGroupedBackground)
                             ],
-                            startPoint: .leading,
-                            endPoint: .trailing
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
                         )
-                        .frame(width: 6)
-                        .mask(
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        ),
-                        alignment: .leading
                     )
             )
-            .shadow(color: Color.black.opacity(isDark ? 0.42 : 0.12), radius: 10, x: 0, y: 6)
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(color.opacity(0.2), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(store.darkMode ? 0.2 : 0.05), radius: 8, x: 0, y: 4)
+            .opacity(disabled ? 0.5 : 1)
+        }
+        .disabled(disabled)
+        .buttonStyle(ScaleButtonStyle())
+    }
+    
+    private func listActionRow(title: String, icon: String, color: Color, disabled: Bool = false, action: CreationAction) -> some View {
+        Button {
+            onAction(action)
+        } label: {
+            HStack(spacing: 16) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(color.opacity(0.15))
+                        .frame(width: 32, height: 32)
+                    Image(systemName: icon)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(color)
+                }
+                Text(title)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(primaryText)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.secondary.opacity(0.5))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
         }
         .disabled(disabled)
         .buttonStyle(.plain)
-        .opacity(disabled ? 0.55 : 1.0)
+        .opacity(disabled ? 0.5 : 1)
     }
 
-    private var buttonBackground: LinearGradient {
-        LinearGradient(
-            colors: isDark
-                ? [
-                    Color(red: 0.12, green: 0.15, blue: 0.22).opacity(0.96),
-                    Color(red: 0.07, green: 0.08, blue: 0.12).opacity(0.94)
-                ]
-                : [
-                    Color.white.opacity(0.96),
-                    Color.white.opacity(0.90)
-                ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
+    private var primaryText: Color {
+        store.darkMode ? .white : .primary
     }
+}
 
-    private var buttonBorder: LinearGradient {
-        LinearGradient(
-            colors: [
-                accentSecondary.opacity(isDark ? 0.55 : 0.35),
-                Color.white.opacity(isDark ? 0.16 : 0.24)
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-    }
-
-    private var iconGradient: LinearGradient {
-        LinearGradient(
-            colors: [
-                accentPrimary,
-                accentSecondary.opacity(isDark ? 0.85 : 0.76)
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
+struct ScaleButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.95 : 1)
+            .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
     }
 }
