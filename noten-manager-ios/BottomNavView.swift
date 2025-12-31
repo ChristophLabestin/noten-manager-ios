@@ -12,6 +12,7 @@ struct BottomNavView: View {
     }
 
     let currentTab: Tab
+    var isSubscriptionGateActive: Bool = false
 
     var onOpenHome: (() -> Void)?
     var onOpenFinalGrade: (() -> Void)?
@@ -69,25 +70,20 @@ struct BottomNavView: View {
         HStack(spacing: 0) {
             navButton(tab: .home, icon: "house.fill", action: onOpenHome)
             Spacer()
-            navButton(tab: .insights, icon: "chart.bar.fill", action: onOpenInsights)
-            Spacer()
-            addButton
-            Spacer()
-            navButton(tab: .final, icon: "graduationcap.fill", action: onOpenFinalGrade)
-            Spacer()
+            if !isSubscriptionGateActive {
+                navButton(tab: .insights, icon: "chart.bar.fill", action: onOpenInsights)
+                Spacer()
+                addButton
+                Spacer()
+                navButton(tab: .final, icon: "graduationcap.fill", action: onOpenFinalGrade)
+                Spacer()
+            }
             navButton(tab: .settings, icon: "gearshape.fill", action: onOpenSettings)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .shadow(color: Color.black.opacity(isDark ? 0.4 : 0.1), radius: 16, x: 0, y: 8)
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(Color.white.opacity(isDark ? 0.1 : 0.5), lineWidth: 1)
-        }
+        .background(navSurface)
+        .overlay(navBorder)
         .padding(.horizontal, 20)
         .padding(.bottom, -10)
         .sheet(isPresented: $showCreationMenu) {
@@ -107,7 +103,23 @@ struct BottomNavView: View {
         .sheet(isPresented: $showAddSubject) { AddSubjectView().environmentObject(store) }
         .sheet(isPresented: $showAddGrade) { AddGradeView(preselectedSubjectName: quickAddPreselectedSubjectName).environmentObject(store) }
         .sheet(isPresented: $showAddFachreferat) { AddFachreferatView(preselectedSubjectName: quickAddPreselectedSubjectName).environmentObject(store) }
-        .sheet(isPresented: $showFachreferatDetail) { NavigationStack { FachreferatDetailView(subject: Subject(name: "Fachreferat", type: 0, date: Date())).environmentObject(store) } }
+        .sheet(isPresented: $showFachreferatDetail) {
+            NavigationStack {
+                FachreferatDetailView(subject: Subject(name: "Fachreferat", type: 0, date: Date()))
+                    .environmentObject(store)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button {
+                                showFachreferatDetail = false
+                            } label: {
+                                Image(systemName: "chevron.down")
+                                    .imageScale(.medium)
+                            }
+                            .accessibilityLabel("Schließen")
+                        }
+                    }
+            }
+        }
         .sheet(isPresented: $showAddHomework) { AddHomeworkView(preselectedSubjectName: quickAddPreselectedSubjectName).environmentObject(store) }
         .sheet(isPresented: $showAddExam) { AddExamView(preselectedSubjectName: quickAddPreselectedSubjectName).environmentObject(store) }
         .sheet(isPresented: $showPractical) { NavigationStack { PraktikumDetailView().environmentObject(store) } }
@@ -126,7 +138,21 @@ struct BottomNavView: View {
             ZStack {
                 if isSelected {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(activeColor.opacity(0.15))
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    activeColor.opacity(isDark ? 0.28 : 0.18),
+                                    activeColor.opacity(isDark ? 0.12 : 0.08)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .stroke(activeColor.opacity(isDark ? 0.45 : 0.28), lineWidth: 1)
+                        )
+                        .shadow(color: activeColor.opacity(isDark ? 0.35 : 0.2), radius: 6, x: 0, y: 3)
                         .matchedGeometryEffect(id: "TAB_BG", in: namespace)
                 }
                 Image(systemName: icon)
@@ -148,20 +174,98 @@ struct BottomNavView: View {
         } label: {
             ZStack {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(activeColor)
-                    .shadow(color: activeColor.opacity(0.3), radius: 6, x: 0, y: 3)
-                
+                    .fill(addButtonGradient)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(Color.white.opacity(isDark ? 0.24 : 0.55), lineWidth: 1)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(isDark ? 0.18 : 0.32),
+                                        Color.clear
+                                    ],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .blendMode(.screen)
+                    )
+                    .shadow(color: activeColor.opacity(isDark ? 0.45 : 0.3), radius: 10, x: 0, y: 6)
+
                 Image(systemName: "plus")
                     .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(.white)
             }
-            .frame(width: 52, height: 44)
+            .frame(width: 56, height: 46)
         }
         .buttonStyle(ScaleButtonStyle())
     }
 
+    private var navCornerRadius: CGFloat { 26 }
+
+    private var navBaseTop: Color {
+        if isDark {
+            return isFeminine ? Color(hex: "#1b1022") : Color(hex: "#0b1220")
+        }
+        return isFeminine ? Color(hex: "#fff1f7") : Color(hex: "#eef2ff")
+    }
+
+    private var navBaseBottom: Color {
+        if isDark {
+            return isFeminine ? Color(hex: "#120a16") : Color(hex: "#111827")
+        }
+        return isFeminine ? Color(hex: "#fff7fb") : Color(hex: "#f8fafc")
+    }
+
+    private var navSurface: some View {
+        RoundedRectangle(cornerRadius: navCornerRadius, style: .continuous)
+            .fill(
+                LinearGradient(
+                    colors: [navBaseTop, navBaseBottom],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: navCornerRadius, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                activeColor.opacity(isDark ? 0.18 : 0.1),
+                                Color.clear
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            )
+            .shadow(color: Color.black.opacity(isDark ? 0.5 : 0.14), radius: 14, x: 0, y: 8)
+    }
+
+    private var navBorder: some View {
+        RoundedRectangle(cornerRadius: navCornerRadius, style: .continuous)
+            .stroke(isDark ? Color.white.opacity(0.12) : Color.black.opacity(0.08), lineWidth: 1)
+    }
+
+    private var addButtonGradient: LinearGradient {
+        LinearGradient(
+            colors: [
+                activeColor.opacity(isDark ? 0.85 : 0.95),
+                activeColor
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
     private func handleCreationAction(_ action: CreationAction) {
         showCreationMenu = false
+        if isSubscriptionGateActive {
+            return
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             switch action {
             case .homework: showAddHomework = true
@@ -195,99 +299,86 @@ struct CreationMenuView: View {
     let showSeminar: Bool
     let encryptionKeyLoaded: Bool
     
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var store: GradesStore
 
     private var isFeminine: Bool { store.theme == "feminine" }
     private var isDark: Bool { store.darkMode }
     
-    private var accentColor: Color {
-        if isFeminine {
-            return isDark ? Color(hex: "#f472b6") : Color(hex: "#ec4899")
-        }
-        return isDark ? Color(hex: "#60a5fa") : Color(hex: "#2563eb")
-    }
-
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 24) {
-                    // Quick Actions Grid
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
-                        quickActionCard(
-                            title: "Hausaufgabe",
-                            icon: "checklist",
-                            color: .cyan,
-                            disabled: isFirstSubject,
-                            action: .homework
-                        )
-                        quickActionCard(
-                            title: "Note",
-                            icon: "list.bullet.rectangle.portrait.fill",
-                            color: .indigo,
-                            disabled: disableAddGrade,
-                            action: .grade
-                        )
-                        quickActionCard(
-                            title: "Klausur",
-                            icon: "calendar.badge.clock",
-                            color: .orange,
-                            disabled: isFirstSubject,
-                            action: .exam
-                        )
-                        quickActionCard(
-                            title: "Fach",
-                            icon: "folder.badge.plus",
-                            color: .blue,
-                            action: .subject
-                        )
-                    }
-                    
-                    // More Options List
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text("Weitere Optionen")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 4)
-                        
-                        VStack(spacing: 0) {
-                            if showPractical {
-                                listActionRow(title: "Praktikum", icon: "briefcase.fill", color: .mint, action: .practical)
-                                Divider().padding(.leading, 52)
-                            }
-                            if showFachreferat {
-                                listActionRow(title: hasFachreferat ? "Fachreferat anzeigen" : "Fachreferat", icon: hasFachreferat ? "slider.horizontal.3" : "doc.text.fill", color: .pink, disabled: !encryptionKeyLoaded || isFirstSubject, action: .fachreferat)
-                                Divider().padding(.leading, 52)
-                            }
-                            if showSeminar {
-                                listActionRow(title: "Seminarfach", icon: "doc.text.magnifyingglass", color: .purple, disabled: !encryptionKeyLoaded, action: .seminar)
-                                Divider().padding(.leading, 52)
-                            }
-                            listActionRow(title: "Abitur", icon: "graduationcap.fill", color: .red, disabled: isFirstSubject, action: .abitur)
-                        }
-                        .background(
-                            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                .fill(Color(uiColor: .secondarySystemGroupedBackground))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                        .shadow(color: Color.black.opacity(store.darkMode ? 0.2 : 0.05), radius: 8, x: 0, y: 4)
-                    }
+                VStack(spacing: 16) {
+                    quickActionsSection
+                    moreOptionsSection
                 }
                 .padding(20)
             }
-            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
-            .navigationTitle("Erstellen")
+            .background(ThemedBackground(isDark: isDark, isFeminine: isFeminine, intensity: store.themeBackgroundIntensity))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("Schnellaktionen")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(primaryText)
+                }
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") { dismiss() }
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .imageScale(.medium)
+                    }
+                    .accessibilityLabel("Abbrechen")
                 }
             }
+        }
+    }
+
+    private var quickActionsSection: some View {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
+            quickActionCard(
+                title: "Hausaufgabe",
+                icon: "checklist",
+                color: .cyan,
+                disabled: isFirstSubject,
+                action: .homework
+            )
+            quickActionCard(
+                title: "Note",
+                icon: "list.bullet.rectangle.portrait.fill",
+                color: .indigo,
+                disabled: disableAddGrade,
+                action: .grade
+            )
+            quickActionCard(
+                title: "Klausur",
+                icon: "calendar.badge.clock",
+                color: .orange,
+                disabled: isFirstSubject,
+                action: .exam
+            )
+            quickActionCard(
+                title: "Fach",
+                icon: "folder.badge.plus",
+                color: .blue,
+                action: .subject
+            )
+        }
+    }
+
+    private var moreOptionsSection: some View {
+        VStack(spacing: 12) {
+            if showPractical {
+                listActionRow(title: "Praktikum", icon: "briefcase.fill", color: .mint, action: .practical)
+            }
+            if showFachreferat {
+                listActionRow(title: hasFachreferat ? "Fachreferat anzeigen" : "Fachreferat", icon: hasFachreferat ? "slider.horizontal.3" : "doc.text.fill", color: .pink, disabled: !encryptionKeyLoaded || isFirstSubject, action: .fachreferat)
+            }
+            if showSeminar {
+                listActionRow(title: "Seminarfach", icon: "doc.text.magnifyingglass", color: .purple, disabled: !encryptionKeyLoaded, action: .seminar)
+            }
+            listActionRow(title: "Abitur", icon: "graduationcap.fill", color: .red, disabled: isFirstSubject, action: .abitur)
         }
     }
     
@@ -298,7 +389,7 @@ struct CreationMenuView: View {
             VStack(spacing: 12) {
                 ZStack {
                     Circle()
-                        .fill(color.opacity(0.15))
+                        .fill(color.opacity(isDark ? 0.22 : 0.16))
                         .frame(width: 52, height: 52)
                     Image(systemName: icon)
                         .font(.system(size: 24, weight: .semibold))
@@ -307,28 +398,19 @@ struct CreationMenuView: View {
                 Text(title)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(primaryText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 20)
+            .padding(.vertical, 18)
             .background(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                color.opacity(store.darkMode ? 0.12 : 0.08),
-                                Color(uiColor: .secondarySystemGroupedBackground)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                cardSurface(accent: color, cornerRadius: 20)
+                    .shadow(color: cardShadow, radius: 8, x: 0, y: 4)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(color.opacity(0.2), lineWidth: 1)
+                cardBorder(accent: color, cornerRadius: 20)
             )
-            .shadow(color: Color.black.opacity(store.darkMode ? 0.2 : 0.05), radius: 8, x: 0, y: 4)
-            .opacity(disabled ? 0.5 : 1)
+            .opacity(disabled ? 0.45 : 1)
         }
         .disabled(disabled)
         .buttonStyle(ScaleButtonStyle())
@@ -338,34 +420,95 @@ struct CreationMenuView: View {
         Button {
             onAction(action)
         } label: {
-            HStack(spacing: 16) {
+            HStack(spacing: 14) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(color.opacity(0.15))
-                        .frame(width: 32, height: 32)
+                    Circle()
+                        .fill(color.opacity(isDark ? 0.2 : 0.14))
+                        .frame(width: 40, height: 40)
                     Image(systemName: icon)
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(color)
                 }
                 Text(title)
-                    .font(.body.weight(.medium))
+                    .font(.headline.weight(.semibold))
                     .foregroundStyle(primaryText)
                 Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Color.secondary.opacity(0.5))
+                Image(systemName: "chevron.forward")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(secondaryText)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .contentShape(Rectangle())
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                cardSurface(accent: color, cornerRadius: 18)
+                    .shadow(color: rowShadow, radius: 10, x: 0, y: 6)
+            )
+            .overlay(
+                cardBorder(accent: color, cornerRadius: 18)
+            )
         }
         .disabled(disabled)
         .buttonStyle(.plain)
-        .opacity(disabled ? 0.5 : 1)
+        .opacity(disabled ? 0.45 : 1)
     }
 
     private var primaryText: Color {
-        store.darkMode ? .white : .primary
+        isDark ? .white : Color(hex: "#0f172a")
+    }
+
+    private var secondaryText: Color {
+        isDark ? Color.white.opacity(0.75) : Color.secondary
+    }
+
+    private var cardShadow: Color {
+        Color.black.opacity(isDark ? 0.42 : 0.1)
+    }
+
+    private var rowShadow: Color {
+        Color.black.opacity(isDark ? 0.36 : 0.08)
+    }
+
+    private var cardTop: Color {
+        if isDark {
+            return isFeminine ? Color(hex: "#1b1022") : Color(hex: "#0b1220")
+        }
+        return isFeminine ? Color(hex: "#fff1f7") : Color(hex: "#eef2ff")
+    }
+
+    private var cardBottom: Color {
+        if isDark {
+            return isFeminine ? Color(hex: "#120a16") : Color(hex: "#111827")
+        }
+        return isFeminine ? Color(hex: "#fff7fb") : Color(hex: "#f8fafc")
+    }
+
+    private func cardSurface(accent: Color, cornerRadius: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(
+                LinearGradient(
+                    colors: [cardTop, cardBottom],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                accent.opacity(isDark ? 0.14 : 0.08),
+                                Color.clear
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            )
+    }
+
+    private func cardBorder(accent: Color, cornerRadius: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .stroke(accent.opacity(isDark ? 0.22 : 0.12), lineWidth: 1)
     }
 }
 

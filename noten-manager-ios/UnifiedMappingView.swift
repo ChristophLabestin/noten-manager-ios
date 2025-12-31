@@ -120,7 +120,13 @@ struct UnifiedMappingView: View {
             .sheetNavigationTitle(groupTitle)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") { dismiss() }
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .imageScale(.medium)
+                    }
+                    .accessibilityLabel("Abbrechen")
                 }
             }
             .onAppear {

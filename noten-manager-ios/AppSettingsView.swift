@@ -1,4 +1,5 @@
 import SwiftUI
+import StoreKit
 import FirebaseAuth
 import FirebaseFirestore
 import UIKit
@@ -10,6 +11,11 @@ struct AppSettingsView: View {
     @EnvironmentObject var offlineManager: OfflineModeManager
     @EnvironmentObject var biometricManager: BiometricAuthManager
     @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var storeKit: StoreKitManager
+    @AppStorage("launchOfferPurchased") private var launchOfferPurchased = false
+#if DEBUG
+    @AppStorage(LaunchOfferNotificationManager.debugForceFebruaryKey) private var debugForceFebruary = false
+#endif
 
     @State private var newName: String = ""
     @State private var isSavingName: Bool = false
@@ -18,6 +24,8 @@ struct AppSettingsView: View {
     @State private var navigateToFinal: Bool = false
     @State private var showHomeworkSheet: Bool = false
     @State private var showExamSheet: Bool = false
+    @State private var purchaseStatusMessage: String?
+    @State private var purchaseStatusIsError: Bool = false
 
     // Gruppen
     @State private var groupJoinCode: String = ""
@@ -92,6 +100,15 @@ struct AppSettingsView: View {
     ]
 
     private var maxExamSubjects: Int { 4 }
+
+    private var offerDisplayPrice: String {
+        let price = storeKit.product?.displayPrice.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let price, !price.isEmpty {
+            return price
+        }
+        return "3,99€"
+    }
+
     private var examEligibleSubjects: [Subject] {
         store
             .sortedSubjectsForDisplay()
@@ -271,15 +288,17 @@ struct AppSettingsView: View {
                             .softFadeIn(enabled: animationsOn, delay: 0.20, offset: 12)
                         helpCard
                             .softFadeIn(enabled: animationsOn, delay: 0.24, offset: 12)
-                        offlineCard
+                        purchaseCard
                             .softFadeIn(enabled: animationsOn, delay: 0.26, offset: 12)
+                        offlineCard
+                            .softFadeIn(enabled: animationsOn, delay: 0.28, offset: 12)
                         resetCard
-                            .softFadeIn(enabled: animationsOn, delay: 0.30, offset: 12)
+                            .softFadeIn(enabled: animationsOn, delay: 0.32, offset: 12)
                         accountCard
-                            .softFadeIn(enabled: animationsOn, delay: 0.34, offset: 12)
+                            .softFadeIn(enabled: animationsOn, delay: 0.36, offset: 12)
                             .id("accountCard")
                         infoCard
-                            .softFadeIn(enabled: animationsOn, delay: 0.38, offset: 12)
+                            .softFadeIn(enabled: animationsOn, delay: 0.40, offset: 12)
 
                     }
                     .padding(.horizontal, 16)
@@ -1036,6 +1055,225 @@ struct AppSettingsView: View {
                 }
             }
         }
+    }
+
+    private var purchaseCard: some View {
+        let offerActive = LaunchOfferNotificationManager.isOfferActive()
+        let isSubscribed = storeKit.isSubscriptionActive
+        let showsEarlyBirdOffer = !launchOfferPurchased && offerActive
+
+        let statusTitle: String
+        let statusAccent: Color
+        let statusDetail: String
+        let headline: String
+        let subline: String
+        let headerIcon: String
+        let headerAccent: Color
+
+        if launchOfferPurchased {
+            statusTitle = "Status: Aktiv"
+            statusAccent = .green
+            statusDetail = "Kauf ist mit deiner Apple ID verknüpft und kann jederzeit wiederhergestellt werden."
+            headline = "Lifetime freigeschaltet"
+            subline = "Danke für deinen Kauf."
+            headerIcon = "checkmark.seal.fill"
+            headerAccent = .green
+        } else if showsEarlyBirdOffer {
+            statusTitle = "Status: Early-Bird verfügbar"
+            statusAccent = .orange
+            statusDetail = "Kein Kauf auf diesem Gerät aktiviert. Wenn du bereits gekauft hast, tippe auf Käufe wiederherstellen."
+            headline = "Earlybird Lifetime"
+            subline = "Einmalig \(offerDisplayPrice) bis 31.01.2026."
+            headerIcon = "cart.badge.plus"
+            headerAccent = .orange
+        } else {
+            statusTitle = isSubscribed ? "Status: Abo aktiv" : "Status: Kein Abo"
+            statusAccent = isSubscribed ? .green : .secondary
+            statusDetail = isSubscribed
+                ? "Abo ist mit deiner Apple ID verknüpft und kann jederzeit wiederhergestellt werden."
+                : "Early-Bird ist beendet. Pro gibt es jetzt im Abo."
+            headline = "Noten Manager Pro Abo"
+            subline = isSubscribed ? "Danke für dein Abo." : "Jetzt im Abo verfügbar."
+            headerIcon = isSubscribed ? "checkmark.seal.fill" : "creditcard.fill"
+            headerAccent = isSubscribed ? .green : .blue
+        }
+
+        return SettingsCard(
+            title: "Noten Manager Pro",
+            subtitle: "Kaufstatus und Wiederherstellung",
+            systemImage: "cart.fill",
+            accent: .green
+        ) {
+            SettingsSectionBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 12) {
+                        Image(systemName: headerIcon)
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(headerAccent)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(headline)
+                                .font(sectionHeaderFont)
+                            Text(statusTitle)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(statusAccent)
+                        }
+                        Spacer()
+                    }
+
+                    Text(subline)
+                        .font(helperFont)
+                        .foregroundStyle(.secondary)
+
+                    Text(statusDetail)
+                        .font(helperFont)
+                        .foregroundStyle(.secondary)
+
+                    if showsEarlyBirdOffer {
+                        Button {
+                            Task { await purchaseLaunchOffer() }
+                        } label: {
+                            HStack(spacing: 10) {
+                                if storeKit.isProcessingPurchase {
+                                    ProgressView()
+                                        .tint(.green)
+                                } else {
+                                    Image(systemName: "cart.fill")
+                                        .font(.headline.weight(.semibold))
+                                }
+                                Text("Jetzt kaufen")
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(SoftTintButtonStyle(accent: .green))
+                        .disabled(storeKit.isProcessingPurchase)
+                    }
+
+                    Button {
+                        Task { await restorePurchases() }
+                    } label: {
+                        HStack(spacing: 10) {
+                            if storeKit.isRestoring {
+                                ProgressView()
+                                    .tint(.green)
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.headline.weight(.semibold))
+                            }
+                            Text("Käufe wiederherstellen")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(SoftTintButtonStyle(accent: .green))
+                    .disabled(storeKit.isRestoring)
+
+#if DEBUG
+                    Button {
+                        debugForceFebruary.toggle()
+                        purchaseStatusMessage = debugForceFebruary
+                            ? "Debug: Februar simuliert."
+                            : "Debug: Echtzeit aktiv."
+                        purchaseStatusIsError = false
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: debugForceFebruary ? "calendar.badge.checkmark" : "calendar")
+                                .font(.headline.weight(.semibold))
+                            Text(debugForceFebruary ? "Debug: Februar simuliert" : "Debug: Februar simulieren")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(SoftTintButtonStyle(accent: .orange))
+
+                    Button {
+                        debugResetLaunchOfferPurchase()
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "arrow.uturn.backward")
+                                .font(.headline.weight(.semibold))
+                            Text("Debug: Kaufstatus zuruecksetzen")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(SoftTintButtonStyle(accent: .red))
+#endif
+
+                    if let message = purchaseStatusMessage, !message.isEmpty {
+                        Text(message)
+                            .font(helperFont)
+                            .foregroundStyle(purchaseStatusIsError ? .red : .secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func purchaseLaunchOffer() async {
+        purchaseStatusMessage = nil
+        purchaseStatusIsError = false
+        let result = await storeKit.purchaseLaunchOffer()
+        switch result {
+        case .success:
+            purchaseStatusMessage = "Kauf erfolgreich. Danke!"
+            purchaseStatusIsError = false
+        case .pending:
+            purchaseStatusMessage = "Der Kauf wird noch geprüft. Wir schalten die Vollversion frei, sobald der Vorgang abgeschlossen ist."
+            purchaseStatusIsError = false
+        case .cancelled:
+            purchaseStatusMessage = "Kauf abgebrochen."
+            purchaseStatusIsError = false
+        case .failed(let failure):
+            purchaseStatusMessage = purchaseFailureMessage(failure)
+            purchaseStatusIsError = true
+        }
+    }
+
+    @MainActor
+    private func restorePurchases() async {
+        purchaseStatusMessage = nil
+        purchaseStatusIsError = false
+        let outcome = await storeKit.restorePurchases()
+        switch outcome {
+        case .success(let found):
+            purchaseStatusMessage = found ? "Käufe wurden wiederhergestellt." : "Keine Käufe gefunden."
+            purchaseStatusIsError = false
+        case .failed(let failure):
+            purchaseStatusMessage = restoreFailureMessage(failure)
+            purchaseStatusIsError = true
+        }
+    }
+
+    private func purchaseFailureMessage(_ failure: StoreKitManager.PurchaseFailure) -> String {
+        switch failure {
+        case .offerExpired:
+            return "Das Angebot ist abgelaufen."
+        case .productUnavailable:
+            return "Das Produkt ist aktuell nicht verfügbar. Bitte später erneut versuchen."
+        case .network:
+            return "Keine Internetverbindung. Bitte später erneut versuchen."
+        case .notAllowed:
+            return "Käufe sind auf diesem Gerät nicht erlaubt."
+        case .verificationFailed:
+            return "Kauf konnte nicht bestätigt werden. Bitte später erneut versuchen."
+        case .unknown:
+            return "Kauf konnte nicht abgeschlossen werden. Bitte später erneut versuchen."
+        }
+    }
+
+    private func restoreFailureMessage(_ failure: StoreKitManager.RestoreFailure) -> String {
+        switch failure {
+        case .network:
+            return "Keine Internetverbindung. Bitte später erneut versuchen."
+        case .notAllowed:
+            return "Käufe sind auf diesem Gerät nicht erlaubt."
+        case .unknown:
+            return "Käufe konnten nicht wiederhergestellt werden. Bitte später erneut versuchen."
+        }
+    }
+
+    private func debugResetLaunchOfferPurchase() {
+        launchOfferPurchased = false
+        purchaseStatusMessage = "Debug: Kaufstatus zurueckgesetzt."
+        purchaseStatusIsError = false
     }
 
     private func activateOfflineManually() {
@@ -1903,10 +2141,14 @@ private struct ChangeEmailSheet: View {
                         .font(.headline.weight(.semibold))
                 }
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") {
+                    Button {
                         cancel()
                         dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .imageScale(.medium)
                     }
+                    .accessibilityLabel("Abbrechen")
                 }
             }
             .interactiveDismissDisabled(isProcessing)
@@ -2030,10 +2272,14 @@ private struct ChangePasswordSheet: View {
                         .font(.headline.weight(.semibold))
                 }
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") {
+                    Button {
                         cancel()
                         dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .imageScale(.medium)
                     }
+                    .accessibilityLabel("Abbrechen")
                 }
             }
             .interactiveDismissDisabled(isProcessing)
@@ -2323,7 +2569,13 @@ struct SchoolYearEditView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Schließen") { dismiss() }
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .imageScale(.medium)
+                    }
+                    .accessibilityLabel("Schließen")
                 }
             }
             .background(
@@ -2819,10 +3071,14 @@ private struct ResetConfirmSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") {
+                    Button {
                         isPresented = false
                         dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .imageScale(.medium)
                     }
+                    .accessibilityLabel("Abbrechen")
                 }
             }
             .scrollDismissesKeyboard(.interactively)

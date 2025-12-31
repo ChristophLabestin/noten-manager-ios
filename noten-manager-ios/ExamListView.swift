@@ -108,16 +108,14 @@ struct ExamListView: View {
                         systemImage: "calendar",
                         accent: .indigo
                     ) {
-                        SettingsSectionBox {
-                            if upcomingExams.isEmpty {
-                                Text("Du hast aktuell keine anstehenden Klausuren.")
-                                    .foregroundStyle(.secondary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            } else {
-                                LazyVStack(spacing: 10) {
-                                    ForEach(upcomingExams) { exam in
-                                        examRow(exam)
-                                    }
+                        if upcomingExams.isEmpty {
+                            Text("Du hast aktuell keine anstehenden Klausuren.")
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            LazyVStack(spacing: 10) {
+                                ForEach(upcomingExams) { exam in
+                                    examRow(exam)
                                 }
                             }
                         }
@@ -130,11 +128,9 @@ struct ExamListView: View {
                             systemImage: "hourglass.circle.fill",
                             accent: .orange
                         ) {
-                            SettingsSectionBox {
-                                LazyVStack(spacing: 10) {
-                                    ForEach(waitingForGradeExams) { exam in
-                                        examRow(exam)
-                                    }
+                            LazyVStack(spacing: 10) {
+                                ForEach(waitingForGradeExams) { exam in
+                                    examRow(exam)
                                 }
                             }
                         }
@@ -147,20 +143,18 @@ struct ExamListView: View {
                             systemImage: "checkmark.seal.fill",
                             accent: .green
                         ) {
-                            SettingsSectionBox {
-                                LazyVStack(spacing: 10) {
-                                    ForEach(Array(completedExams.prefix(visibleCompletedCount))) { exam in
-                                        examRow(exam)
+                            LazyVStack(spacing: 10) {
+                                ForEach(Array(completedExams.prefix(visibleCompletedCount))) { exam in
+                                    examRow(exam)
+                                }
+                                if completedExams.count > visibleCompletedCount {
+                                    Button {
+                                        visibleCompletedCount += 5
+                                    } label: {
+                                        Text("Weitere 5 anzeigen")
+                                            .frame(maxWidth: .infinity)
                                     }
-                                    if completedExams.count > visibleCompletedCount {
-                                        Button {
-                                            visibleCompletedCount += 5
-                                        } label: {
-                                            Text("Weitere 5 anzeigen")
-                                                .frame(maxWidth: .infinity)
-                                        }
-                                        .buttonStyle(SoftTintButtonStyle(accent: .green))
-                                    }
+                                    .buttonStyle(SoftTintButtonStyle(accent: .green))
                                 }
                             }
                         }
@@ -173,7 +167,13 @@ struct ExamListView: View {
             .sheetNavigationTitle(sheetTitle)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Schließen") { dismiss() }
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .imageScale(.medium)
+                    }
+                    .accessibilityLabel("Schließen")
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
@@ -788,14 +788,23 @@ struct ExamDetailSheet: View {
             .sheetNavigationTitle(examTitle)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Schließen") { dismiss() }
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .imageScale(.medium)
+                    }
+                    .accessibilityLabel("Schließen")
                 }
                 if let onEdit {
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("Bearbeiten") {
+                        Button {
                             onEdit(exam)
                             dismiss()
+                        } label: {
+                            ToolbarIcon(symbol: "slider.horizontal.3", showDot: false)
                         }
+                        .accessibilityLabel("Bearbeiten")
                     }
                 }
             }
@@ -981,9 +990,13 @@ private struct ExamAddChooserView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Schließen") {
+                    Button {
                         dismiss()
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .imageScale(.medium)
                     }
+                    .accessibilityLabel("Schließen")
                 }
             }
         }
@@ -1076,13 +1089,23 @@ struct PersonalNoteEditor: View {
             .sheetNavigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") { dismiss() }
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .imageScale(.medium)
+                    }
+                    .accessibilityLabel("Abbrechen")
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Speichern") {
+                    Button {
                         onSave(text)
                         dismiss()
+                    } label: {
+                        Image(systemName: "checkmark")
+                            .imageScale(.medium)
                     }
+                    .accessibilityLabel("Speichern")
                 }
             }
         }

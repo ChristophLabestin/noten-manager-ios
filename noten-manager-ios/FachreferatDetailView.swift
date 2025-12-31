@@ -2,7 +2,6 @@ import SwiftUI
 
 struct FachreferatDetailView: View {
     @EnvironmentObject var store: GradesStore
-    @Environment(\.dismiss) private var dismiss
 
     let subject: Subject
     @State private var showEditSheet: Bool = false
@@ -98,14 +97,14 @@ struct FachreferatDetailView: View {
                 .environmentObject(store)
         }
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Schließen") { dismiss() }
-            }
             ToolbarItem(placement: .navigationBarTrailing) {
                 if referat != nil {
-                    Button("Bearbeiten") {
+                    Button {
                         showEditSheet = true
+                    } label: {
+                        ToolbarIcon(symbol: "slider.horizontal.3", showDot: false)
                     }
+                    .accessibilityLabel("Bearbeiten")
                 }
             }
         }

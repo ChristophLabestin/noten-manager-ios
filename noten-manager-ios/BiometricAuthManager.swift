@@ -63,6 +63,7 @@ final class BiometricAuthManager: ObservableObject {
         let biometricContext = LAContext()
         biometricContext.localizedCancelTitle = "Abbrechen"
         biometricContext.localizedFallbackTitle = "Code verwenden"
+        biometricContext.touchIDAuthenticationAllowableReuseDuration = 10
         var error: NSError?
 
         let canUseBiometrics = biometricContext.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error)

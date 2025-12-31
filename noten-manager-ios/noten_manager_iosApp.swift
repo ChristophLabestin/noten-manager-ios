@@ -7,7 +7,7 @@
 
 import SwiftUI
 import UIKit
-import UserNotifications
+@preconcurrency import UserNotifications
 import FirebaseCore
 import BackgroundTasks
 
@@ -21,6 +21,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         HomeworkNotificationManager.configureCategories()
         ExamNotificationManager.configureCategories()
         DailyReminderNotificationManager.configureCategories()
+        LaunchOfferNotificationManager.configureCategory()
         BackgroundRefreshManager.register()
         BackgroundRefreshManager.schedule()
         if #unavailable(iOS 13.0) {
@@ -40,6 +41,11 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
+        if let item = NotificationInboxItem.from(notification) {
+            Task { @MainActor in
+                NotificationInboxStore.shared.record(item: item)
+            }
+        }
         completionHandler([.banner, .sound])
     }
 
@@ -48,9 +54,15 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
+        if let item = NotificationInboxItem.from(response.notification, markRead: true) {
+            Task { @MainActor in
+                NotificationInboxStore.shared.record(item: item)
+            }
+        }
         HomeworkNotificationManager.handleNotificationResponse(response)
         ExamNotificationManager.handleNotificationResponse(response)
         DailyReminderNotificationManager.handleNotificationResponse(response)
+        LaunchOfferNotificationManager.handleNotificationResponse(response)
         completionHandler()
     }
 }

@@ -171,7 +171,13 @@ struct HomeworkDetailSheet: View {
             .sheetNavigationTitle("Hausaufgabe")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Schließen") { dismiss() }
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .imageScale(.medium)
+                    }
+                    .accessibilityLabel("Schließen")
                 }
                 if let onEdit {
                     ToolbarItem(placement: .confirmationAction) {

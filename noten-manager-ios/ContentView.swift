@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 import FirebaseAuth
 import LocalAuthentication
 
@@ -18,6 +19,7 @@ enum DeeplinkDestination: Equatable {
 struct ContentView: View {
     @StateObject private var authManager = AuthManager()
     @StateObject private var biometricManager = BiometricAuthManager.shared
+    @StateObject private var storeKitManager = StoreKitManager()
     @EnvironmentObject private var offlineManager: OfflineModeManager
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
@@ -27,6 +29,7 @@ struct ContentView: View {
     @State private var biometricUnlocked: Bool = false
     @State private var biometricMessage: String?
     @State private var isRequestingBiometric: Bool = false
+    @State private var pendingBiometricAfterUnlock: Bool = false
     @State private var incomingHomeworkShare: HomeworkShareLinkPayload?
     @State private var incomingExamId: String?
     @State private var deeplinkDestination: DeeplinkDestination?
@@ -52,6 +55,7 @@ struct ContentView: View {
                         .environmentObject(authManager)
                         .environmentObject(offlineManager)
                         .environmentObject(biometricManager)
+                        .environmentObject(storeKitManager)
                     }
                 } else {
                     NavigationStack {
@@ -99,16 +103,22 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .background {
                 biometricUnlocked = false
+                pendingBiometricAfterUnlock = biometricRequired
                 let snapshot = offlineManager.cachedSnapshot ?? offlineManager.availableSnapshot()
                 let exams = snapshot.map { $0.exams + $0.sharedExams }
                 BackgroundRefreshManager.schedule(for: exams)
             } else if phase == .active {
-                Task { await attemptBiometricUnlockIfNeeded(force: false) }
+                requestBiometricUnlockIfNeeded(force: false)
                 Task { await BackgroundRefreshManager.refreshLiveActivitiesFromSnapshot() }
             }
         }
         .onChange(of: biometricManager.isEnabledForActiveUser) { _, _ in
             refreshBiometricState(triggerUnlock: false)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.protectedDataDidBecomeAvailableNotification)) { _ in
+            guard pendingBiometricAfterUnlock else { return }
+            pendingBiometricAfterUnlock = false
+            requestBiometricUnlockIfNeeded(force: false)
         }
         .alert("Offline-Modus nutzen?", isPresented: $showOfflinePrompt) {
             Button("Offline starten") {
@@ -223,6 +233,7 @@ struct ContentView: View {
         if !requires {
             biometricUnlocked = true
             biometricMessage = nil
+            pendingBiometricAfterUnlock = false
             return
         }
         if !triggerUnlock && biometricUnlocked {
@@ -232,7 +243,7 @@ struct ContentView: View {
         biometricUnlocked = false
         biometricMessage = biometricManager.biometricsAvailable ? nil : "\(biometricManager.biometryName()) ist aktuell nicht verfügbar."
         if triggerUnlock {
-            Task { await attemptBiometricUnlockIfNeeded(force: true) }
+            requestBiometricUnlockIfNeeded(force: true)
         }
     }
 
@@ -242,6 +253,10 @@ struct ContentView: View {
         guard requires else {
             biometricUnlocked = true
             biometricMessage = nil
+            return
+        }
+        guard UIApplication.shared.isProtectedDataAvailable else {
+            pendingBiometricAfterUnlock = true
             return
         }
         if !biometricManager.biometricsAvailable {
@@ -258,6 +273,15 @@ struct ContentView: View {
             biometricMessage = success ? nil : "\(biometricManager.biometryName()) fehlgeschlagen oder abgebrochen."
             isRequestingBiometric = false
         }
+    }
+
+    private func requestBiometricUnlockIfNeeded(force: Bool) {
+        guard biometricRequired else { return }
+        guard UIApplication.shared.isProtectedDataAvailable else {
+            pendingBiometricAfterUnlock = true
+            return
+        }
+        Task { await attemptBiometricUnlockIfNeeded(force: force) }
     }
 
     private var biometricLockScreen: some View {
@@ -367,6 +391,7 @@ struct ContentView: View {
 
 extension Notification.Name {
     static let openExamDetail = Notification.Name("openExamDetail")
+    static let openLaunchOffer = Notification.Name("openLaunchOffer")
 }
 
 private struct PreAuthOnboardingView: View {

@@ -156,6 +156,13 @@ enum DailyReminderNotificationManager {
             content.sound = .default
 
             var userInfo: [AnyHashable: Any] = [:]
+            let examIds = tomorrowExams.map(\.id)
+            if !examIds.isEmpty {
+                userInfo["examIds"] = examIds
+                if examIds.count == 1 {
+                    userInfo["examId"] = examIds[0]
+                }
+            }
             if let hw = tomorrowHomeworks.sorted(by: { ($0.dueDate ?? .distantFuture) < ($1.dueDate ?? .distantFuture) }).first {
                 userInfo["homeworkId"] = hw.id
                 if let gid = hw.groupId, !gid.isEmpty {

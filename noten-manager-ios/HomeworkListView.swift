@@ -88,16 +88,14 @@ struct HomeworkListView: View {
                         systemImage: "checklist",
                         accent: .indigo
                     ) {
-                        SettingsSectionBox {
-                            if openHomeworks.isEmpty {
-                                Text("Du hast aktuell keine offenen Hausaufgaben.")
-                                    .foregroundStyle(.secondary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            } else {
-                                LazyVStack(spacing: 10) {
-                                    ForEach(openHomeworks) { hw in
-                                        homeworkRow(hw)
-                                    }
+                        if openHomeworks.isEmpty {
+                            Text("Du hast aktuell keine offenen Hausaufgaben.")
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            LazyVStack(spacing: 10) {
+                                ForEach(openHomeworks) { hw in
+                                    homeworkRow(hw)
                                 }
                             }
                         }
@@ -110,20 +108,18 @@ struct HomeworkListView: View {
                             systemImage: "checkmark.seal.fill",
                             accent: .green
                         ) {
-                            SettingsSectionBox {
-                                LazyVStack(spacing: 10) {
-                                    ForEach(Array(completedHomeworks.prefix(visibleCompletedCount))) { hw in
-                                        homeworkRow(hw)
+                            LazyVStack(spacing: 10) {
+                                ForEach(Array(completedHomeworks.prefix(visibleCompletedCount))) { hw in
+                                    homeworkRow(hw)
+                                }
+                                if completedHomeworks.count > visibleCompletedCount {
+                                    Button {
+                                        visibleCompletedCount += 5
+                                    } label: {
+                                        Text("Weitere 5 anzeigen")
+                                            .frame(maxWidth: .infinity)
                                     }
-                                    if completedHomeworks.count > visibleCompletedCount {
-                                        Button {
-                                            visibleCompletedCount += 5
-                                        } label: {
-                                            Text("Weitere 5 anzeigen")
-                                                .frame(maxWidth: .infinity)
-                                        }
-                                        .buttonStyle(SoftTintButtonStyle(accent: .green))
-                                    }
+                                    .buttonStyle(SoftTintButtonStyle(accent: .green))
                                 }
                             }
                         }
@@ -139,8 +135,10 @@ struct HomeworkListView: View {
                     Button {
                         dismiss()
                     } label: {
-                        Text("Schließen")
+                        Image(systemName: "chevron.down")
+                            .imageScale(.medium)
                     }
+                    .accessibilityLabel("Schließen")
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
@@ -553,14 +551,26 @@ private struct LocalHomeworkReminderSheet: View {
             .sheetNavigationTitle(sheetTitle)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") { dismiss() }
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .imageScale(.medium)
+                    }
+                    .accessibilityLabel("Abbrechen")
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
                         Task { await save() }
                     } label: {
-                        if isSaving { ProgressView() } else { Text("Speichern") }
+                        if isSaving {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "checkmark")
+                                .imageScale(.medium)
+                        }
                     }
+                    .accessibilityLabel("Speichern")
                     .disabled(isSaving)
                 }
             }

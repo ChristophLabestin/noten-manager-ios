@@ -1,11 +1,12 @@
 import SwiftUI
+import StoreKit
 import FirebaseAuth
 import FirebaseFirestore
 
 struct HomeView: View {
     @EnvironmentObject var store: GradesStore
 
-    enum HalfYearFilter: Equatable {
+    enum HalfYearFilter: Hashable {
         case all
         case one
         case two
@@ -26,8 +27,6 @@ struct HomeView: View {
     @State private var selectedSubject: Subject? = nil
     @State private var subjectLinkActive: Bool = false
     @State private var showPraktikumDetail: Bool = false
-    @State private var greetingAnimationSeed: UUID = UUID()
-    @State private var greetingVisible: Bool = false
     @State private var upcomingHoliday: HolidayWindow?
 
     private var subjectsWithoutFachreferat: [Subject] {
@@ -216,7 +215,7 @@ struct HomeView: View {
     }
 
     private func countLabel(_ count: Int, singular: String, plural: String) -> String {
-        count == 1 ? "1 \(singular)" : "\(count) \(plural)"
+        count == 1 ? singular : plural
     }
 
     private func sortedSubjects(subjectGrades: [String: [Grade]]) -> [Subject] {
@@ -408,63 +407,63 @@ struct HomeView: View {
 
     // MARK: - Header & Overview
 
-    private var compactOverview: some View {
-        SettingsCard(
-            title: greeting.isEmpty ? "Willkommen" : greeting,
-            subtitle: displayName.isEmpty ? nil : displayName,
-            systemImage: "hand.wave.fill",
-            accent: .indigo,
-            trailing: {
-                if let year = store.activeSchoolYearId {
-                    PillBadge(
-                        text: year,
-                        systemImage: "calendar",
-                        foreground: Color.cyan,
-                        background: Color.cyan.opacity(0.14)
-                    )
-                }
+    private var overviewStats: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                StatChip(title: "Gesamt-Ø", value: formatAverage(overallComputed), accent: .indigo)
+                StatChip(title: "Fächer", value: "\(subjectsWithoutFachreferat.count)", accent: .cyan)
+                StatChip(title: "Noten", value: "\(totalGradesCountComputed)", accent: .orange)
             }
-        ) {
-            VStack(alignment: .leading, spacing: 10) {
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                    StatChip(title: "Gesamt-Ø", value: formatAverage(overallComputed), accent: .indigo)
-                    StatChip(title: "Fächer", value: "\(subjectsWithoutFachreferat.count)", accent: .cyan)
-                    StatChip(title: "Noten", value: "\(totalGradesCountComputed)", accent: .orange)
-                }
+            upcomingStatusChips
+        }
+    }
 
+    private var upcomingStatuses: [UpcomingStatus] {
+        var items: [UpcomingStatus] = []
+        if overdueHomeworksCount > 0 {
+            items.append(
+                UpcomingStatus(
+                    title: countLabel(overdueHomeworksCount, singular: "Hausaufgabe fällig", plural: "Hausaufgaben fällig"),
+                    count: overdueHomeworksCount,
+                    systemImage: "exclamationmark.triangle.fill",
+                    accent: .orange
+                )
+            )
+        }
+        if homeworkDueTomorrowCount > 0 {
+            items.append(
+                UpcomingStatus(
+                    title: countLabel(homeworkDueTomorrowCount, singular: "Hausaufgabe morgen", plural: "Hausaufgaben morgen"),
+                    count: homeworkDueTomorrowCount,
+                    systemImage: "clock.badge.exclamationmark",
+                    accent: .yellow
+                )
+            )
+        }
+        if upcomingExamsNextTwoWeeksCount > 0 {
+            items.append(
+                UpcomingStatus(
+                    title: countLabel(upcomingExamsNextTwoWeeksCount, singular: "Klausur steht an", plural: "Klausuren stehen an"),
+                    count: upcomingExamsNextTwoWeeksCount,
+                    systemImage: "calendar.badge.clock",
+                    accent: .red
+                )
+            )
+        }
+        return items
+    }
+
+    private var upcomingStatusChips: some View {
+        Group {
+            if upcomingStatuses.count <= 1 {
+                if let status = upcomingStatuses.first {
+                    UpcomingStatusChip(status: status, fillsWidth: true)
+                }
+            } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        if overdueHomeworksCount > 0 {
-                            PillBadge(
-                                text: countLabel(overdueHomeworksCount, singular: "Hausaufgabe fällig", plural: "Hausaufgaben fällig"),
-                                systemImage: "exclamationmark.triangle.fill",
-                                foreground: .orange,
-                                background: Color.orange.opacity(0.16)
-                            )
-                        }
-                        if homeworkDueTomorrowCount > 0 {
-                            PillBadge(
-                                text: countLabel(homeworkDueTomorrowCount, singular: "Hausaufgabe morgen", plural: "Hausaufgaben morgen"),
-                                systemImage: "clock.badge.exclamationmark",
-                                foreground: .yellow,
-                                background: Color.yellow.opacity(0.16)
-                            )
-                        }
-                        if upcomingExamsNextTwoWeeksCount > 0 {
-                            PillBadge(
-                                text: countLabel(upcomingExamsNextTwoWeeksCount, singular: "Klausur steht an", plural: "Klausuren stehen an"),
-                                systemImage: "calendar.badge.clock",
-                                foreground: .red,
-                                background: Color.red.opacity(0.12)
-                            )
-                        }
-                        if overdueHomeworksCount == 0 && homeworkDueTomorrowCount == 0 && upcomingExamsNextTwoWeeksCount == 0 {
-                            PillBadge(
-                                text: "Alles im Plan",
-                                systemImage: "checkmark.circle.fill",
-                                foreground: .green,
-                                background: Color.green.opacity(0.14)
-                            )
+                        ForEach(upcomingStatuses) { status in
+                            UpcomingStatusChip(status: status, fillsWidth: false)
                         }
                     }
                     .padding(.vertical, 2)
@@ -488,12 +487,18 @@ struct HomeView: View {
                             Image(systemName: "arrow.up.arrow.down")
                             Text(isEditingOrder ? "Fertig" : "Sortieren")
                         }
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 8)
-                            .background(Color.cyan.opacity(0.16))
-                            .foregroundStyle(Color.cyan)
-                            .clipShape(Capsule())
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(Color.cyan.opacity(0.16))
+                        )
+                        .overlay(
+                            Capsule(style: .continuous)
+                                .stroke(Color.cyan.opacity(0.22), lineWidth: 1)
+                        )
+                        .foregroundStyle(Color.cyan)
                     }
                     .buttonStyle(.plain)
                 }
@@ -586,13 +591,9 @@ struct HomeView: View {
             }
 
             Section {
-                compactOverview
-                    .id(greetingAnimationSeed)
-                    .opacity((greetingVisible || !animationsOn) ? 1 : 0)
-                    .offset(y: (greetingVisible || !animationsOn) ? 0 : 12)
-                    .onAppear { startGreetingAnimation() }
-                    .onChange(of: greetingAnimationSeed) { _, _ in startGreetingAnimation() }
-                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                overviewStats
+                    .softFadeIn(enabled: animationsOn, delay: 0.02, offset: 12)
+                    .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 8, trailing: 16))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                 if let upcomingHoliday {
@@ -652,7 +653,10 @@ struct HomeView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                ToolbarTitleView(title: "Übersicht", subtitle: "Fächer & Noten")
+                ToolbarTitleView(
+                    title: greeting.isEmpty ? "Willkommen" : greeting,
+                    subtitle: displayName.isEmpty ? "Fächer & Noten" : displayName
+                )
             }
             ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 0) {
@@ -705,12 +709,8 @@ struct HomeView: View {
         }
         .onAppear {
             computeGreeting()
-            greetingAnimationSeed = UUID()
             Task { await loadUserDisplayName() }
             Task { await loadUpcomingHolidayNotice() }
-        }
-        .onChange(of: displayName) { _, _ in
-            greetingAnimationSeed = UUID()
         }
         .onChange(of: store.showHolidayHints) { _, enabled in
             if enabled {
@@ -785,19 +785,6 @@ struct HomeView: View {
         }
     }
 
-    private func startGreetingAnimation() {
-        if !animationsOn {
-            greetingVisible = true
-            return
-        }
-        greetingVisible = false
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            withAnimation(.easeOut(duration: 0.45)) {
-                greetingVisible = true
-            }
-        }
-    }
-
     private func loadUpcomingHolidayNotice() async {
         guard store.showHolidayHints else { return }
         let info = await HolidaysService.shared.upcomingHolidayWithin(days: 7, from: Date())
@@ -805,51 +792,1055 @@ struct HomeView: View {
             self.upcomingHoliday = info
         }
     }
+
 }
 
-
-
-struct SegmentButton: View {
+struct LaunchMessageSheetView: View {
+    @EnvironmentObject private var store: GradesStore
+    @EnvironmentObject private var storeKit: StoreKitManager
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dismiss) private var dismiss
 
-    let title: String
-    let active: Bool
-    let action: () -> Void
+    let onLater: () -> Void
+    let onPurchaseSuccess: () -> Void
+
+    @State private var purchaseStatusMessage: String?
+    @State private var purchaseStatusIsError: Bool = false
+
+    private var accentPrimary: Color {
+        store.theme == "feminine" ? Color(hex: "#ec4899") : Color(hex: "#2563eb")
+    }
+
+    private var ctaAccent: Color {
+        if store.theme == "feminine" {
+            return colorScheme == .dark ? Color(hex: "#f9a8d4") : Color(hex: "#f472b6")
+        }
+        return colorScheme == .dark ? Color(hex: "#93c5fd") : Color(hex: "#3b82f6")
+    }
+
+    private var cardBackground: Color {
+        if colorScheme == .dark {
+            return store.theme == "feminine" ? Color(hex: "#1b1022") : Color(hex: "#0b1220")
+        }
+        return store.theme == "feminine" ? Color(hex: "#fff1f7") : Color(hex: "#eef2ff")
+    }
+
+    private var cardBorder: Color {
+        accentPrimary.opacity(colorScheme == .dark ? 0.24 : 0.12)
+    }
+
+    private var heroGradient: LinearGradient {
+        if store.theme == "feminine" {
+            let colors: [Color]
+            if colorScheme == .dark {
+                colors = [
+                    Color(hex: "#be123c"),
+                    Color(hex: "#db2777"),
+                    Color(hex: "#f472b6")
+                ]
+            } else {
+                colors = [
+                    Color(hex: "#fb7185"),
+                    Color(hex: "#f472b6"),
+                    Color(hex: "#fbcfe8")
+                ]
+            }
+            return LinearGradient(
+                gradient: Gradient(colors: colors),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+        let colors: [Color]
+        if colorScheme == .dark {
+            colors = [
+                Color(hex: "#1d4ed8"),
+                Color(hex: "#0284c7"),
+                Color(hex: "#0ea5e9")
+            ]
+        } else {
+            colors = [
+                Color(hex: "#60a5fa"),
+                Color(hex: "#38bdf8"),
+                Color(hex: "#22d3ee")
+            ]
+        }
+        return LinearGradient(
+            gradient: Gradient(colors: colors),
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    private var highlightGradient: LinearGradient {
+        LinearGradient(
+            gradient: Gradient(colors: [
+                ctaAccent,
+                accentPrimary.opacity(colorScheme == .dark ? 0.9 : 1)
+            ]),
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    private var spotlightPriceFont: Font {
+        .system(size: 42, weight: .bold, design: .rounded)
+    }
+
+    private var offerDisplayPrice: String {
+        let price = storeKit.product?.displayPrice.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let price, !price.isEmpty {
+            return price
+        }
+        return "3,99€"
+    }
+
+    private var yearlyDisplayPrice: String {
+        let price = storeKit.subscriptionProduct?.displayPrice.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let price, !price.isEmpty {
+            return price
+        }
+        return "9,99€"
+    }
 
     var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 14, weight: .medium))
+        GeometryReader { proxy in
+            VStack(alignment: .leading, spacing: 16) {
+                heroSection
+                priceSpotlight
+                benefitsList
+                Spacer(minLength: 8)
+                ctaSection
+                finePrint
+            }
+            .frame(maxWidth: .infinity, minHeight: proxy.size.height, alignment: .top)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 20)
+        }
+        .background(
+            ThemedBackground(
+                isDark: store.darkMode,
+                isFeminine: store.theme == "feminine",
+                intensity: store.themeBackgroundIntensity
+            )
+        )
+        .task {
+            if storeKit.product == nil || storeKit.subscriptionProduct == nil || storeKit.monthlySubscriptionProduct == nil {
+                await storeKit.loadProduct()
+            }
+        }
+    }
+
+    private var heroSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                Text("EARLY-BIRD")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule()
+                            .fill(Color.white.opacity(0.22))
+                    )
+                Label("Kostenpflichtig ab 01.02.2026", systemImage: "calendar")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
+            }
+            Text("Pro für immer freischalten")
+                .font(.title2.weight(.bold))
+                .foregroundStyle(.white)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Als Dank für deine frühe Nutzung bekommst du das einmalige Early-Bird Upgrade statt Abo.")
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.92))
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(heroGradient)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+        )
+        .shadow(
+            color: Color.black.opacity(colorScheme == .dark ? 0.35 : 0.2),
+            radius: 10,
+            x: 0,
+            y: 6
+        )
+    }
+
+    private var priceSpotlight: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Einmaliger Preis")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(offerDisplayPrice)
+                        .font(spotlightPriceFont)
+                        .foregroundStyle(.primary)
+                    Text("einmalig")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(ctaAccent)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(offerDisplayPrice)
+                        .font(spotlightPriceFont)
+                        .foregroundStyle(.primary)
+                    Text("einmalig")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(ctaAccent)
+                }
+            }
+            Text("Lifetime Pro inkl. aller Features • statt \(yearlyDisplayPrice) pro Jahr ab 01.02.2026")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(cardBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(cardBorder, lineWidth: 1)
+        )
+    }
+
+    private var benefitsList: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Im Abo enthalten")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            featureRow(
+                title: "Voller Zugriff auf Noten Manager",
+                subtitle: "Alle Funktionen ohne Einschränkungen."
+            )
+            featureRow(
+                title: "Alles an einem Ort",
+                subtitle: "Noten, Prüfungen und Hausaufgaben."
+            )
+            featureRow(
+                title: "Erinnerungen & Live-Aktivitäten",
+                subtitle: "Wichtige Termine im Blick."
+            )
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(cardBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(cardBorder, lineWidth: 1)
+        )
+    }
+
+    private var ctaSection: some View {
+        VStack(spacing: 12) {
+            Button {
+                handlePurchase()
+            } label: {
+                HStack(spacing: 14) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Early-Bird Upgrade sichern")
+                            .font(.headline.weight(.bold))
+                        HStack(spacing: 6) {
+                            Text(offerDisplayPrice)
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(ctaAccent)
+                            Text("einmalig • dauerhaft Pro")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    if storeKit.isProcessingPurchase {
+                        ProgressView()
+                            .tint(ctaAccent)
+                    } else {
+                        Image(systemName: "chevron.right")
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(ctaAccent)
+                    }
+                }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
-                .padding(.horizontal, 10)
-                .background(active ? activeBackground : Color.clear)
-                .foregroundStyle(active ? activeTextColor : inactiveTextColor)
-                .clipShape(Capsule())
-                .shadow(
-                    color: active ? shadowColor : .clear,
-                    radius: active ? 4 : 0,
-                    x: 0,
-                    y: active ? 2 : 0
+                .padding(.vertical, 16)
+                .padding(.horizontal, 16)
+                .background(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(cardBackground)
                 )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(highlightGradient, lineWidth: 1.5)
+                )
+                .shadow(
+                    color: ctaAccent.opacity(colorScheme == .dark ? 0.28 : 0.18),
+                    radius: 8,
+                    x: 0,
+                    y: 5
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(storeKit.isProcessingPurchase || storeKit.product == nil)
+
+            Button("Später entscheiden") {
+                onLater()
+                dismiss()
+            }
+            .buttonStyle(SoftTintButtonStyle(accent: Color(.secondaryLabel)))
+            .disabled(storeKit.isProcessingPurchase)
+
+            if let message = purchaseStatusMessage, !message.isEmpty {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(purchaseStatusIsError ? Color.red : Color.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 2)
+            }
+            if storeKit.product == nil {
+                Text("Produkte werden geladen...")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+            }
+#if DEBUG
+            Button("Debug: Sheet schließen") {
+                dismiss()
+            }
+            .buttonStyle(SoftTintButtonStyle(accent: .orange))
+#endif
+        }
+    }
+
+    private var finePrint: some View {
+        VStack(spacing: 6) {
+            Text("Einmaliger Kauf, kein Abo. Pro bleibt dauerhaft und lässt sich über deine Apple ID wiederherstellen.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+            Button {
+                handleRestore()
+            } label: {
+                Text("Käufe wiederherstellen")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(ctaAccent)
+                    .underline()
+            }
+            .buttonStyle(.plain)
+            .disabled(storeKit.isRestoring)
+        }
+        .padding(.top, 2)
+    }
+
+    private func featureRow(title: String, subtitle: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(ctaAccent)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func handlePurchase() {
+        purchaseStatusMessage = nil
+        purchaseStatusIsError = false
+        Task {
+            if storeKit.product == nil {
+                purchaseStatusMessage = "Produkte werden geladen. Bitte erneut versuchen."
+                purchaseStatusIsError = false
+                await storeKit.loadProduct()
+                return
+            }
+            let result = await storeKit.purchaseLaunchOffer()
+            switch result {
+            case .success:
+                onPurchaseSuccess()
+                dismiss()
+            case .pending:
+                purchaseStatusMessage = "Der Kauf wird noch geprüft. Wir schalten die Vollversion frei, sobald der Vorgang abgeschlossen ist."
+                purchaseStatusIsError = false
+            case .cancelled:
+                purchaseStatusMessage = "Kauf abgebrochen."
+                purchaseStatusIsError = false
+            case .failed(let failure):
+                purchaseStatusMessage = purchaseFailureMessage(failure)
+                purchaseStatusIsError = true
+            }
+        }
+    }
+
+    private func handleRestore() {
+        purchaseStatusMessage = nil
+        purchaseStatusIsError = false
+        Task {
+            let result = await storeKit.restorePurchases()
+            switch result {
+            case .success(let found):
+                if found {
+                    onPurchaseSuccess()
+                    dismiss()
+                    return
+                }
+                purchaseStatusMessage = "Keine Käufe zum Wiederherstellen gefunden."
+                purchaseStatusIsError = false
+            case .failed(let failure):
+                purchaseStatusMessage = restoreFailureMessage(failure)
+                purchaseStatusIsError = true
+            }
+        }
+    }
+
+    private func restoreFailureMessage(_ failure: StoreKitManager.RestoreFailure) -> String {
+        switch failure {
+        case .network:
+            return "Keine Internetverbindung. Bitte später erneut versuchen."
+        case .notAllowed:
+            return "Wiederherstellen ist auf diesem Gerät nicht erlaubt."
+        case .unknown:
+            return "Wiederherstellung fehlgeschlagen. Bitte später erneut versuchen."
+        }
+    }
+
+    private func purchaseFailureMessage(_ failure: StoreKitManager.PurchaseFailure) -> String {
+        switch failure {
+        case .offerExpired:
+            return "Das Angebot ist abgelaufen."
+        case .productUnavailable:
+            return "Das Produkt ist aktuell nicht verfügbar. Bitte später erneut versuchen."
+        case .network:
+            return "Keine Internetverbindung. Bitte später erneut versuchen."
+        case .notAllowed:
+            return "Käufe sind auf diesem Gerät nicht erlaubt."
+        case .verificationFailed:
+            return "Kauf konnte nicht bestätigt werden. Bitte später erneut versuchen."
+        case .unknown:
+            return "Kauf konnte nicht abgeschlossen werden. Bitte später erneut versuchen."
+        }
+    }
+
+}
+
+struct SubscriptionOfferSheetView: View {
+    @EnvironmentObject private var store: GradesStore
+    @EnvironmentObject private var storeKit: StoreKitManager
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dismiss) private var dismiss
+
+    let onLater: () -> Void
+    let onPurchaseSuccess: () -> Void
+
+    @State private var purchaseStatusMessage: String?
+    @State private var purchaseStatusIsError: Bool = false
+    @State private var selectedPlan: SubscriptionPlan = .yearly
+
+    private enum SubscriptionPlan: String, CaseIterable {
+        case yearly
+        case monthly
+
+        var productId: String {
+            switch self {
+            case .yearly:
+                return "noten_manager_pro_yearly"
+            case .monthly:
+                return "noten_manager_pro_monthly"
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .yearly:
+                return "Jahresabo"
+            case .monthly:
+                return "Monatsabo"
+            }
+        }
+
+        var periodLabel: String {
+            switch self {
+            case .yearly:
+                return "Jahr"
+            case .monthly:
+                return "Monat"
+            }
+        }
+
+        var detail: String {
+            switch self {
+            case .yearly:
+                return "Bester Preis"
+            case .monthly:
+                return "Flexibel monatlich"
+            }
+        }
+    }
+
+    private var accentPrimary: Color {
+        store.theme == "feminine" ? Color(hex: "#ec4899") : Color(hex: "#2563eb")
+    }
+
+    private var ctaAccent: Color {
+        if store.theme == "feminine" {
+            return colorScheme == .dark ? Color(hex: "#f9a8d4") : Color(hex: "#f472b6")
+        }
+        return colorScheme == .dark ? Color(hex: "#93c5fd") : Color(hex: "#3b82f6")
+    }
+
+    private var cardBackground: Color {
+        if colorScheme == .dark {
+            return store.theme == "feminine" ? Color(hex: "#1b1022") : Color(hex: "#0b1220")
+        }
+        return store.theme == "feminine" ? Color(hex: "#fff1f7") : Color(hex: "#eef2ff")
+    }
+
+    private var cardBorder: Color {
+        accentPrimary.opacity(colorScheme == .dark ? 0.24 : 0.12)
+    }
+
+    private var heroGradient: LinearGradient {
+        if store.theme == "feminine" {
+            let colors: [Color]
+            if colorScheme == .dark {
+                colors = [
+                    Color(hex: "#be123c"),
+                    Color(hex: "#db2777"),
+                    Color(hex: "#f472b6")
+                ]
+            } else {
+                colors = [
+                    Color(hex: "#fb7185"),
+                    Color(hex: "#f472b6"),
+                    Color(hex: "#fbcfe8")
+                ]
+            }
+            return LinearGradient(
+                gradient: Gradient(colors: colors),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+        let colors: [Color]
+        if colorScheme == .dark {
+            colors = [
+                Color(hex: "#1d4ed8"),
+                Color(hex: "#0284c7"),
+                Color(hex: "#0ea5e9")
+            ]
+        } else {
+            colors = [
+                Color(hex: "#60a5fa"),
+                Color(hex: "#38bdf8"),
+                Color(hex: "#22d3ee")
+            ]
+        }
+        return LinearGradient(
+            gradient: Gradient(colors: colors),
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    private var highlightGradient: LinearGradient {
+        LinearGradient(
+            gradient: Gradient(colors: [
+                ctaAccent,
+                accentPrimary.opacity(colorScheme == .dark ? 0.9 : 1)
+            ]),
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    private var yearlyDisplayPrice: String {
+        let price = storeKit.subscriptionProduct?.displayPrice.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let price, !price.isEmpty {
+            return price
+        }
+        return "9,99€"
+    }
+
+    private var monthlyDisplayPrice: String {
+        let price = storeKit.monthlySubscriptionProduct?.displayPrice.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let price, !price.isEmpty {
+            return price
+        }
+        return "1,99€"
+    }
+
+#if DEBUG
+    private var debugStoreKitStatus: String {
+        let earlybirdId = storeKit.product?.id ?? "nil"
+        let yearlyId = storeKit.subscriptionProduct?.id ?? "nil"
+        let monthlyId = storeKit.monthlySubscriptionProduct?.id ?? "nil"
+        let loadError = storeKit.lastProductLoadError ?? "none"
+        return "StoreKit: earlybird=\(earlybirdId), yearly=\(yearlyId), monthly=\(monthlyId)\nLast load error: \(loadError)"
+    }
+#endif
+
+    private var ctaDetailLine: String {
+        let price = priceValue(for: selectedPlan)
+        return "\(selectedPlan.title) • danach \(price) / \(selectedPlan.periodLabel)"
+    }
+
+    private var selectedSubscriptionAvailable: Bool {
+        switch selectedPlan {
+        case .yearly:
+            return storeKit.subscriptionProduct != nil
+        case .monthly:
+            return storeKit.monthlySubscriptionProduct != nil
+        }
+    }
+
+    private var yearlySavingsText: String? {
+        let yearlyPrice = storeKit.subscriptionProduct?.price ?? Decimal(9.99)
+        let monthlyPrice = storeKit.monthlySubscriptionProduct?.price ?? Decimal(1.99)
+        let yearlyFromMonthly = monthlyPrice * Decimal(12)
+        guard yearlyFromMonthly > 0 else { return nil }
+        let savings = yearlyFromMonthly - yearlyPrice
+        guard savings > 0 else { return nil }
+        let percent = (savings / yearlyFromMonthly) * Decimal(100)
+        let percentValue = NSDecimalNumber(decimal: percent).doubleValue
+        let percentRounded = Int(percentValue.rounded())
+        let formatStyle = storeKit.subscriptionProduct?.priceFormatStyle
+            ?? storeKit.monthlySubscriptionProduct?.priceFormatStyle
+        let savingsText: String
+        if let formatStyle {
+            savingsText = savings.formatted(formatStyle)
+        } else {
+            let formatter = NumberFormatter()
+            formatter.numberStyle = .currency
+            formatter.locale = Locale.current
+            savingsText = formatter.string(from: NSDecimalNumber(decimal: savings))
+                ?? String(format: "%.2f€", NSDecimalNumber(decimal: savings).doubleValue)
+        }
+        if percentRounded > 0 {
+            return "Spare \(savingsText) bei jährlicher Zahlung (\(percentRounded)%)."
+        }
+        return "Spare \(savingsText) pro Jahr."
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            VStack(alignment: .leading, spacing: 14) {
+                heroSection
+                planSelection
+                benefitsList
+                Spacer(minLength: 6)
+                ctaSection
+                finePrint
+#if DEBUG
+                Button("Debug: Sheet schließen") {
+                    dismiss()
+                }
+                .buttonStyle(SoftTintButtonStyle(accent: .orange))
+                .padding(.top, 6)
+#endif
+            }
+            .frame(maxWidth: .infinity, minHeight: proxy.size.height, alignment: .top)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 20)
+        }
+        .background(
+            ThemedBackground(
+                isDark: store.darkMode,
+                isFeminine: store.theme == "feminine",
+                intensity: store.themeBackgroundIntensity
+            )
+        )
+        .task {
+            if storeKit.subscriptionProduct == nil || storeKit.monthlySubscriptionProduct == nil {
+                await storeKit.loadProduct()
+            }
+        }
+    }
+
+    private var heroSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Text("PRO ABO")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule()
+                            .fill(Color.white.opacity(0.22))
+                    )
+                Label("7 Tage gratis", systemImage: "sparkles")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.92))
+            }
+            Text("Noten Manager Pro")
+                .font(.title2.weight(.bold))
+                .foregroundStyle(.white)
+            Text("Teste 7 Tage kostenlos und entscheide dich danach für Jahres- oder Monatsabo.")
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.92))
+                .lineSpacing(2)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(heroGradient)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+        )
+        .shadow(
+            color: Color.black.opacity(colorScheme == .dark ? 0.35 : 0.2),
+            radius: 10,
+            x: 0,
+            y: 6
+        )
+    }
+
+    private var planSelection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Abo wählen")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            HStack(spacing: 12) {
+                planCard(.yearly)
+                planCard(.monthly)
+            }
+            if let savingsText = yearlySavingsText {
+                HStack(spacing: 6) {
+                    Image(systemName: "tag.fill")
+                    Text(savingsText)
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(ctaAccent)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule()
+                        .fill(ctaAccent.opacity(colorScheme == .dark ? 0.22 : 0.14))
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var benefitsList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Im Abo enthalten")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            featureRow(
+                title: "Voller Zugriff auf Noten Manager",
+                subtitle: "Alle Funktionen ohne Einschränkungen."
+            )
+            featureRow(
+                title: "Alles an einem Ort",
+                subtitle: "Noten, Prüfungen und Hausaufgaben."
+            )
+            featureRow(
+                title: "Erinnerungen & Live-Aktivitäten",
+                subtitle: "Wichtige Termine im Blick."
+            )
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(cardBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(cardBorder, lineWidth: 1)
+        )
+    }
+
+    private var ctaSection: some View {
+        VStack(spacing: 10) {
+            Button {
+                handlePurchase()
+            } label: {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("7 Tage gratis starten")
+                            .font(.headline.weight(.bold))
+                        Text(ctaDetailLine)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
+                    if storeKit.isProcessingSubscriptionPurchase {
+                        ProgressView()
+                            .tint(ctaAccent)
+                    } else {
+                        Image(systemName: "chevron.right")
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(ctaAccent)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .padding(.horizontal, 14)
+                .background(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(cardBackground)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(highlightGradient, lineWidth: 1.5)
+                )
+                .shadow(
+                    color: ctaAccent.opacity(colorScheme == .dark ? 0.28 : 0.18),
+                    radius: 8,
+                    x: 0,
+                    y: 5
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(storeKit.isProcessingSubscriptionPurchase || !selectedSubscriptionAvailable)
+
+            if let message = purchaseStatusMessage, !message.isEmpty {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(purchaseStatusIsError ? Color.red : Color.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 2)
+            }
+
+            if !selectedSubscriptionAvailable {
+                Text("Produkte werden geladen...")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    private var finePrint: some View {
+        VStack(spacing: 6) {
+            Text(finePrintText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+            Button {
+                handleRestore()
+            } label: {
+                Text("Käufe wiederherstellen")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(ctaAccent)
+                    .underline()
+            }
+            .buttonStyle(.plain)
+            .disabled(storeKit.isRestoring)
+#if DEBUG
+            Text(debugStoreKitStatus)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+#endif
+        }
+        .padding(.top, 2)
+    }
+
+    private func handlePurchase() {
+        purchaseStatusMessage = nil
+        purchaseStatusIsError = false
+        Task {
+            if !selectedSubscriptionAvailable {
+                purchaseStatusMessage = "Produkte werden geladen. Bitte erneut versuchen."
+                purchaseStatusIsError = false
+                await storeKit.loadProduct()
+                return
+            }
+            let result = await storeKit.purchaseSubscription(productId: selectedPlan.productId)
+            switch result {
+            case .success:
+                onPurchaseSuccess()
+                dismiss()
+            case .pending:
+                purchaseStatusMessage = "Der Kauf wird noch geprüft. Wir schalten die Vollversion frei, sobald der Vorgang abgeschlossen ist."
+                purchaseStatusIsError = false
+            case .cancelled:
+                purchaseStatusMessage = "Kauf abgebrochen."
+                purchaseStatusIsError = false
+            case .failed(let failure):
+                purchaseStatusMessage = purchaseFailureMessage(failure)
+                purchaseStatusIsError = true
+            }
+        }
+    }
+
+    private func handleRestore() {
+        purchaseStatusMessage = nil
+        purchaseStatusIsError = false
+        Task {
+            let result = await storeKit.restorePurchases()
+            switch result {
+            case .success(let found):
+                if found {
+                    onPurchaseSuccess()
+                    dismiss()
+                    return
+                }
+                purchaseStatusMessage = "Keine Käufe zum Wiederherstellen gefunden."
+                purchaseStatusIsError = false
+            case .failed(let failure):
+                purchaseStatusMessage = restoreFailureMessage(failure)
+                purchaseStatusIsError = true
+            }
+        }
+    }
+
+    private func restoreFailureMessage(_ failure: StoreKitManager.RestoreFailure) -> String {
+        switch failure {
+        case .network:
+            return "Keine Internetverbindung. Bitte später erneut versuchen."
+        case .notAllowed:
+            return "Wiederherstellen ist auf diesem Gerät nicht erlaubt."
+        case .unknown:
+            return "Wiederherstellung fehlgeschlagen. Bitte später erneut versuchen."
+        }
+    }
+
+    private var finePrintText: String {
+        let price = priceValue(for: selectedPlan)
+        return "7 Tage kostenlos, danach \(price) / \(selectedPlan.periodLabel). Automatische Verlängerung, jederzeit kündbar."
+    }
+
+    private func priceValue(for plan: SubscriptionPlan) -> String {
+        switch plan {
+        case .yearly:
+            return yearlyDisplayPrice
+        case .monthly:
+            return monthlyDisplayPrice
+        }
+    }
+
+    private func featureRow(title: String, subtitle: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(ctaAccent)
+                .font(.subheadline.weight(.semibold))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func planCard(_ plan: SubscriptionPlan) -> some View {
+        let isSelected = selectedPlan == plan
+        let priceLabel = priceLabel(for: plan)
+        return Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                selectedPlan = plan
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(plan.title)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(ctaAccent)
+                            .font(.subheadline.weight(.semibold))
+                    }
+                }
+                Text(priceLabel)
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(isSelected ? ctaAccent : .primary)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(plan.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(cardBackground)
+            )
+            .overlay {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(highlightGradient, lineWidth: 1.5)
+                } else {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(cardBorder, lineWidth: 1)
+                }
+            }
         }
         .buttonStyle(.plain)
     }
 
-    private var activeBackground: Color {
-        colorScheme == .dark ? Color.white.opacity(0.14) : Color.white
+    private func priceLabel(for plan: SubscriptionPlan) -> String {
+        "\(priceValue(for: plan)) / \(plan.periodLabel)"
     }
 
-    private var activeTextColor: Color {
-        colorScheme == .dark ? Color.white : Color(hex: "#111827")
-    }
-
-    private var inactiveTextColor: Color {
-        colorScheme == .dark ? Color(hex: "#d1d5db") : Color(hex: "#6b7280")
-    }
-
-    private var shadowColor: Color {
-        Color.black.opacity(colorScheme == .dark ? 0.5 : 0.16)
+    private func purchaseFailureMessage(_ failure: StoreKitManager.PurchaseFailure) -> String {
+        switch failure {
+        case .offerExpired:
+            return "Das Angebot ist abgelaufen."
+        case .productUnavailable:
+            return "Das Produkt ist aktuell nicht verfügbar. Bitte später erneut versuchen."
+        case .network:
+            return "Keine Internetverbindung. Bitte später erneut versuchen."
+        case .notAllowed:
+            return "Käufe sind auf diesem Gerät nicht erlaubt."
+        case .verificationFailed:
+            return "Kauf konnte nicht bestätigt werden. Bitte später erneut versuchen."
+        case .unknown:
+            return "Kauf konnte nicht abgeschlossen werden. Bitte später erneut versuchen."
+        }
     }
 }
 
@@ -959,17 +1950,58 @@ struct SubjectRowView: View {
         )
     }
 
-    private func backgroundTile(accent: SubjectAccent) -> some View {
-        RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .fill(
-                LinearGradient(
-                    colors: [
-                        accent.primary.opacity(colorScheme == .dark ? 0.20 : 0.12),
-                        Color(.secondarySystemBackground)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
+    private func cardBaseColors() -> (Color, Color) {
+        if colorScheme == .dark {
+            if store.theme == "feminine" {
+                return (Color(hex: "#1b1022"), Color(hex: "#120a16"))
+            }
+            return (Color(hex: "#0b1220"), Color(hex: "#111827"))
+        }
+        if store.theme == "feminine" {
+            return (Color(hex: "#fff1f7"), Color(hex: "#fff7fb"))
+        }
+        return (Color(hex: "#eef2ff"), Color(hex: "#f8fafc"))
+    }
+
+    private func cardSurface(accent: SubjectAccent) -> some View {
+        let base = cardBaseColors()
+        return ZStack {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [base.0, base.1],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
                 )
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            accent.primary.opacity(colorScheme == .dark ? 0.10 : 0.06),
+                            Color.clear
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        }
+    }
+
+    private func cardStroke(accent: SubjectAccent) -> some View {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .stroke(
+                accent.primary.opacity(colorScheme == .dark ? 0.20 : 0.12),
+                lineWidth: 1
+            )
+    }
+
+    private func gradePillBackground(_ color: Color) -> some View {
+        Capsule(style: .continuous)
+            .fill(color.opacity(colorScheme == .dark ? 0.18 : 0.12))
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(color.opacity(colorScheme == .dark ? 0.30 : 0.20), lineWidth: 1)
             )
     }
 
@@ -1027,7 +2059,16 @@ struct SubjectRowView: View {
                         let ratio = progress(for: avg)
                         ZStack(alignment: .leading) {
                             Capsule()
-                                .fill(Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.08))
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            Color.primary.opacity(colorScheme == .dark ? 0.18 : 0.08),
+                                            Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.04)
+                                        ],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
                             Capsule()
                                 .fill(
                                     LinearGradient(
@@ -1053,168 +2094,216 @@ struct SubjectRowView: View {
                     .monospacedDigit()
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(gradeClassColor(average).opacity(colorScheme == .dark ? 0.24 : 0.14))
+                    .background(gradePillBackground(gradeClassColor(average)))
                     .foregroundStyle(gradeClassColor(average))
                     .clipShape(Capsule())
             }
         }
         .padding(16)
-        .background(backgroundTile(accent: accent))
+        .background(cardSurface(accent: accent))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(
-                    accent.primary.opacity(colorScheme == .dark ? 0.26 : 0.16),
-                    lineWidth: 1
-                )
-        )
+        .overlay(cardStroke(accent: accent))
         .shadow(
-            color: accent.primary.opacity(colorScheme == .dark ? 0.22 : 0.12),
-            radius: 8,
+            color: Color.black.opacity(colorScheme == .dark ? 0.45 : 0.08),
+            radius: 6,
             x: 0,
-            y: 6
+            y: 4
         )
     }
 }
 
 struct Tag: View {
     @EnvironmentObject var store: GradesStore
+    @Environment(\.colorScheme) private var colorScheme
 
     enum Style { case main, minor, elective }
     let text: String
     let style: Style
 
     private var isFeminine: Bool { store.theme == "feminine" }
-    private var isDark: Bool { store.darkMode }
+    private var isDark: Bool { colorScheme == .dark }
 
-    private var primaryDefault: Color { Color(hex: "#1e3a8a") }          // $color-primary
-    private var primaryFeminine: Color { Color(hex: "#ec4899") }        // $color-primary-feminine
-    private var textMedium: Color { Color(hex: "#6b7280") }             // $color-text-medium
-    private var textDarkDark: Color { Color(hex: "#f9fafb") }           // $color-text-dark-dark
+    private func palette() -> (Color, Color, Color) {
+        if isDark {
+            let base: Color
+            if isFeminine {
+                switch style {
+                case .main:
+                    base = Color(hex: "#f472b6")
+                case .minor:
+                    base = Color(hex: "#c084fc")
+                case .elective:
+                    base = Color(hex: "#fb923c")
+                }
+            } else {
+                switch style {
+                case .main:
+                    base = Color(hex: "#60a5fa")
+                case .minor:
+                    base = Color(hex: "#34d399")
+                case .elective:
+                    base = Color(hex: "#fb923c")
+                }
+            }
+            return (
+                base.opacity(0.20),
+                Color(hex: "#e2e8f0"),
+                base.opacity(0.32)
+            )
+        }
 
-    private var bgBlueBase: Color { Color(red: 37 / 255, green: 99 / 255, blue: 235 / 255) }
-    private var bgGrayBase: Color { Color(red: 148 / 255, green: 163 / 255, blue: 184 / 255) }
-    private var bgPinkBase: Color { Color(red: 236 / 255, green: 72 / 255, blue: 153 / 255) }
-
-    private var backgroundColor: Color {
         if isFeminine {
             switch style {
             case .main:
-                // body.theme-feminine .subject-tag / .subject-tag--main
-                return bgPinkBase.opacity(isDark ? 0.8 : 0.18)
+                return (Color(hex: "#fce7f3"), Color(hex: "#9d174d"), Color(hex: "#f9a8d4"))
             case .minor:
-                // body.theme-feminine .subject-tag--minor
-                return bgPinkBase.opacity(isDark ? 0.55 : 0.08)
+                return (Color(hex: "#fae8ff"), Color(hex: "#6b21a8"), Color(hex: "#d8b4fe"))
             case .elective:
-                return bgGrayBase.opacity(isDark ? 0.45 : 0.10)
+                return (Color(hex: "#ffedd5"), Color(hex: "#9a3412"), Color(hex: "#fdba74"))
             }
         }
 
-        if isDark {
-            // body.dark-mode .subject-tag / .subject-tag--minor
-            switch style {
-            case .main:
-                return bgBlueBase.opacity(0.35)
-            case .minor:
-                return bgGrayBase.opacity(0.55)
-            case .elective:
-                return bgGrayBase.opacity(0.35)
-            }
-        }
-
-        // Light + default theme
         switch style {
         case .main:
-            return bgBlueBase.opacity(0.12)
+            return (Color(hex: "#dbeafe"), Color(hex: "#1e3a8a"), Color(hex: "#93c5fd"))
         case .minor:
-            return bgGrayBase.opacity(0.18)
+            return (Color(hex: "#dcfce7"), Color(hex: "#166534"), Color(hex: "#86efac"))
         case .elective:
-            return bgGrayBase.opacity(0.12)
-        }
-    }
-
-    private var foregroundColor: Color {
-        if isFeminine {
-            if isDark {
-                // body.theme-feminine.dark-mode -> immer heller Text
-                return textDarkDark
-            }
-            switch style {
-            case .main:
-                return primaryFeminine
-            case .minor:
-                return bgPinkBase.opacity(0.85)
-            case .elective:
-                return textMedium
-            }
-        }
-
-        if isDark {
-            // body.dark-mode .subject-tag / .subject-tag--minor
-            return textDarkDark
-        }
-
-        // Light + default theme
-        switch style {
-        case .main:
-            return primaryDefault
-        case .minor:
-            return textMedium
-        case .elective:
-            return textMedium
+            return (Color(hex: "#ffedd5"), Color(hex: "#9a3412"), Color(hex: "#fdba74"))
         }
     }
 
     var body: some View {
+        let colors = palette()
         Text(text)
-            .font(.caption2)
+            .font(.caption2.weight(.semibold))
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(backgroundColor)
-            .foregroundStyle(foregroundColor)
-            .clipShape(Capsule())
+            .background(
+                Capsule(style: .continuous)
+                    .fill(colors.0.opacity(isDark ? 0.20 : 0.14))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(colors.2.opacity(isDark ? 0.30 : 0.22), lineWidth: 1)
+            )
+            .foregroundStyle(colors.1)
+    }
+}
+
+private struct UpcomingStatus: Identifiable {
+    let id = UUID()
+    let title: String
+    let count: Int?
+    let systemImage: String
+    let accent: Color
+}
+
+private struct UpcomingStatusChip: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject private var store: GradesStore
+
+    let status: UpcomingStatus
+    let fillsWidth: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if let countText {
+                Text(countText)
+                    .font(.caption.weight(.bold))
+                    .monospacedDigit()
+                    .foregroundStyle(status.accent)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(status.accent.opacity(colorScheme == .dark ? 0.20 : 0.12))
+                    )
+            }
+
+            Text(status.title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+
+            Image(systemName: status.systemImage)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(status.accent)
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .frame(maxWidth: fillsWidth ? .infinity : nil, alignment: .leading)
+        .fixedSize(horizontal: !fillsWidth, vertical: false)
+        .background(tileSurface)
+        .overlay(tileBorder)
+    }
+
+    private var countText: String? {
+        guard let count = status.count else { return nil }
+        return "\(count)"
+    }
+
+    private var tileSurface: some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(
+                LinearGradient(
+                    colors: [tileTop, tileBottom],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                status.accent.opacity(colorScheme == .dark ? 0.08 : 0.05),
+                                Color.clear
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            )
+    }
+
+    private var tileBorder: some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .stroke(status.accent.opacity(colorScheme == .dark ? 0.18 : 0.12), lineWidth: 1)
+    }
+
+    private var tileTop: Color {
+        if colorScheme == .dark {
+            return store.theme == "feminine" ? Color(hex: "#1b1022") : Color(hex: "#0b1220")
+        }
+        return store.theme == "feminine" ? Color(hex: "#fff5fb") : Color(hex: "#f1f5ff")
+    }
+
+    private var tileBottom: Color {
+        if colorScheme == .dark {
+            return store.theme == "feminine" ? Color(hex: "#120a16") : Color(hex: "#111827")
+        }
+        return store.theme == "feminine" ? Color(hex: "#fffafb") : Color(hex: "#f8fafc")
     }
 }
 
 // MARK: - Extracted small views for HomeView body
 
 private struct HalfYearFilterRow: View {
-    @Environment(\.colorScheme) private var colorScheme
     @Binding var halfYear: HomeView.HalfYearFilter
 
     var body: some View {
-        HStack(spacing: 6) {
-            SegmentButton(title: "Alle", active: halfYear == .all) { halfYear = .all }
-            SegmentButton(title: "1. Hj", active: halfYear == .one) { halfYear = .one }
-            SegmentButton(title: "2. Hj", active: halfYear == .two) { halfYear = .two }
-        }
-        .padding(6)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 999, style: .continuous)
-                .fill(toggleBackground)
+        SegmentedPicker(
+            selection: $halfYear,
+            options: [
+                SegmentedPickerOption(title: "Alle", value: .all),
+                SegmentedPickerOption(title: "1. Hj", value: .one),
+                SegmentedPickerOption(title: "2. Hj", value: .two)
+            ],
+            accent: .cyan
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: 999, style: .continuous)
-                .stroke(toggleStroke, lineWidth: 1)
-        )
-        .shadow(color: toggleShadow, radius: 8, x: 0, y: 4)
-    }
-
-    private var toggleBackground: Color {
-        colorScheme == .dark
-            ? Color.white.opacity(0.06)
-            : Color(.systemBackground)
-    }
-
-    private var toggleStroke: Color {
-        colorScheme == .dark
-            ? Color.white.opacity(0.08)
-            : Color.black.opacity(0.05)
-    }
-
-    private var toggleShadow: Color {
-        Color.black.opacity(colorScheme == .dark ? 0.5 : 0.12)
     }
 }
 

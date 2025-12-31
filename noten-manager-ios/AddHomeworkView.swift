@@ -186,14 +186,26 @@ struct AddHomeworkView: View {
             .sheetNavigationTitle("Hausaufgabe")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") { dismiss() }
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .imageScale(.medium)
+                    }
+                    .accessibilityLabel("Abbrechen")
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
                         Task { await save() }
                     } label: {
-                        if isSaving { ProgressView() } else { Text("Speichern") }
+                        if isSaving {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "checkmark")
+                                .imageScale(.medium)
+                        }
                     }
+                    .accessibilityLabel("Speichern")
                     .disabled(!canSave || isSaving || subjects.isEmpty)
                 }
             }

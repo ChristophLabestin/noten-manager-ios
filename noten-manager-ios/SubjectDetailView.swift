@@ -9,6 +9,19 @@ struct SubjectDetailView: View {
     let subject: Subject
 
     enum HalfYearFilter: Hashable { case all, one, two }
+    enum SchulaufgabeReplacement: Double, CaseIterable, Identifiable {
+        case kurzarbeit = 1
+        case muendlichEx = 0
+
+        var id: Double { rawValue }
+
+        var title: String {
+            switch self {
+            case .kurzarbeit: return "Kurzarbeit"
+            case .muendlichEx: return "Mündlich / EX"
+            }
+        }
+    }
 
     // Aktueller Fachzustand (lokal, damit Umbenennen direkt sichtbar ist)
     @State private var currentSubjectName: String
@@ -16,6 +29,8 @@ struct SubjectDetailView: View {
     @State private var currentRoom: String?
     @State private var currentEmail: String?
     @State private var currentAlias: String?
+    @State private var currentSubjectType: Int
+    @State private var currentIsElective: Bool
 
     @State private var halfYear: HalfYearFilter = .all
 
@@ -41,8 +56,16 @@ struct SubjectDetailView: View {
     @State private var editRoom: String = ""
     @State private var editEmail: String = ""
     @State private var editAlias: String = ""
+    @State private var editType: Int = 1
+    @State private var editIsElective: Bool = false
+    @State private var editError: String? = nil
     @State private var isSavingSubject: Bool = false
     @State private var showDeleteSubjectAlert: Bool = false
+    @State private var showSchulaufgabeMergeSheet: Bool = false
+    @State private var schulaufgabeGradesToConvert: [GradeWithId] = []
+    @State private var schulaufgabeConversions: [String: SchulaufgabeReplacement] = [:]
+    @State private var isConvertingSchulaufgaben: Bool = false
+    @State private var conversionError: String? = nil
 
     // BottomNav Navigation
     @State private var navigateToSettings: Bool = false
@@ -72,6 +95,8 @@ struct SubjectDetailView: View {
         _currentRoom = State(initialValue: subject.room)
         _currentEmail = State(initialValue: subject.email)
         _currentAlias = State(initialValue: subject.alias)
+        _currentSubjectType = State(initialValue: subject.type)
+        _currentIsElective = State(initialValue: subject.isElective)
     }
 
     private var subjectTitle: String {
@@ -98,7 +123,7 @@ struct SubjectDetailView: View {
     }
 
     private func weightOptions() -> [(title: String, value: Double)] {
-        if subject.type == 0 {
+        if currentSubjectType == 0 {
             return [
                 ("Kurzarbeit", 1),
                 ("Mündlich / EX", 0)
@@ -123,7 +148,7 @@ struct SubjectDetailView: View {
         var total = 0.0
         var totalWeight = 0.0
         for g in filteredGrades {
-            let w = store.effectiveGradeWeight(subjectType: subject.type, rawWeight: g.weight)
+            let w = store.effectiveGradeWeight(subjectType: currentSubjectType, rawWeight: g.weight)
             total += g.grade * w
             totalWeight += w
         }
@@ -249,26 +274,15 @@ struct SubjectDetailView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Halbjahr filtern")
                         .font(.headline)
-                    HStack {
-                        HStack(spacing: 6) {
-                            SegmentButton(title: "Alle", active: halfYear == .all) { halfYear = .all }
-                            SegmentButton(title: "1. Hj", active: halfYear == .one) { halfYear = .one }
-                            SegmentButton(title: "2. Hj", active: halfYear == .two) { halfYear = .two }
-                        }
-                        .padding(6)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            RoundedRectangle(cornerRadius: 999, style: .continuous)
-                                .fill(toggleBackground)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 999, style: .continuous)
-                                .stroke(toggleStroke, lineWidth: 1)
-                        )
-                        .shadow(color: toggleShadow, radius: 8, x: 0, y: 4)
-
-                        Spacer(minLength: 0)
-                    }
+                    SegmentedPicker(
+                        selection: $halfYear,
+                        options: [
+                            SegmentedPickerOption(title: "Alle", value: .all),
+                            SegmentedPickerOption(title: "1. Hj", value: .one),
+                            SegmentedPickerOption(title: "2. Hj", value: .two)
+                        ],
+                        accent: .indigo
+                    )
                 }
             }
         }
@@ -406,6 +420,155 @@ struct SubjectDetailView: View {
         }
     }
 
+    @ViewBuilder
+    private var schulaufgabeMergeView: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 16) {
+                SettingsCard(
+                    title: "Schulaufgaben umwandeln",
+                    subtitle: currentSubjectName.isEmpty ? "Fach" : currentSubjectName,
+                    systemImage: "arrow.triangle.2.circlepath",
+                    accent: .orange
+                ) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Beim Wechsel zu Nebenfach müssen Schulaufgaben angepasst werden.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        if schulaufgabeGradesToConvert.isEmpty {
+                            Text("Keine Schulaufgaben gefunden.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            VStack(spacing: 10) {
+                                ForEach(schulaufgabeGradesToConvert) { grade in
+                                    schulaufgabeConversionRow(grade)
+                                }
+                            }
+                        }
+
+                        HStack(spacing: 10) {
+                            Button {
+                                setSchulaufgabeConversions(.kurzarbeit)
+                            } label: {
+                                Text("Alle: Kurzarbeit")
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.85)
+                            }
+                            .buttonStyle(SoftTintButtonStyle(accent: .orange, font: .subheadline.weight(.semibold), verticalPadding: 10))
+                            .disabled(isConvertingSchulaufgaben)
+
+                            Button {
+                                setSchulaufgabeConversions(.muendlichEx)
+                            } label: {
+                                Text("Alle: Mündlich / EX")
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.85)
+                            }
+                            .buttonStyle(SoftTintButtonStyle(accent: .indigo, font: .subheadline.weight(.semibold), verticalPadding: 10))
+                            .disabled(isConvertingSchulaufgaben)
+                        }
+                    }
+                }
+
+                if let conversionError {
+                    Text(conversionError)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
+
+                Button {
+                    Task { await applySchulaufgabeConversionsAndSave() }
+                } label: {
+                    HStack(spacing: 10) {
+                        if isConvertingSchulaufgaben {
+                            ProgressView()
+                        }
+                        Text(isConvertingSchulaufgaben ? "Umwandeln…" : "Umwandeln & Speichern")
+                    }
+                }
+                .buttonStyle(SoftTintButtonStyle(accent: .orange, font: .headline.weight(.semibold), verticalPadding: 14))
+                .disabled(isConvertingSchulaufgaben || schulaufgabeGradesToConvert.isEmpty)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+        }
+        .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
+        .sheetNavigationTitle("Schulaufgaben")
+        .interactiveDismissDisabled(isConvertingSchulaufgaben)
+    }
+
+    private func schulaufgabeReplacementBinding(for grade: GradeWithId) -> Binding<SchulaufgabeReplacement> {
+        Binding(
+            get: { schulaufgabeConversions[grade.id] ?? .kurzarbeit },
+            set: { schulaufgabeConversions[grade.id] = $0 }
+        )
+    }
+
+    @ViewBuilder
+    private func schulaufgabeConversionRow(_ grade: GradeWithId) -> some View {
+        let selection = schulaufgabeReplacementBinding(for: grade)
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(String(format: "%.1f", grade.grade))
+                    .font(.headline)
+                    .foregroundStyle(gradeColor(grade.grade))
+                Text(grade.date.formatted(date: .abbreviated, time: .omitted))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+            Menu {
+                ForEach(SchulaufgabeReplacement.allCases) { option in
+                    Button {
+                        selection.wrappedValue = option
+                    } label: {
+                        HStack {
+                            Text(option.title)
+                            if option == selection.wrappedValue {
+                                Spacer()
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Text(selection.wrappedValue.title)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .frame(minWidth: 140, maxWidth: 190, alignment: .leading)
+                .background(Color.formInputBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+            .tint(.primary)
+            .disabled(isConvertingSchulaufgaben)
+        }
+        .padding(12)
+        .background(Color.formSectionBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func setSchulaufgabeConversions(_ replacement: SchulaufgabeReplacement) {
+        for grade in schulaufgabeGradesToConvert {
+            schulaufgabeConversions[grade.id] = replacement
+        }
+    }
+
+    private func clearSchulaufgabeConversionState() {
+        showSchulaufgabeMergeSheet = false
+        schulaufgabeGradesToConvert = []
+        schulaufgabeConversions = [:]
+        conversionError = nil
+    }
+
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 16) {
@@ -453,6 +616,38 @@ struct SubjectDetailView: View {
                                 }
 
                                 SettingsSectionBox {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("Typ")
+                                            .font(.headline)
+                                        Picker("", selection: $editType) {
+                                            Text("Hauptfach").tag(1)
+                                            Text("Nebenfach").tag(0)
+                                        }
+                                        .pickerStyle(.segmented)
+                                        .disabled(editIsElective)
+
+                                        Text("Hauptfach: Schulaufgaben zählen doppelt, Kurzarbeiten und Mündlich / EX einfach.")
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
+                                        Text("Nebenfach: Kurzarbeiten zählen doppelt, Mündlich / EX einfach.")
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+
+                                SettingsSectionBox {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Toggle("Wahlfach / nicht einbringbar", isOn: $editIsElective)
+                                            .onChange(of: editIsElective) { _, newVal in
+                                                if newVal { editType = 0 }
+                                            }
+                                        Text("Wahlfächer fließen nicht in die Abschlussnote ein. Für Sport/Musik bitte als Wahlfach markieren.")
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+
+                                SettingsSectionBox {
                                     VStack(alignment: .leading, spacing: 10) {
                                         Text("Details")
                                             .font(.headline)
@@ -461,6 +656,12 @@ struct SubjectDetailView: View {
                                         detailField(label: "Kürzel", value: $editAlias)
                                         detailField(label: "E-Mail", value: $editEmail, keyboard: .emailAddress, autocap: .never)
                                     }
+                                }
+
+                                if let editError {
+                                    Text(editError)
+                                        .font(.footnote)
+                                        .foregroundStyle(.red)
                                 }
 
                                 SettingsSectionBox {
@@ -475,6 +676,7 @@ struct SubjectDetailView: View {
                                 }
                             }
                         }
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
@@ -483,20 +685,34 @@ struct SubjectDetailView: View {
             .sheetNavigationTitle(editSheetTitle)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") {
+                    Button {
                         cancelEditSubject()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .imageScale(.medium)
                     }
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button(isSavingSubject ? "Speichern…" : "Speichern") {
-                            Task { await handleSaveSubject() }
-                        }
-                        .disabled(isSavingSubject)
-                    }
+                    .accessibilityLabel("Abbrechen")
                 }
-                .scrollDismissesKeyboard(.interactively)
-                .hideKeyboardOnTap()
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        Task { await handleSaveSubject() }
+                    } label: {
+                        if isSavingSubject {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "checkmark")
+                                .imageScale(.medium)
+                        }
+                    }
+                    .accessibilityLabel("Speichern")
+                    .disabled(isSavingSubject)
+                }
             }
+            .navigationDestination(isPresented: $showSchulaufgabeMergeSheet) {
+                schulaufgabeMergeView
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .hideKeyboardOnTap()
         }
         .sheet(isPresented: $showNoteSheet) {
             NavigationStack {
@@ -509,11 +725,23 @@ struct SubjectDetailView: View {
                 .sheetNavigationTitle("Notiz bearbeiten")
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("Abbrechen") { showNoteSheet = false }
+                        Button {
+                            showNoteSheet = false
+                        } label: {
+                            Image(systemName: "xmark")
+                                .imageScale(.medium)
+                        }
+                        .accessibilityLabel("Abbrechen")
                     }
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("Speichern") { Task { await saveNote() } }
-                            .disabled(noteEditGradeId == nil)
+                        Button {
+                            Task { await saveNote() }
+                        } label: {
+                            Image(systemName: "checkmark")
+                                .imageScale(.medium)
+                        }
+                        .accessibilityLabel("Speichern")
+                        .disabled(noteEditGradeId == nil)
                     }
                 }
             }
@@ -522,7 +750,7 @@ struct SubjectDetailView: View {
             EditGradeView(
                 grade: grade,
                 subjectName: currentSubjectName,
-                subjectType: subject.type
+                subjectType: currentSubjectType
             )
             .environmentObject(store)
         }
@@ -530,7 +758,7 @@ struct SubjectDetailView: View {
             GradeDetailSheet(
                 grade: grade,
                 subjectName: currentSubjectName,
-                subjectType: subject.type,
+                subjectType: currentSubjectType,
                 onEdit: { gradeToEdit = $0 },
                 onDelete: { grade in deleteConfirmGradeId = grade.id }
             )
@@ -664,24 +892,6 @@ struct SubjectDetailView: View {
         }
         // Nur den aktuellen Fachnamen an den Container melden
         .preference(key: QuickAddSubjectPreferenceKey.self, value: currentSubjectName)
-    }
-
-    // MARK: - Helpers (Optik)
-
-    private var toggleBackground: Color {
-        colorScheme == .dark
-            ? Color.white.opacity(0.06)
-            : Color(.systemBackground)
-    }
-
-    private var toggleShadow: Color {
-        Color.black.opacity(colorScheme == .dark ? 0.5 : 0.12)
-    }
-
-    private var toggleStroke: Color {
-        colorScheme == .dark
-            ? Color.white.opacity(0.08)
-            : Color.black.opacity(0.05)
     }
 
     @ViewBuilder
@@ -872,7 +1082,7 @@ struct SubjectDetailView: View {
         .onTapGesture { detailHomework = homework }
     }
 
-private func statusBadge(_ text: String, color: Color) -> some View {
+    private func statusBadge(_ text: String, color: Color) -> some View {
         Text(text)
             .font(.caption)
             .padding(.horizontal, 10)
@@ -1000,9 +1210,13 @@ private func statusBadge(_ text: String, color: Color) -> some View {
                 }
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("Schließen") {
+                        Button {
                             dismissSheet()
+                        } label: {
+                            Image(systemName: "chevron.down")
+                                .imageScale(.medium)
                         }
+                        .accessibilityLabel("Schließen")
                     }
                 }
             }
@@ -1211,31 +1425,154 @@ private func statusBadge(_ text: String, color: Color) -> some View {
         editRoom = currentRoom ?? ""
         editEmail = currentEmail ?? ""
         editAlias = currentAlias ?? ""
+        editType = currentSubjectType
+        editIsElective = currentIsElective
+        editError = nil
         showEditSubjectSheet = true
     }
 
     private func cancelEditSubject() {
         showEditSubjectSheet = false
+        clearSchulaufgabeConversionState()
         editName = ""
         editTeacher = ""
         editRoom = ""
         editEmail = ""
         editAlias = ""
+        editType = 1
+        editIsElective = false
+        editError = nil
     }
 
     private func handleSaveSubject() async {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
-        guard let schoolYearId = store.activeSchoolYearId else { return }
         guard !isSavingSubject else { return }
 
-        let originalName = subject.name
+        editError = nil
+        conversionError = nil
+
+        if editIsElective { editType = 0 }
+
+        let originalName = currentSubjectName
         let newName = editName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !newName.isEmpty else { return }
+        guard !newName.isEmpty else {
+            editError = "Bitte gib einen Namen ein."
+            return
+        }
+
+        let resolvedType = editIsElective ? 0 : editType
 
         if newName.lowercased() != originalName.lowercased(),
            store.subjects.contains(where: { $0.name.lowercased() == newName.lowercased() }) {
+            editError = "Ein Fach mit diesem Namen existiert bereits."
             return
         }
+
+        let lower = newName.lowercased()
+        if ["sport", "musik"].contains(lower) && !editIsElective {
+            editError = "Bitte markiere Sport oder Musik als nicht einbringbar (Wahlfach)."
+            return
+        }
+
+        if currentSubjectType == 1 && resolvedType == 0 {
+            let schulaufgaben = allGrades.filter { $0.weight == 2 }.sorted { $0.date > $1.date }
+            if !schulaufgaben.isEmpty {
+                schulaufgabeGradesToConvert = schulaufgaben
+                schulaufgabeConversions = Dictionary(uniqueKeysWithValues: schulaufgaben.map { ($0.id, .kurzarbeit) })
+                showSchulaufgabeMergeSheet = true
+                return
+            }
+        }
+
+        clearSchulaufgabeConversionState()
+        await performSubjectSave(
+            originalName: originalName,
+            newName: newName,
+            newType: resolvedType,
+            newIsElective: editIsElective
+        )
+    }
+
+    private func applySchulaufgabeConversionsAndSave() async {
+        guard !isConvertingSchulaufgaben else { return }
+        isConvertingSchulaufgaben = true
+        conversionError = nil
+
+        do {
+            try await applySchulaufgabeConversions()
+        } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
+            conversionError = "Schulaufgaben konnten nicht umgewandelt werden."
+            isConvertingSchulaufgaben = false
+            return
+        }
+
+        isConvertingSchulaufgaben = false
+        showSchulaufgabeMergeSheet = false
+
+        let originalName = currentSubjectName
+        let newName = editName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedType = editIsElective ? 0 : editType
+        await performSubjectSave(
+            originalName: originalName,
+            newName: newName,
+            newType: resolvedType,
+            newIsElective: editIsElective
+        )
+    }
+
+    private func applySchulaufgabeConversions() async throws {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "SubjectDetailView", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
+        }
+        guard let schoolYearId = store.activeSchoolYearId else {
+            throw NSError(domain: "SubjectDetailView", code: -2, userInfo: [NSLocalizedDescriptionKey: "Kein Schuljahr"])
+        }
+
+        let db = Firestore.firestore()
+        let yearRef = db.collection("users").document(uid).collection("schoolYears").document(schoolYearId)
+        let gradesRef = yearRef.collection("subjects").document(currentSubjectName).collection("grades")
+
+        for grade in schulaufgabeGradesToConvert {
+            let replacement = schulaufgabeConversions[grade.id] ?? .kurzarbeit
+            try await gradesRef.document(grade.id).updateData([
+                "weight": replacement.rawValue
+            ])
+        }
+
+        if var list = store.gradesBySubject[currentSubjectName] {
+            var changed = false
+            for idx in list.indices {
+                let grade = list[idx]
+                guard let replacement = schulaufgabeConversions[grade.id] else { continue }
+                let newWeight = replacement.rawValue
+                if grade.weight != newWeight {
+                    list[idx] = GradeWithId(
+                        id: grade.id,
+                        grade: grade.grade,
+                        weight: newWeight,
+                        date: grade.date,
+                        note: grade.note,
+                        halfYear: grade.halfYear,
+                        linkedExamId: grade.linkedExamId
+                    )
+                    changed = true
+                }
+            }
+            if changed {
+                store.gradesBySubject[currentSubjectName] = list
+            }
+        }
+    }
+
+    private func performSubjectSave(
+        originalName: String,
+        newName: String,
+        newType: Int,
+        newIsElective: Bool
+    ) async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let schoolYearId = store.activeSchoolYearId else { return }
+        guard !isSavingSubject else { return }
 
         isSavingSubject = true
         defer { isSavingSubject = false }
@@ -1251,14 +1588,16 @@ private func statusBadge(_ text: String, color: Color) -> some View {
                     "teacher": editTeacher.isEmpty ? NSNull() : editTeacher,
                     "room": editRoom.isEmpty ? NSNull() : editRoom,
                     "email": editEmail.isEmpty ? NSNull() : editEmail,
-                    "alias": editAlias.isEmpty ? NSNull() : editAlias
+                    "alias": editAlias.isEmpty ? NSNull() : editAlias,
+                    "type": newType,
+                    "isElective": newIsElective
                 ])
             } else {
                 let oldRef = yearRef.collection("subjects").document(originalName)
                 let newRef = yearRef.collection("subjects").document(newName)
 
-                var payload: [String: Any] = [
-                    "type": original.type,
+                let payload: [String: Any] = [
+                    "type": newType,
                     "date": original.date,
                     "order": original.order as Any,
                     "teacher": editTeacher.isEmpty ? NSNull() : editTeacher,
@@ -1271,10 +1610,8 @@ private func statusBadge(_ text: String, color: Color) -> some View {
                     "examPointsEncrypted": original.examPointsEncrypted as Any,
                     "writtenExamPointsEncrypted": original.writtenExamPointsEncrypted as Any,
                     "oralExamPointsEncrypted": original.oralExamPointsEncrypted as Any,
-                    "isElective": original.isElective
+                    "isElective": newIsElective
                 ]
-                payload["type"] = original.type
-                payload["date"] = original.date
 
                 try await newRef.setData(payload, merge: true)
 
@@ -1296,11 +1633,13 @@ private func statusBadge(_ text: String, color: Color) -> some View {
             currentRoom = editRoom.isEmpty ? nil : editRoom
             currentEmail = editEmail.isEmpty ? nil : editEmail
             currentAlias = editAlias.isEmpty ? nil : editAlias
+            currentSubjectType = newType
+            currentIsElective = newIsElective
 
             cancelEditSubject()
         } catch {
             ErrorLoggingService.logErrorIfEnabled(error)
-            // Optional: Fehler anzeigen
+            editError = error.localizedDescription
         }
     }
 

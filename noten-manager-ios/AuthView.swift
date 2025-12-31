@@ -551,7 +551,13 @@ struct AuthView: View {
             .navigationTitle("Passwort zurücksetzen")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") { showResetSheet = false }
+                    Button {
+                        showResetSheet = false
+                    } label: {
+                        Image(systemName: "xmark")
+                            .imageScale(.medium)
+                    }
+                    .accessibilityLabel("Abbrechen")
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Senden") {

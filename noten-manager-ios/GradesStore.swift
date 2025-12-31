@@ -2498,9 +2498,9 @@ final class GradesStore: ObservableObject {
         } else {
             UIApplication.shared.setAlternateIconName(targetName) { error in
                 guard let error else { return }
-                ErrorLoggingService.logErrorIfEnabled(error)
                 print("AppIcon switch failed for \(targetName ?? "primary"): \(error)")
                 Task { @MainActor in
+                    ErrorLoggingService.logErrorIfEnabled(error)
                     let resolved = self.selection(forAlternateIconName: UIApplication.shared.alternateIconName)
                     self.appIcon = resolved
                     UserDefaults.standard.set(resolved, forKey: self.appIconDefaultsKey)

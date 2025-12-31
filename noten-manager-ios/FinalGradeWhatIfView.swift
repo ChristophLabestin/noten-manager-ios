@@ -124,7 +124,13 @@ struct FinalGradeWhatIfView: View {
             .sheetNavigationTitle("Was-wäre-wenn (Abitur)")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Schließen") { dismiss() }
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .imageScale(.medium)
+                    }
+                    .accessibilityLabel("Schließen")
                 }
             }
             .keyboardNavigationToolbar(

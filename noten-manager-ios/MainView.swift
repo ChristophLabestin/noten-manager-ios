@@ -1,5 +1,6 @@
 // MainView.swift
 import SwiftUI
+import StoreKit
 import FirebaseAuth
 
 // PreferenceKey, mit dem Detailseiten (SubjectDetail) den aktuellen Fachnamen
@@ -17,11 +18,18 @@ struct MainView: View {
     @Binding var incomingExamId: String?
     @Binding var deeplinkDestination: DeeplinkDestination?
     @StateObject private var gradesStore = GradesStore()
+    @StateObject private var notificationInbox = NotificationInboxStore.shared
     @State private var currentTab: BottomNavView.Tab = .home
     @EnvironmentObject private var offlineManager: OfflineModeManager
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var biometricManager: BiometricAuthManager
+    @EnvironmentObject private var storeKit: StoreKitManager
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("launchMessageSeen_2026_paid") private var launchMessageSeen = false
+    @AppStorage("launchOfferPurchased") private var launchOfferPurchased = false
+#if DEBUG
+    @AppStorage(LaunchOfferNotificationManager.debugForceFebruaryKey) private var debugForceFebruary = false
+#endif
     @State private var navPath = NavigationPath()
     @State private var showOnboardingFunnel: Bool = false
     @State private var offlineBannerVisible: Bool = false
@@ -34,12 +42,25 @@ struct MainView: View {
     @State private var emailBannerDismissTask: Task<Void, Never>?
     @State private var needsEmailVerification: Bool = false
     @State private var scrollToAccountOnOpen: Bool = false
+    @State private var showNotificationsSheet: Bool = false
+    @State private var pendingNotificationAction: NotificationInboxItem?
+    @State private var pendingOpenLaunchMessageFromInbox: Bool = false
+    @State private var showLaunchMessage: Bool = false
+    @State private var showLaunchLaterReminder: Bool = false
+    @State private var pendingLaunchLaterReminder: Bool = false
+    @State private var showSubscriptionOffer: Bool = false
+    @State private var showSubscriptionPurchaseSuccess: Bool = false
+    @State private var pendingSubscriptionPurchaseSuccess: Bool = false
+    @State private var subscriptionOfferShownThisSession: Bool = false
+    @State private var showLaunchPurchaseSuccess: Bool = false
+    @State private var pendingLaunchPurchaseSuccess: Bool = false
 
     // Von SubjectDetail per Preference gemeldetes Fach für „Note hinzufügen“
     @State private var quickAddSubjectName: String? = nil
     @State private var navigateToAbiturExam: Bool = false
     @State private var deeplinkExamId: String? = nil
     @State private var deeplinkExam: Exam? = nil
+    @State private var deeplinkHomework: Homework? = nil
     @State private var showExamListSheet: Bool = false
     @State private var showHomeworkListSheet: Bool = false
 
@@ -59,10 +80,33 @@ struct MainView: View {
             }
             .onAppear {
                 gradesStore.syncDarkModeWithSystem(colorScheme: colorScheme)
+                showLaunchMessageIfNeeded()
+                Task { await showSubscriptionOfferIfNeeded() }
+                notificationInbox.refreshFromDelivered()
+                scheduleLaunchOfferNotifications(purchased: launchOfferPurchased)
+                if LaunchOfferNotificationManager.consumePendingOpen() {
+                    handleOpenLaunchOfferNotification()
+                }
+                enforceSubscriptionGateIfNeeded()
             }
             .onChange(of: colorScheme) { _, newScheme in
                 gradesStore.syncDarkModeWithSystem(colorScheme: newScheme)
             }
+            .onChange(of: launchOfferPurchased) { _, purchased in
+                scheduleLaunchOfferNotifications(purchased: purchased)
+                enforceSubscriptionGateIfNeeded()
+            }
+            .onChange(of: storeKit.product?.displayPrice) { _, _ in
+                scheduleLaunchOfferNotifications(purchased: launchOfferPurchased)
+            }
+            .onChange(of: storeKit.isSubscriptionActive) { _, _ in
+                enforceSubscriptionGateIfNeeded()
+            }
+#if DEBUG
+            .onChange(of: debugForceFebruary) { _, _ in
+                enforceSubscriptionGateIfNeeded()
+            }
+#endif
             .preferredColorScheme(gradesStore.preferredColorScheme)
 
         let onboardingTracking = base
@@ -121,12 +165,27 @@ struct MainView: View {
                 }
             }
             .onChange(of: authManager.isAuthenticated) {
-                Task { await refreshEmailVerification() }
+                Task {
+                    await refreshEmailVerification()
+                    await showSubscriptionOfferIfNeeded()
+                }
             }
             .onChange(of: currentTab) { _, newTab in
+                if isSubscriptionGateActive && !isTabAllowed(newTab) {
+                    currentTab = .home
+                    presentSubscriptionGate()
+                    return
+                }
                 if newTab != .settings {
                     scrollToAccountOnOpen = false
                 }
+                if newTab == .home {
+                    showLaunchMessageIfNeeded()
+                    Task { await showSubscriptionOfferIfNeeded() }
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .openLaunchOffer)) { _ in
+                handleOpenLaunchOfferNotification()
             }
             .onChange(of: gradesStore.legacyMigrationSummary) { _, summary in
                 if summary != nil {
@@ -163,19 +222,76 @@ struct MainView: View {
                 HomeworkListView()
                     .environmentObject(gradesStore)
             }
+            .sheet(isPresented: $showNotificationsSheet, onDismiss: handleNotificationsSheetDismiss) {
+                NotificationsInboxView(
+                    inbox: notificationInbox,
+                    onSelectNotification: { item in
+                        pendingNotificationAction = item
+                    },
+                    onOpenImportant: {
+                        pendingOpenLaunchMessageFromInbox = true
+                    }
+                )
+                .environmentObject(gradesStore)
+            }
+            .sheet(isPresented: $showLaunchMessage, onDismiss: {
+                launchMessageSeen = true
+                if pendingLaunchLaterReminder {
+                    showLaunchLaterReminder = true
+                    pendingLaunchLaterReminder = false
+                }
+                if pendingLaunchPurchaseSuccess {
+                    showLaunchPurchaseSuccess = true
+                    pendingLaunchPurchaseSuccess = false
+                }
+            }) {
+                LaunchMessageSheetView(
+                    onLater: { pendingLaunchLaterReminder = true },
+                    onPurchaseSuccess: {
+                        launchOfferPurchased = true
+                        pendingLaunchPurchaseSuccess = true
+                    }
+                )
+                .environmentObject(gradesStore)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.hidden)
+                .interactiveDismissDisabled(true)
+            }
+            .sheet(isPresented: $showSubscriptionOffer, onDismiss: {
+                if pendingSubscriptionPurchaseSuccess {
+                    showSubscriptionPurchaseSuccess = true
+                    pendingSubscriptionPurchaseSuccess = false
+                }
+            }) {
+                SubscriptionOfferSheetView(
+                    onLater: {},
+                    onPurchaseSuccess: {
+                        pendingSubscriptionPurchaseSuccess = true
+                    }
+                )
+                .environmentObject(gradesStore)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.hidden)
+                .interactiveDismissDisabled(true)
+            }
             .sheet(item: $deeplinkExam) { exam in
                 ExamDetailSheet(exam: exam, onEdit: { _ in })
                     .environmentObject(gradesStore)
             }
+            .sheet(item: $deeplinkHomework) { homework in
+                HomeworkDetailSheet(homework: homework, onEdit: { _ in })
+                    .environmentObject(gradesStore)
+            }
             .toolbar {
-                if offlineManager.isOfflineModeActive, navPath.isEmpty {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        offlineToolbarButton
-                    }
-                }
-                if needsEmailVerification, navPath.isEmpty {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        emailVerificationToolbarButton
+                if navPath.isEmpty {
+                    ToolbarItemGroup(placement: .navigationBarLeading) {
+                        notificationsToolbarButton
+                        if offlineManager.isOfflineModeActive {
+                            offlineToolbarButton
+                        }
+                        if needsEmailVerification {
+                            emailVerificationToolbarButton
+                        }
                     }
                 }
             }
@@ -190,6 +306,21 @@ struct MainView: View {
                 }
             } message: { yearId in
                 Text("Die Pfingstferien sind vorbei. Möchtest du das neue Schuljahr \(yearId) jetzt anlegen?")
+            }
+            .alert("Erinnerung gesetzt", isPresented: $showLaunchLaterReminder) {
+                Button("Okay", role: .cancel) {}
+            } message: {
+                Text("Wir erinnern dich am letzten Tag (31.01.2026) noch einmal an das Angebot.")
+            }
+            .alert("Kauf erfolgreich", isPresented: $showLaunchPurchaseSuccess) {
+                Button("Alles klar", role: .cancel) {}
+            } message: {
+                Text("Danke! Die Vollversion ist jetzt freigeschaltet.")
+            }
+            .alert("Abo aktiviert", isPresented: $showSubscriptionPurchaseSuccess) {
+                Button("Alles klar", role: .cancel) {}
+            } message: {
+                Text("Danke! Dein Jahresabo ist jetzt aktiv.")
             }
             .sheet(item: $incomingHomeworkShare, onDismiss: {
                 incomingHomeworkShare = nil
@@ -347,6 +478,24 @@ struct MainView: View {
         return formatter
     }()
 
+    private var notificationsToolbarButton: some View {
+        Button {
+            showNotificationsSheet = true
+        } label: {
+            ToolbarIcon(
+                symbol: "bell.fill",
+                showDot: notificationInbox.hasUnread || hasImportantNotifications,
+                dotOffset: CGSize(width: 0, height: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Benachrichtigungen")
+    }
+
+    private var hasImportantNotifications: Bool {
+        LaunchOfferNotificationManager.isOfferActive() && !launchOfferPurchased
+    }
+
     private var offlineToolbarButton: some View {
         Button {
             showOfflineBannerTemporarily()
@@ -455,6 +604,117 @@ struct MainView: View {
         }
     }
 
+    private func showLaunchMessageIfNeeded() {
+        guard authManager.isAuthenticated else { return }
+        guard currentTab == .home else { return }
+        guard !launchMessageSeen else { return }
+        guard !launchOfferPurchased else { return }
+        guard LaunchOfferNotificationManager.isOfferActive() else { return }
+        guard !showLaunchMessage else { return }
+        showLaunchMessage = true
+    }
+
+    @MainActor
+    private func showSubscriptionOfferIfNeeded() async {
+        guard authManager.isAuthenticated else { return }
+        guard currentTab == .home else { return }
+        guard !LaunchOfferNotificationManager.isOfferActive() else { return }
+        guard !launchOfferPurchased else { return }
+        guard !showSubscriptionOffer else { return }
+        guard !subscriptionOfferShownThisSession else { return }
+        let isActive = await storeKit.refreshSubscriptionStatus()
+        guard !isActive else { return }
+        showSubscriptionOffer = true
+        subscriptionOfferShownThisSession = true
+    }
+
+    private func scheduleLaunchOfferNotifications(purchased: Bool) {
+        LaunchOfferNotificationManager.scheduleIfNeeded(
+            purchased: purchased,
+            displayPrice: storeKit.product?.displayPrice
+        )
+    }
+
+    private func handleOpenLaunchOfferNotification() {
+        guard authManager.isAuthenticated else { return }
+        guard !launchOfferPurchased else { return }
+        guard LaunchOfferNotificationManager.isOfferActive() else { return }
+        currentTab = .home
+        showNotificationsSheet = false
+        pendingOpenLaunchMessageFromInbox = false
+        showLaunchMessage = true
+    }
+
+    private func handleNotificationsSheetDismiss() {
+        if pendingOpenLaunchMessageFromInbox {
+            pendingOpenLaunchMessageFromInbox = false
+            showLaunchMessage = true
+            return
+        }
+        guard let item = pendingNotificationAction else { return }
+        pendingNotificationAction = nil
+        openInboxNotification(item)
+    }
+
+    private func openInboxNotification(_ item: NotificationInboxItem) {
+        currentTab = .home
+        switch item.kind {
+        case .exam:
+            if let examId = item.examId,
+               let exam = gradesStore.allExams.first(where: { $0.id == examId }) {
+                deeplinkExam = exam
+            } else {
+                showExamListSheet = true
+            }
+        case .homework:
+            if let homeworkId = item.homeworkId {
+                let homework = gradesStore.allHomeworks.first { hw in
+                    guard hw.id == homeworkId else { return false }
+                    if let gid = item.groupId {
+                        return hw.groupId == gid
+                    }
+                    return true
+                }
+                if let homework {
+                    deeplinkHomework = homework
+                } else {
+                    showHomeworkListSheet = true
+                }
+            } else {
+                showHomeworkListSheet = true
+            }
+        case .daily:
+            let examIds = item.examIds ?? (item.examId.map { [$0] } ?? [])
+            if examIds.count > 1 {
+                showExamListSheet = true
+                return
+            }
+            if let examId = examIds.first,
+               let exam = gradesStore.allExams.first(where: { $0.id == examId }) {
+                deeplinkExam = exam
+                return
+            }
+            if let homeworkId = item.homeworkId {
+                let homework = gradesStore.allHomeworks.first { hw in
+                    guard hw.id == homeworkId else { return false }
+                    if let gid = item.groupId {
+                        return hw.groupId == gid
+                    }
+                    return true
+                }
+                if let homework {
+                    deeplinkHomework = homework
+                } else {
+                    showHomeworkListSheet = true
+                }
+            } else {
+                showExamListSheet = true
+            }
+        default:
+            break
+        }
+    }
+
     @MainActor
     private func refreshEmailVerification() async {
         guard let user = Auth.auth().currentUser else {
@@ -517,16 +777,66 @@ struct MainView: View {
         .overlay(alignment: .bottom) {
             BottomNavView(
                 currentTab: currentTab,
-                onOpenHome: { currentTab = .home },
-                onOpenFinalGrade: { currentTab = .final },
-                onOpenSettings: { currentTab = .settings },
-                onOpenInsights: { currentTab = .insights },
-                onOpenAbitur: { navigateToAbiturExam = true },
+                isSubscriptionGateActive: isSubscriptionGateActive,
+                onOpenHome: { openTab(.home) },
+                onOpenFinalGrade: { openTab(.final) },
+                onOpenSettings: { openTab(.settings) },
+                onOpenInsights: { openTab(.insights) },
+                onOpenAbitur: {
+                    if isSubscriptionGateActive {
+                        presentSubscriptionGate()
+                        return
+                    }
+                    navigateToAbiturExam = true
+                },
                 quickAddPreselectedSubjectName: quickAddSubjectName
             )
             .environmentObject(gradesStore)
             .ignoresSafeArea(.keyboard, edges: .bottom)
         }
+    }
+
+    private var isSubscriptionGateActive: Bool {
+#if DEBUG
+        _ = debugForceFebruary
+#endif
+        guard LaunchOfferNotificationManager.isSubscriptionGateActive() else { return false }
+        if launchOfferPurchased { return false }
+        if storeKit.isSubscriptionActive { return false }
+        return true
+    }
+
+    private func isTabAllowed(_ tab: BottomNavView.Tab) -> Bool {
+        if !isSubscriptionGateActive {
+            return true
+        }
+        return tab == .home || tab == .settings
+    }
+
+    @MainActor
+    private func openTab(_ tab: BottomNavView.Tab) {
+        if isTabAllowed(tab) {
+            currentTab = tab
+            return
+        }
+        currentTab = .home
+        presentSubscriptionGate()
+    }
+
+    @MainActor
+    private func enforceSubscriptionGateIfNeeded() {
+        guard isSubscriptionGateActive else { return }
+        if !isTabAllowed(currentTab) {
+            currentTab = .home
+        }
+        presentSubscriptionGate()
+    }
+
+    @MainActor
+    private func presentSubscriptionGate() {
+        guard isSubscriptionGateActive else { return }
+        guard !showSubscriptionOffer else { return }
+        showSubscriptionOffer = true
     }
 
     @MainActor

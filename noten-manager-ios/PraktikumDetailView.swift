@@ -167,8 +167,14 @@ struct PraktikumDetailView: View {
         .sheetNavigationTitle("Praktikum")
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-                Button("Schließen") { dismiss() }
-                    .disabled(isWorking)
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .imageScale(.medium)
+                }
+                .accessibilityLabel("Schließen")
+                .disabled(isWorking)
             }
             ToolbarItem(placement: .navigationBarTrailing) {
                 if canManage {

@@ -2028,7 +2028,13 @@ struct FinalGradeView: View {
             .sheetNavigationTitle("Status-Details")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Schließen") { showStatusDetails = false }
+                    Button {
+                        showStatusDetails = false
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .imageScale(.medium)
+                    }
+                    .accessibilityLabel("Schließen")
                 }
             }
         }

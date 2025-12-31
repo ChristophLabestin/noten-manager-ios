@@ -63,6 +63,13 @@
 			);
 			target = 553A0CE62EDA312F00D93B93 /* ExamCountdownWidgetExtension */;
 		};
+		55D010C82EF7113F0031EF29 /* Exceptions for "noten-manager-ios" folder in "ExamCountdownWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				StoreKitConfiguration.storekit,
+			);
+			target = 553A0CE62EDA312F00D93B93 /* ExamCountdownWidgetExtension */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -70,6 +77,7 @@
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				55050D382ED62A370082A2EE /* Exceptions for "noten-manager-ios" folder in "noten-manager-ios" target */,
+				55D010C82EF7113F0031EF29 /* Exceptions for "noten-manager-ios" folder in "ExamCountdownWidgetExtension" target */,
 			);
 			path = "noten-manager-ios";
 			sourceTree = "<group>";
@@ -406,13 +414,14 @@
 				CODE_SIGN_ENTITLEMENTS = "noten-manager-ios/noten-manager-ios.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.1;
+				CURRENT_PROJECT_VERSION = 1.2;
 				DEVELOPMENT_TEAM = 48BM67TY9G;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "noten-manager-ios/Info.plist";
 				INFOPLIST_KEY_CFBundleDevelopmentRegion = de;
 				INFOPLIST_KEY_CFBundleDisplayName = "Noten Manager";
+				INFOPLIST_KEY_CFBundleVersion = "$(CURRENT_PROJECT_VERSION)";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -423,7 +432,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = "de.christophlabestin.noten-manager-ios";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -447,13 +456,14 @@
 				CODE_SIGN_ENTITLEMENTS = "noten-manager-ios/noten-manager-ios.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.1;
+				CURRENT_PROJECT_VERSION = 1.2;
 				DEVELOPMENT_TEAM = 48BM67TY9G;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "noten-manager-ios/Info.plist";
 				INFOPLIST_KEY_CFBundleDevelopmentRegion = de;
 				INFOPLIST_KEY_CFBundleDisplayName = "Noten Manager";
+				INFOPLIST_KEY_CFBundleVersion = "$(CURRENT_PROJECT_VERSION)";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -464,7 +474,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = "de.christophlabestin.noten-manager-ios";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -486,18 +496,19 @@
 				CODE_SIGN_ENTITLEMENTS = ExamCountdownWidget/ExamCountdownWidget.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.1;
+				CURRENT_PROJECT_VERSION = 1.2;
 				DEVELOPMENT_TEAM = 48BM67TY9G;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ExamCountdownWidget/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = ExamCountdownWidget;
+				INFOPLIST_KEY_CFBundleVersion = "$(CURRENT_PROJECT_VERSION)";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = "de.christophlabestin.noten-manager-ios.ExamCountdownWidget";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -518,18 +529,19 @@
 				CODE_SIGN_ENTITLEMENTS = ExamCountdownWidget/ExamCountdownWidget.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1.1;
+				CURRENT_PROJECT_VERSION = 1.2;
 				DEVELOPMENT_TEAM = 48BM67TY9G;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ExamCountdownWidget/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = ExamCountdownWidget;
+				INFOPLIST_KEY_CFBundleVersion = "$(CURRENT_PROJECT_VERSION)";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = "de.christophlabestin.noten-manager-ios.ExamCountdownWidget";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;

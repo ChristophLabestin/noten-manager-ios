@@ -1,0 +1,131 @@
+{
+  "appPolicies" : {
+    "eula" : "",
+    "policies" : [
+      {
+        "locale" : "en_US",
+        "policyText" : "",
+        "policyURL" : ""
+      }
+    ]
+  },
+  "identifier" : "9D1D3F4B",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+    {
+      "displayPrice" : "3.99",
+      "familyShareable" : false,
+      "internalID" : "2A8C1F5B",
+      "localizations" : [
+        {
+          "description" : "Einmaliger Kauf fuer lebenslangen Zugriff.",
+          "displayName" : "Earlybird Lifetime",
+          "locale" : "de"
+        },
+        {
+          "description" : "One-time purchase for lifetime access.",
+          "displayName" : "Earlybird Lifetime",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "earlybird_lifetime",
+      "referenceName" : "earlybird_lifetime",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+    "_askToBuyEnabled" : false,
+    "_billingGracePeriodEnabled" : false,
+    "_billingIssuesEnabled" : false,
+    "_disableDialogs" : false,
+    "_failTransactionsEnabled" : false,
+    "_locale" : "de",
+    "_renewalBillingIssuesEnabled" : false,
+    "_storefront" : "DEU",
+    "_storeKitErrors" : [
+      {
+        "enabled" : false,
+        "name" : "Load Products"
+      },
+      {
+        "enabled" : false,
+        "name" : "Purchase"
+      },
+      {
+        "enabled" : false,
+        "name" : "Verification"
+      }
+    ],
+    "_timeRate" : 0
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "21865065",
+      "name" : "Noten Manager Pro",
+      "localizations" : [
+        {
+          "description" : "Premium-Abo fuer Noten Manager Pro.",
+          "displayName" : "Noten Manager Pro",
+          "locale" : "de"
+        },
+        {
+          "description" : "Premium subscription for Noten Manager Pro.",
+          "displayName" : "Noten Manager Pro",
+          "locale" : "en_US"
+        }
+      ],
+      "subscriptions" : [
+        {
+          "displayPrice" : "9.99",
+          "familyShareable" : false,
+          "internalID" : "7B9E3C11",
+          "localizations" : [
+            {
+              "description" : "Jahresabo fuer Noten Manager Pro.",
+              "displayName" : "Noten Manager Pro Jahresabo",
+              "locale" : "de"
+            },
+            {
+              "description" : "Yearly subscription for Noten Manager Pro.",
+              "displayName" : "Noten Manager Pro Yearly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "noten_manager_pro_yearly",
+          "referenceName" : "noten_manager_pro_yearly",
+          "subscriptionGroupID" : "21865065",
+          "subscriptionPeriod" : "P1Y",
+          "type" : "AutoRenewableSubscription"
+        },
+        {
+          "displayPrice" : "1.99",
+          "familyShareable" : false,
+          "internalID" : "4F2D8A6C",
+          "localizations" : [
+            {
+              "description" : "Monatsabo fuer Noten Manager Pro.",
+              "displayName" : "Noten Manager Pro Monatsabo",
+              "locale" : "de"
+            },
+            {
+              "description" : "Monthly subscription for Noten Manager Pro.",
+              "displayName" : "Noten Manager Pro Monthly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "noten_manager_pro_monthly",
+          "referenceName" : "noten_manager_pro_monthly",
+          "subscriptionGroupID" : "21865065",
+          "subscriptionPeriod" : "P1M",
+          "type" : "AutoRenewableSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

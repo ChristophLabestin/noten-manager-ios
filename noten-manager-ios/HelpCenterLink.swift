@@ -50,7 +50,13 @@ struct HelpCenterLink: View {
                     .environmentObject(store)
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
-                            Button("Schließen") { showHelp = false }
+                            Button {
+                                showHelp = false
+                            } label: {
+                                Image(systemName: "chevron.down")
+                                    .imageScale(.medium)
+                            }
+                            .accessibilityLabel("Schließen")
                         }
                     }
             }

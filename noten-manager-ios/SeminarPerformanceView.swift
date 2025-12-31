@@ -205,17 +205,29 @@ struct SeminarPerformanceView: View {
         .sheetNavigationTitle("Seminarfach")
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-                Button("Abbrechen") { dismiss() }
-            }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        Task { await save() }
-                    } label: {
-                        if isSaving { ProgressView() } else { Text("Speichern") }
-                    }
-                    .disabled(!canSave)
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .imageScale(.medium)
                 }
+                .accessibilityLabel("Abbrechen")
             }
+            ToolbarItem(placement: .confirmationAction) {
+                Button {
+                    Task { await save() }
+                } label: {
+                    if isSaving {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "checkmark")
+                            .imageScale(.medium)
+                    }
+                }
+                .accessibilityLabel("Speichern")
+                .disabled(!canSave)
+            }
+        }
             .onAppear {
                 if topic.isEmpty, let sem = store.seminarPerformance {
                     topic = sem.topic ?? ""

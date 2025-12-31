@@ -150,15 +150,17 @@ struct AccentFilledButtonStyle: ButtonStyle {
 
 struct SoftTintButtonStyle: ButtonStyle {
     var accent: Color
+    var font: Font = .subheadline.weight(.semibold)
+    var verticalPadding: CGFloat = 12
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         let bg = accent.opacity(isEnabled ? 0.16 : 0.08)
         let stroke = accent.opacity(isEnabled ? 0.24 : 0.12)
         configuration.label
-            .font(.subheadline.weight(.semibold))
+            .font(font)
             .foregroundStyle(accent.opacity(isEnabled ? 1 : 0.6))
-            .padding(.vertical, 12)
+            .padding(.vertical, verticalPadding)
             .frame(maxWidth: .infinity)
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -175,6 +177,9 @@ struct SoftTintButtonStyle: ButtonStyle {
 }
 
 struct SettingsCard<Content: View, Trailing: View>: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject private var store: GradesStore
+
     let title: String
     let subtitle: String?
     let systemImage: String?
@@ -203,17 +208,21 @@ struct SettingsCard<Content: View, Trailing: View>: View {
             HStack(alignment: .center, spacing: 12) {
                 if let systemImage {
                     ZStack {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(accent.opacity(0.2))
-                            .frame(width: 44, height: 44)
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(iconBackground)
+                            .frame(width: 46, height: 46)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .stroke(accent.opacity(colorScheme == .dark ? 0.30 : 0.20), lineWidth: 1)
+                            )
                         Image(systemName: systemImage)
-                            .font(.headline.weight(.semibold))
+                            .font(.headline.weight(.bold))
                             .foregroundStyle(accent)
                     }
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title)
-                        .font(.title3.weight(.semibold))
+                        .font(.title3.weight(.bold))
                     if let subtitle, !subtitle.isEmpty {
                         Text(subtitle)
                             .font(.subheadline)
@@ -227,23 +236,61 @@ struct SettingsCard<Content: View, Trailing: View>: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            accent.opacity(0.10),
-                            .formCardBackground
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
+        .background(cardSurface)
+        .overlay(cardBorder)
+        .shadow(
+            color: Color.black.opacity(colorScheme == .dark ? 0.45 : 0.08),
+            radius: 6,
+            x: 0,
+            y: 4
+        )
+    }
+
+    private var baseTop: Color {
+        if colorScheme == .dark {
+            return store.theme == "feminine" ? Color(hex: "#1b1022") : Color(hex: "#0b1220")
+        }
+        return store.theme == "feminine" ? Color(hex: "#fff1f7") : Color(hex: "#eef2ff")
+    }
+
+    private var baseBottom: Color {
+        if colorScheme == .dark {
+            return store.theme == "feminine" ? Color(hex: "#120a16") : Color(hex: "#111827")
+        }
+        return store.theme == "feminine" ? Color(hex: "#fff7fb") : Color(hex: "#f8fafc")
+    }
+
+    private var iconBackground: Color {
+        accent.opacity(colorScheme == .dark ? 0.22 : 0.14)
+    }
+
+    private var cardSurface: some View {
+        RoundedRectangle(cornerRadius: 22, style: .continuous)
+            .fill(
+                LinearGradient(
+                    colors: [baseTop, baseBottom],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
                 )
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(accent.opacity(0.18), lineWidth: 1)
-        )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                accent.opacity(colorScheme == .dark ? 0.08 : 0.05),
+                                Color.clear
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            )
+    }
+
+    private var cardBorder: some View {
+        RoundedRectangle(cornerRadius: 22, style: .continuous)
+            .stroke(accent.opacity(colorScheme == .dark ? 0.18 : 0.12), lineWidth: 1)
     }
 }
 
@@ -289,6 +336,7 @@ struct SettingsSectionBox<Content: View>: View {
 struct ToolbarIcon: View {
     let symbol: String
     let showDot: Bool
+    var dotOffset: CGSize = CGSize(width: 2, height: 0)
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -300,7 +348,7 @@ struct ToolbarIcon: View {
                 Circle()
                     .fill(Color.red)
                     .frame(width: 8, height: 8)
-                    .offset(x: 2, y: 0)
+                    .offset(x: dotOffset.width, y: dotOffset.height)
             }
         }
     }
@@ -400,6 +448,9 @@ struct SummaryCard<Content: View>: View {
 }
 
 struct StatChip: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject private var store: GradesStore
+
     let title: String
     let value: String
     let accent: Color
@@ -418,14 +469,134 @@ struct StatChip: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(chipSurface)
+        .overlay(chipBorder)
+    }
+
+    private var chipTop: Color {
+        if colorScheme == .dark {
+            return store.theme == "feminine" ? Color(hex: "#1b1022") : Color(hex: "#0b1220")
+        }
+        return store.theme == "feminine" ? Color(hex: "#fff5fb") : Color(hex: "#f1f5ff")
+    }
+
+    private var chipBottom: Color {
+        if colorScheme == .dark {
+            return store.theme == "feminine" ? Color(hex: "#120a16") : Color(hex: "#111827")
+        }
+        return store.theme == "feminine" ? Color(hex: "#fffafb") : Color(hex: "#f8fafc")
+    }
+
+    private var chipSurface: some View {
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .fill(
+                LinearGradient(
+                    colors: [chipTop, chipBottom],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                accent.opacity(colorScheme == .dark ? 0.08 : 0.05),
+                                Color.clear
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            )
+    }
+
+    private var chipBorder: some View {
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .stroke(accent.opacity(colorScheme == .dark ? 0.18 : 0.12), lineWidth: 1)
+    }
+}
+
+struct SegmentedPickerOption<T: Hashable>: Identifiable {
+    let title: String
+    let value: T
+
+    var id: T { value }
+}
+
+struct SegmentedPicker<T: Hashable>: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject private var store: GradesStore
+    @Binding var selection: T
+
+    let options: [SegmentedPickerOption<T>]
+    var accent: Color? = nil
+
+    @Namespace private var selectionNamespace
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(options) { option in
+                let isActive = selection == option.value
+                Button {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+                        selection = option.value
+                    }
+                } label: {
+                    ZStack {
+                        if isActive {
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(activeBackground)
+                                .matchedGeometryEffect(id: "active-pill", in: selectionNamespace)
+                        }
+                        Text(option.title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(isActive ? activeText : inactiveText)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(option.title)
+            }
+        }
+        .padding(4)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(trackBackground)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(accent.opacity(0.2), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(trackBorder, lineWidth: 1)
         )
+    }
+
+    private var accentColor: Color {
+        accent ?? (store.theme == "feminine" ? Color(hex: "#ec4899") : Color(hex: "#2563eb"))
+    }
+
+    private var trackBackground: Color {
+        if colorScheme == .dark {
+            return store.theme == "feminine" ? Color(hex: "#1b1022") : Color(hex: "#0b1220")
+        }
+        return store.theme == "feminine" ? Color(hex: "#fff5fb") : Color(hex: "#f1f5ff")
+    }
+
+    private var trackBorder: Color {
+        accentColor.opacity(colorScheme == .dark ? 0.18 : 0.12)
+    }
+
+    private var activeBackground: Color {
+        accentColor.opacity(colorScheme == .dark ? 0.22 : 0.14)
+    }
+
+    private var activeText: Color {
+        accentColor
+    }
+
+    private var inactiveText: Color {
+        colorScheme == .dark ? Color(hex: "#cbd5e1") : Color(hex: "#475569")
     }
 }
 
