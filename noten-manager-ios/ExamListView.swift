@@ -148,10 +148,12 @@ struct ExamListView: View {
                                     examRow(exam)
                                 }
                                 if completedExams.count > visibleCompletedCount {
+                                    let remaining = completedExams.count - visibleCompletedCount
+                                    let nextBatch = min(5, remaining)
                                     Button {
-                                        visibleCompletedCount += 5
+                                        visibleCompletedCount += nextBatch
                                     } label: {
-                                        Text("Weitere 5 anzeigen")
+                                        Text("Weitere \(nextBatch) anzeigen")
                                             .frame(maxWidth: .infinity)
                                     }
                                     .buttonStyle(SoftTintButtonStyle(accent: .green))

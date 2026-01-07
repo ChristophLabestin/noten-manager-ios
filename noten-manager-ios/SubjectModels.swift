@@ -147,4 +147,14 @@ enum SubjectSortMode: String, Codable, CaseIterable {
     case average
     case average_worst
     case custom
+
+    var displayName: String {
+        switch self {
+        case .name: return "Alphabetisch (A-Z)"
+        case .name_desc: return "Alphabetisch (Z-A)"
+        case .average: return "Beste zuerst"
+        case .average_worst: return "Schlechteste zuerst"
+        case .custom: return "Eigene Reihenfolge"
+        }
+    }
 }

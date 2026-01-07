@@ -15,6 +15,7 @@ struct HomeView: View {
     @State private var halfYear: HalfYearFilter = .all
     @State private var isEditingOrder: Bool = false
     @State private var customOrderWorkingCopy: [String] = []
+    @AppStorage("isSubjectGridView") private var isGridView: Bool = false
 
     // Navigation-States für echte Seiten (kein Sheet)
     @State private var navigateToSettings: Bool = false
@@ -309,6 +310,38 @@ struct HomeView: View {
         }
     }
 
+    private func subjectGridItemAny(subject: Subject,
+                                    subjectGrades: [String: [Grade]],
+                                    fachreferatSubjectName: String?) -> some View {
+        let grades = subjectGrades[subject.name] ?? []
+        let item = SubjectGridItemView(
+            subject: subject,
+            grades: grades,
+            fachreferatSubjectName: fachreferatSubjectName
+        )
+        .contentShape(Rectangle())
+
+        if subject.name == "Praktikum" {
+            return AnyView(
+                Button {
+                    showPraktikumDetail = true
+                } label: {
+                    item
+                }
+                .buttonStyle(.plain)
+            )
+        } else {
+            return AnyView(
+                Button {
+                    openSubject(subject)
+                } label: {
+                    item
+                }
+                .buttonStyle(.plain)
+            )
+        }
+    }
+
     // MARK: - Derived computed properties to simplify body
 
     private var subjectGradesComputed: [String: [Grade]] {
@@ -405,7 +438,41 @@ struct HomeView: View {
         }.count
     }
 
+    private var dateString: String {
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "de_DE")
+        fmt.dateFormat = "EEEE, d. MMMM yyyy"
+        return fmt.string(from: Date())
+    }
+
     // MARK: - Header & Overview
+
+    private var homeHeader: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(dateString)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            
+            if !displayName.isEmpty {
+                ViewThatFits(in: .horizontal) {
+                    Text("\(greeting), \(displayName)")
+                        .font(.title2.weight(.bold))
+                    
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("\(greeting),")
+                        Text(displayName)
+                    }
+                    .font(.title2.weight(.bold))
+                }
+                .foregroundStyle(.primary)
+            } else {
+                Text(greeting)
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.primary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 
     private var overviewStats: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -479,26 +546,46 @@ struct HomeView: View {
             systemImage: "text.book.closed",
             accent: .cyan,
             trailing: {
-                if enableDrag {
-                    Button {
-                        toggleEditMode(sortedNames: sortedSubjectsComputed.map { $0.name })
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.up.arrow.down")
-                            Text(isEditingOrder ? "Fertig" : "Sortieren")
+                HStack(spacing: 8) {
+                    if enableDrag {
+                        Button {
+                            toggleEditMode(sortedNames: sortedSubjectsComputed.map { $0.name })
+                        } label: {
+                            Image(systemName: isEditingOrder ? "checkmark" : "arrow.up.arrow.down")
+                                .font(.caption.weight(.semibold))
+                                .imageScale(.medium)
+                                .frame(width: 40, height: 40)
+                                .background(
+                                    Circle()
+                                        .fill((isEditingOrder ? Color.green : Color.cyan).opacity(0.16))
+                                )
+                                .overlay(
+                                    Circle()
+                                        .stroke((isEditingOrder ? Color.green : Color.cyan).opacity(0.22), lineWidth: 1)
+                                )
+                                .foregroundStyle(isEditingOrder ? Color.green : Color.cyan)
                         }
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(Color.cyan.opacity(0.16))
-                        )
-                        .overlay(
-                            Capsule(style: .continuous)
-                                .stroke(Color.cyan.opacity(0.22), lineWidth: 1)
-                        )
-                        .foregroundStyle(Color.cyan)
+                        .buttonStyle(.plain)
+                    }
+
+                    Button {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                            isGridView.toggle()
+                        }
+                    } label: {
+                        Image(systemName: isGridView ? "list.bullet" : "squareshape.split.2x2")
+                            .font(.caption.weight(.semibold))
+                            .imageScale(.medium)
+                            .frame(width: 40, height: 40)
+                            .background(
+                                Circle()
+                                    .fill(Color.cyan.opacity(0.16))
+                            )
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.cyan.opacity(0.22), lineWidth: 1)
+                            )
+                            .foregroundStyle(Color.cyan)
                     }
                     .buttonStyle(.plain)
                 }
@@ -570,79 +657,183 @@ struct HomeView: View {
     }
 
 
-    // MARK: - Body
-
-    var body: some View {
-        List {
-            if store.isLoading {
-                Section {
-                    SettingsCard(
-                        title: "Sync läuft...",
-                        subtitle: store.loadingLabel,
-                        systemImage: "arrow.triangle.2.circlepath",
-                        accent: .cyan
-                    ) {
-                        ProgressView(value: store.progress, total: 100)
-                    }
-                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                    .listRowBackground(Color.clear)
-                }
-                .listSectionSeparator(.hidden)
-            }
-
+    @ViewBuilder
+    private var sortingModeSection: some View {
+        if isEditingOrder {
             Section {
-                overviewStats
-                    .softFadeIn(enabled: animationsOn, delay: 0.02, offset: 12)
-                    .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 8, trailing: 16))
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                if let upcomingHoliday {
-                    holidayNoticeCard(info: upcomingHoliday)
-                        .softFadeIn(enabled: animationsOn, delay: 0.05, offset: 10)
-                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
+                SettingsCard(
+                    title: "Sortierung wählen",
+                    subtitle: "Wähle eine Standard-Sortierung oder ziehe Fächer frei an ihre Position.",
+                    systemImage: "arrow.up.arrow.down.square",
+                    accent: .blue
+                ) {
+                    Picker("Modus", selection: Binding(
+                        get: { store.subjectSortMode },
+                        set: { newMode in
+                            Task {
+                                await store.updateSubjectSortMode(mode: newMode)
+                            }
+                        }
+                    )) {
+                        ForEach(SubjectSortMode.allCases, id: \.self) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(.blue)
+                    .padding(.vertical, 4)
                 }
-                subjectsControlCard
-                    .softFadeIn(enabled: animationsOn, delay: 0.08, offset: 12)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
             .listSectionSeparator(.hidden)
+        }
+    }
 
+    private func applyModeToWorkingCopy() {
+        let base = baseSubjectsList()
+        let reordered: [Subject]
+        switch store.subjectSortMode {
+        case .name:
+            reordered = moveSpecialSubjectsToEnd(base.sorted(by: comparatorNameAsc()))
+        case .name_desc:
+            reordered = moveSpecialSubjectsToEnd(base.sorted(by: comparatorNameDesc()))
+        case .average:
+            reordered = moveSpecialSubjectsToEnd(base.sorted(by: comparatorAverageBestFirst(subjectGrades: subjectGradesComputed)))
+        case .average_worst:
+            reordered = moveSpecialSubjectsToEnd(base.sorted(by: comparatorAverageWorstFirst(subjectGrades: subjectGradesComputed)))
+        case .custom:
+            return
+        }
+        customOrderWorkingCopy = reordered.map { $0.name }
+    }
+
+    @ViewBuilder
+    private var loadingSection: some View {
+        if store.isLoading {
             Section {
-                if isEditingOrder && enableDrag {
-                    ForEach(customOrderWorkingCopy, id: \.self) { name in
-                        SubjectRowView(
-                            subject: subjectByNameComputed[name] ?? Subject(name: name, type: 0, date: Date()),
-                            grades: subjectGradesComputed[name] ?? [],
-                            fachreferatSubjectName: store.fachreferat?.subjectName
-                        )
-                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
+                SettingsCard(
+                    title: "Sync läuft...",
+                    subtitle: store.loadingLabel,
+                    systemImage: "arrow.triangle.2.circlepath",
+                    accent: .cyan
+                ) {
+                    ProgressView(value: store.progress, total: 100)
+                }
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                .listRowBackground(Color.clear)
+            }
+            .listSectionSeparator(.hidden)
+        }
+    }
+
+    @ViewBuilder
+    private var topContentSection: some View {
+        Section {
+            homeHeader
+                .softFadeIn(enabled: animationsOn, delay: 0.01, offset: 10)
+                .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 4, trailing: 16))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+
+            overviewStats
+                .softFadeIn(enabled: animationsOn, delay: 0.04, offset: 12)
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+
+            if let upcomingHoliday {
+                holidayNoticeCard(info: upcomingHoliday)
+                    .softFadeIn(enabled: animationsOn, delay: 0.07, offset: 10)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
+
+            subjectsControlCard
+                .softFadeIn(enabled: animationsOn, delay: 0.10, offset: 12)
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+
+            sortingModeSection
+                .softFadeIn(enabled: animationsOn, delay: 0.12, offset: 10)
+        }
+        .listSectionSeparator(.hidden)
+    }
+
+    @ViewBuilder
+    private var subjectListSection: some View {
+        Section {
+            if isEditingOrder && enableDrag {
+                ForEach(customOrderWorkingCopy, id: \.self) { name in
+                    SubjectRowView(
+                        subject: subjectByNameComputed[name] ?? Subject(name: name, type: 0, date: Date()),
+                        grades: subjectGradesComputed[name] ?? [],
+                        fachreferatSubjectName: store.fachreferat?.subjectName
+                    )
+                    .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                }
+                .onMove { indices, newOffset in
+                    customOrderWorkingCopy.move(fromOffsets: indices, toOffset: newOffset)
+                    
+                    // If we were in a fixed mode, atomize the switch to custom mode with the new order
+                    if store.subjectSortMode != .custom {
+                        Task {
+                            await store.updateSubjectSortPreferences(mode: .custom, order: customOrderWorkingCopy)
+                        }
+                    } else {
+                        // Just update the custom order
+                        Task {
+                            await store.updateSubjectCustomOrder(order: customOrderWorkingCopy)
+                        }
                     }
-                    .onMove { indices, newOffset in
-                        customOrderWorkingCopy.move(fromOffsets: indices, toOffset: newOffset)
-                    }
-                } else {
-                    ForEach(Array(sortedSubjectsComputed.enumerated()), id: \.element.name) { entry in
+                }
+            } else if isGridView {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                    ForEach(Array(sortedSubjectsComputed.enumerated()), id: \.element.id) { entry in
                         let subject = entry.element
-                        let delay = 0.12 + Double(entry.offset) * 0.04
-                        subjectRowAny(
+                        let delay = 0.14 + Double(entry.offset) * 0.03
+                        subjectGridItemAny(
                             subject: subject,
                             subjectGrades: subjectGradesComputed,
                             fachreferatSubjectName: store.fachreferat?.subjectName
                         )
-                        .softFadeIn(enabled: animationsOn, delay: delay, offset: 14)
-                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
+                        .softFadeIn(enabled: animationsOn, delay: delay, offset: 10)
                     }
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            } else {
+                ForEach(Array(sortedSubjectsComputed.enumerated()), id: \.element.name) { entry in
+                    let subject = entry.element
+                    let delay = 0.14 + Double(entry.offset) * 0.04
+                    subjectRowAny(
+                        subject: subject,
+                        subjectGrades: subjectGradesComputed,
+                        fachreferatSubjectName: store.fachreferat?.subjectName
+                    )
+                    .softFadeIn(enabled: animationsOn, delay: delay, offset: 14)
+                    .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                }
             }
-            .listSectionSeparator(.hidden)
+        }
+        .listSectionSeparator(.hidden)
+    }
+
+    var body: some View {
+        List {
+            loadingSection
+            topContentSection
+            subjectListSection
         }
         .environment(\.editMode, .constant(editModeBinding))
         .listStyle(.plain)
@@ -651,13 +842,8 @@ struct HomeView: View {
         .listSectionSpacing(0)
         .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
         .navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("Überblick")
         .toolbar {
-            ToolbarItem(placement: .principal) {
-                ToolbarTitleView(
-                    title: greeting.isEmpty ? "Willkommen" : greeting,
-                    subtitle: displayName.isEmpty ? "Fächer & Noten" : displayName
-                )
-            }
             ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 0) {
                     Button {
@@ -724,24 +910,49 @@ struct HomeView: View {
                 selectedSubject = nil
             }
         }
+        .onChange(of: store.subjectSortMode) { _, newMode in
+            if isEditingOrder {
+                if newMode == .custom {
+                    // Restore from persistent custom order
+                    customOrderWorkingCopy = store.subjectCustomOrder
+                } else {
+                    // Apply the fixed mode reordering
+                    applyModeToWorkingCopy()
+                }
+            }
+        }
     }
 
     // MARK: - Actions
 
     private func toggleEditMode(sortedNames: [String]) {
         if isEditingOrder {
-            Task {
-                await store.updateSubjectSortPreferences(mode: .custom, order: customOrderWorkingCopy)
+            // Only save the current working copy as the NEW custom baseline 
+            // if we are actually in custom mode (or just switched to it).
+            if store.subjectSortMode == .custom {
+                Task {
+                    await store.updateSubjectSortPreferences(mode: .custom, order: customOrderWorkingCopy)
+                }
             }
             isEditingOrder = false
         } else {
-            if store.subjectSortOrder.isEmpty {
+            // Wenn wir den Modus öffnen, ist die Basis IMMER die gespeicherte Custom-Reihenfolge.
+            if store.subjectCustomOrder.isEmpty {
                 customOrderWorkingCopy = sortedNames
             } else {
-                customOrderWorkingCopy = store.subjectSortOrder
-                    .filter { sortedNames.contains($0) } +
-                    sortedNames.filter { !store.subjectSortOrder.contains($0) }
+                // Wir nehmen die gespeicherte Custom-Reihenfolge, filtern aber Fächer raus, die evtl. nicht mehr da sind
+                customOrderWorkingCopy = store.subjectCustomOrder.filter { sortedNames.contains($0) }
+                // Und fügen neue Fächer, die noch nicht in der Custom-Reihenfolge waren, am Ende an
+                let missing = sortedNames.filter { !store.subjectCustomOrder.contains($0) }
+                customOrderWorkingCopy.append(contentsOf: missing)
             }
+            
+            // Wenn wir aktuell einen festen Sortier-Modus haben (z.B. Beste zuerst), 
+            // dann wenden wir diesen JETZT auf die Working Copy an.
+            if store.subjectSortMode != .custom {
+                applyModeToWorkingCopy()
+            }
+            
             isEditingOrder = true
         }
     }
@@ -2327,5 +2538,192 @@ private struct ToolbarTitleView: View {
         .frame(maxWidth: .infinity)
         .multilineTextAlignment(.center)
         .allowsHitTesting(false)
+    }
+}
+
+struct SubjectGridItemView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject private var store: GradesStore
+
+    let subject: Subject
+    let grades: [Grade]
+    let fachreferatSubjectName: String?
+
+    private func avg(_ subject: Subject) -> Double? {
+        guard !grades.isEmpty else { return nil }
+        func calculateGradeWeight(_ subject: Subject, _ grade: Grade) -> Double {
+            if subject.name == "Fachreferat" { return 3 }
+            if subject.name == "Praktikum" { return 1 }
+            return store.effectiveGradeWeight(subjectType: subject.type, rawWeight: grade.weight)
+        }
+        var total = 0.0
+        var totalWeight = 0.0
+        for g in grades {
+            let w = calculateGradeWeight(subject, g)
+            total += g.grade * w
+            totalWeight += w
+        }
+        guard totalWeight > 0 else { return nil }
+        return total / totalWeight
+    }
+
+    private func formatAverage(_ value: Double?) -> String {
+        guard let v = value else { return "–" }
+        return String(format: "%.1f", v)
+    }
+
+    private func gradeClassColor(_ value: Double?) -> Color {
+        guard let v = value else { return .secondary }
+        if v >= 7 { return .green }
+        if v >= 4 { return .orange }
+        return .red
+    }
+
+    private func progress(for average: Double) -> Double {
+        let clamped = max(0, min(15, average))
+        return clamped / 15
+    }
+
+    private struct SubjectAccent {
+        let primary: Color
+        let secondary: Color
+    }
+
+    private func accent(for subject: Subject) -> SubjectAccent {
+        let feminine = store.theme == "feminine"
+        let mainPrimary = feminine ? Color(hex: "#ec4899") : Color(hex: "#2563eb")
+        let mainSecondary = feminine ? Color(hex: "#c084fc") : Color(hex: "#38bdf8")
+        let minorPrimary = feminine ? Color(hex: "#a855f7") : Color(hex: "#0ea5e9")
+        let minorSecondary = feminine ? Color(hex: "#f472b6") : Color(hex: "#22c55e")
+        let electivePrimary = feminine ? Color(hex: "#f97316") : Color(hex: "#6b7280")
+        let electiveSecondary = feminine ? Color(hex: "#fb7185") : Color(hex: "#94a3b8")
+
+        if subject.name == "Fachreferat" {
+            return SubjectAccent(
+                primary: feminine ? Color(hex: "#d946ef") : Color(hex: "#8b5cf6"),
+                secondary: feminine ? Color(hex: "#f472b6") : Color(hex: "#60a5fa")
+            )
+        }
+        if subject.name == "Praktikum" {
+            return SubjectAccent(primary: Color(hex: "#f59e0b"), secondary: Color(hex: "#fcd34d"))
+        }
+        if subject.isElective {
+            return SubjectAccent(primary: electivePrimary, secondary: electiveSecondary)
+        }
+        if subject.type == 1 {
+            return SubjectAccent(primary: mainPrimary, secondary: mainSecondary)
+        }
+        return SubjectAccent(primary: minorPrimary, secondary: minorSecondary)
+    }
+
+    private func cardBaseColors() -> (Color, Color) {
+        if colorScheme == .dark {
+            if store.theme == "feminine" {
+                return (Color(hex: "#1b1022"), Color(hex: "#120a16"))
+            }
+            return (Color(hex: "#0b1220"), Color(hex: "#111827"))
+        }
+        if store.theme == "feminine" {
+            return (Color(hex: "#fff1f7"), Color(hex: "#fff7fb"))
+        }
+        return (Color(hex: "#eef2ff"), Color(hex: "#f8fafc"))
+    }
+
+    private func gradePillBackground(_ color: Color) -> some View {
+        Capsule(style: .continuous)
+            .fill(color.opacity(colorScheme == .dark ? 0.18 : 0.12))
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(color.opacity(colorScheme == .dark ? 0.30 : 0.20), lineWidth: 1)
+            )
+    }
+
+    var body: some View {
+        let average = avg(subject)
+        let accent = accent(for: subject)
+        let base = cardBaseColors()
+        let isFachreferat = subject.name == "Fachreferat"
+        let isPraktikum = subject.name == "Praktikum"
+
+        let displayName: String = {
+            if isFachreferat, let frName = fachreferatSubjectName, !frName.isEmpty {
+                return frName
+            }
+            if isPraktikum {
+                return "Praktikum"
+            }
+            return subject.name
+        }()
+
+        VStack(spacing: 12) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(displayName)
+                        .font(.subheadline.weight(.bold))
+                        .lineLimit(1)
+                        .foregroundStyle(colorScheme == .dark ? .white : Color(hex: "#0f172a"))
+                    
+                    if isFachreferat {
+                        Text("Fachreferat")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(accent.primary.opacity(0.8))
+                    } else if isPraktikum {
+                        Text("11. Klasse")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(accent.primary.opacity(0.8))
+                    } else {
+                        Text(subject.type == 1 ? "Hauptfach" : (subject.isElective ? "Wahlfach" : "Nebenfach"))
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(accent.primary.opacity(0.8))
+                    }
+                }
+                Spacer(minLength: 4)
+                
+                Text(formatAverage(average))
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(gradeClassColor(average))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(gradePillBackground(gradeClassColor(average)))
+            }
+
+            if let avg = average {
+                GeometryReader { geo in
+                    let ratio = progress(for: avg)
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(Color.primary.opacity(colorScheme == .dark ? 0.12 : 0.06))
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [accent.primary, accent.secondary],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(width: geo.size.width * ratio)
+                    }
+                }
+                .frame(height: 5)
+            } else {
+                Spacer().frame(height: 5)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity)
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(LinearGradient(colors: [base.0, base.1], startPoint: .topLeading, endPoint: .bottomTrailing))
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(LinearGradient(colors: [accent.primary.opacity(colorScheme == .dark ? 0.10 : 0.05), Color.clear], startPoint: .topLeading, endPoint: .bottomTrailing))
+            }
+            .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.35 : 0.08), radius: 8, x: 0, y: 4)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(accent.primary.opacity(colorScheme == .dark ? 0.20 : 0.10), lineWidth: 1)
+        )
     }
 }

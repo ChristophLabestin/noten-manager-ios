@@ -4,6 +4,7 @@ import Foundation
 enum LaunchOfferNotificationManager {
     static let categoryIdentifier = "LAUNCH_OFFER_CATEGORY"
     static let pendingOpenDefaultsKey = "launch_offer_pending_open"
+    static let remindersDisabledKey = "launch_offer_reminders_disabled"
 #if DEBUG
     static let debugForceFebruaryKey = "debug_force_february_2026"
 #endif
@@ -45,6 +46,13 @@ enum LaunchOfferNotificationManager {
     }
 
     static func scheduleIfNeeded(purchased: Bool, displayPrice: String? = nil) {
+        if UserDefaults.standard.bool(forKey: remindersDisabledKey) {
+            let center = UNUserNotificationCenter.current()
+            let ids = [idSevenDays, idLastDay]
+            center.removePendingNotificationRequests(withIdentifiers: ids)
+            return
+        }
+        
         requestAuthorizationIfNeeded()
         configureCategory()
 
@@ -202,5 +210,13 @@ enum LaunchOfferNotificationManager {
         let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: date)
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
         return UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
+    }
+
+    static func disableReminders() {
+        UserDefaults.standard.set(true, forKey: remindersDisabledKey)
+        let center = UNUserNotificationCenter.current()
+        let ids = [idSevenDays, idLastDay]
+        center.removePendingNotificationRequests(withIdentifiers: ids)
+        center.removeDeliveredNotifications(withIdentifiers: ids)
     }
 }

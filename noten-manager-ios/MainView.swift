@@ -307,10 +307,9 @@ struct MainView: View {
             } message: { yearId in
                 Text("Die Pfingstferien sind vorbei. Möchtest du das neue Schuljahr \(yearId) jetzt anlegen?")
             }
-            .alert("Erinnerung gesetzt", isPresented: $showLaunchLaterReminder) {
-                Button("Okay", role: .cancel) {}
-            } message: {
-                Text("Wir erinnern dich am letzten Tag (31.01.2026) noch einmal an das Angebot.")
+            .sheet(isPresented: $showLaunchLaterReminder) {
+                ReminderConfirmationView()
+                    .environmentObject(gradesStore)
             }
             .alert("Kauf erfolgreich", isPresented: $showLaunchPurchaseSuccess) {
                 Button("Alles klar", role: .cancel) {}
@@ -898,17 +897,13 @@ struct MainView: View {
             Color.black.opacity(gradesStore.darkMode ? 0.18 : 0.10)
                 .ignoresSafeArea()
 
-            VStack(spacing: 14) {
+            VStack(spacing: 18) {
+                // Style matching CreationMenuView quickActionCard icon
                 ZStack {
                     Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [loadingAccent.opacity(0.18), loadingAccent.opacity(0.34)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 70, height: 70)
+                        .fill(loadingAccent.opacity(gradesStore.darkMode ? 0.22 : 0.16))
+                        .frame(width: 64, height: 64)
+                    
                     Image(systemName: "arrow.triangle.2.circlepath")
                         .font(.system(size: 28, weight: .semibold))
                         .foregroundStyle(loadingAccent)
@@ -916,47 +911,89 @@ struct MainView: View {
                         .animation(.linear(duration: 1.2).repeatForever(autoreverses: false), value: spinnerAnimating)
                 }
 
-                VStack(spacing: 4) {
+                VStack(spacing: 6) {
                     Text("Synchronisiere deine Daten")
-                        .font(.headline)
-                        .foregroundStyle(loadingAccentSecondary)
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(gradesStore.darkMode ? .white : Color(hex: "#0f172a"))
+                    
                     Text(loadingOverlayLabel)
                         .font(.subheadline)
-                        .foregroundStyle(loadingAccentSecondary.opacity(0.8))
+                        .foregroundStyle(gradesStore.darkMode ? Color.white.opacity(0.7) : .secondary)
                         .multilineTextAlignment(.center)
                 }
-                .padding(.horizontal, 4)
+                .padding(.horizontal, 8)
 
                 if gradesStore.progress > 0 {
                     VStack(spacing: 8) {
                         ProgressView(value: gradesStore.progress, total: 100)
                             .tint(loadingAccent)
                         Text("\(Int(gradesStore.progress.rounded()))% abgeschlossen")
-                            .font(.caption)
-                            .foregroundStyle(loadingAccentSecondary.opacity(0.8))
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(gradesStore.darkMode ? Color.white.opacity(0.6) : .secondary)
                     }
-                    .frame(maxWidth: 240)
+                    .frame(maxWidth: 220)
                 } else {
                     ProgressView()
                         .tint(loadingAccent)
+                        .scaleEffect(1.1)
                 }
             }
             .padding(.horizontal, 28)
-            .padding(.vertical, 22)
+            .padding(.vertical, 26)
             .background(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .stroke(loadingAccent.opacity(0.25), lineWidth: 1)
-                    )
-                    .shadow(color: .black.opacity(gradesStore.darkMode ? 0.5 : 0.2), radius: 20, x: 0, y: 12)
+                loadingCardSurface
+                    .shadow(color: Color.black.opacity(gradesStore.darkMode ? 0.45 : 0.12), radius: 12, x: 0, y: 8)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(loadingAccent.opacity(gradesStore.darkMode ? 0.22 : 0.12), lineWidth: 1)
             )
             .padding(.horizontal, 32)
         }
         .onAppear { spinnerAnimating = true }
         .onDisappear { spinnerAnimating = false }
         .zIndex(50)
+    }
+
+    private var loadingCardSurface: some View {
+        let isDark = gradesStore.darkMode
+        let isFeminine = gradesStore.theme == "feminine"
+        
+        let cardTop: Color = {
+            if isDark {
+                return isFeminine ? Color(hex: "#1b1022") : Color(hex: "#0b1220")
+            }
+            return isFeminine ? Color(hex: "#fff1f7") : Color(hex: "#eef2ff")
+        }()
+
+        let cardBottom: Color = {
+            if isDark {
+                return isFeminine ? Color(hex: "#120a16") : Color(hex: "#111827")
+            }
+            return isFeminine ? Color(hex: "#fff7fb") : Color(hex: "#f8fafc")
+        }()
+
+        return RoundedRectangle(cornerRadius: 24, style: .continuous)
+            .fill(
+                LinearGradient(
+                    colors: [cardTop, cardBottom],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                loadingAccent.opacity(isDark ? 0.12 : 0.08),
+                                Color.clear
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            )
     }
 
     private func handleDeeplinkExam() {

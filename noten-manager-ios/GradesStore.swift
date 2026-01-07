@@ -302,6 +302,7 @@ final class GradesStore: ObservableObject {
     @Published var progress: Double = 0.0
     @Published var subjectSortMode: SubjectSortMode = .name
     @Published var subjectSortOrder: [String] = []
+    @Published var subjectCustomOrder: [String] = []
     @Published var compactView: Bool = false
     @Published var animationsEnabled: Bool = true
 
@@ -616,6 +617,7 @@ final class GradesStore: ObservableObject {
         activeSchoolYearId = nil
         schoolYears = []
         schoolYearNames = [:]
+        subjectCustomOrder = []
 
         examGroupId = nil
         homeworkGroupId = nil
@@ -2373,6 +2375,11 @@ final class GradesStore: ObservableObject {
             subjectSortOrder = order
         } else {
             subjectSortOrder = []
+        }
+        if let customOrder = data["subjectCustomOrder"] as? [String] {
+            subjectCustomOrder = customOrder
+        } else {
+            subjectCustomOrder = subjectSortOrder
         }
 
         updateGroupObservers(uid: uid, schoolYearId: activeSchoolYearId)
@@ -4840,16 +4847,53 @@ final class GradesStore: ObservableObject {
     func updateSubjectSortPreferences(mode: SubjectSortMode, order: [String]) async {
         subjectSortMode = mode
         subjectSortOrder = order
+        if mode == .custom {
+            subjectCustomOrder = order
+        }
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let yearRef = try? await requireYearRef(uid: uid) else { return }
+        do {
+            var update: [String: Any] = [
+                "subjectSortMode": mode.rawValue,
+                "subjectSortOrder": order
+            ]
+            if mode == .custom {
+                update["subjectCustomOrder"] = order
+            }
+            try await yearRef.updateData(update)
+        } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
+        }
+    }
+
+    func updateSubjectSortMode(mode: SubjectSortMode) async {
+        subjectSortMode = mode
         guard let uid = Auth.auth().currentUser?.uid else { return }
         guard let yearRef = try? await requireYearRef(uid: uid) else { return }
         do {
             try await yearRef.updateData([
-                "subjectSortMode": mode.rawValue,
-                "subjectSortOrder": order
+                "subjectSortMode": mode.rawValue
             ])
         } catch {
             ErrorLoggingService.logErrorIfEnabled(error)
-            // optional loggen
+        }
+    }
+
+    func updateSubjectCustomOrder(order: [String]) async {
+        subjectCustomOrder = order
+        if subjectSortMode == .custom {
+            subjectSortOrder = order
+        }
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let yearRef = try? await requireYearRef(uid: uid) else { return }
+        do {
+            var update: [String: Any] = ["subjectCustomOrder": order]
+            if subjectSortMode == .custom {
+                update["subjectSortOrder"] = order
+            }
+            try await yearRef.updateData(update)
+        } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
         }
     }
 
