@@ -13,9 +13,6 @@ struct AppSettingsView: View {
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var storeKit: StoreKitManager
     @AppStorage("launchOfferPurchased") private var launchOfferPurchased = false
-#if DEBUG
-    @AppStorage(LaunchOfferNotificationManager.debugForceFebruaryKey) private var debugForceFebruary = false
-#endif
 
     @State private var newName: String = ""
     @State private var isSavingName: Bool = false
@@ -1321,12 +1318,6 @@ struct AppSettingsView: View {
         case .unknown:
             return "Käufe konnten nicht wiederhergestellt werden. Bitte später erneut versuchen."
         }
-    }
-
-    private func debugResetLaunchOfferPurchase() {
-        launchOfferPurchased = false
-        purchaseStatusMessage = "Debug: Kaufstatus zurueckgesetzt."
-        purchaseStatusIsError = false
     }
 
     private func activateOfflineManually() {

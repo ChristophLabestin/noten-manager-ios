@@ -127,8 +127,6 @@ struct AddSubjectView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
-                onDone: { hideKeyboard() }
-            )
         }
     }
 

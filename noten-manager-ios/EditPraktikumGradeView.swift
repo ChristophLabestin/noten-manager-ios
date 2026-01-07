@@ -156,8 +156,6 @@ struct EditPraktikumGradeView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
-                onDone: { hideKeyboard() }
-            )
         }
     }
 

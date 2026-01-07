@@ -391,8 +391,6 @@ struct EditGradeView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
-                onDone: { hideKeyboard() }
-            )
             .onAppear {
                 if linkToExam {
                     ensureLinkedExamSelection()

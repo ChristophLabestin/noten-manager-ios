@@ -406,8 +406,6 @@ struct AddGradeView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
-                onDone: { hideKeyboard() }
-            )
             .onAppear {
                 if subjectName.isEmpty {
                     if let pre = preselectedSubjectName,

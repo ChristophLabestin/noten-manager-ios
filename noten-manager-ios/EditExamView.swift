@@ -547,8 +547,6 @@ struct EditExamView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
-                onDone: { hideKeyboard() }
-            )
             .onChange(of: date) { _, newValue in
                 date = Calendar.current.startOfDay(for: newValue)
             }

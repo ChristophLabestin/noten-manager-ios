@@ -318,17 +318,17 @@ struct OnboardingFunnelView: View {
         .interactiveDismissDisabled(!(isSchoolYearChange || isManualRestart))
         .presentationDetents([.large])
         .presentationDragIndicator(showCloseButton ? .visible : .hidden)
-        .onChange(of: store.groupSubjectsByGroup) {
+        .onChange(of: store.groupSubjectsByGroup) { _, _ in
             if currentStep == .subjects && !isSchoolYearChange {
                 prepareGroupSubjectCandidates()
             }
         }
-        .onChange(of: store.subjects) {
+        .onChange(of: store.subjects) { _, _ in
             if currentStep == .subjects && !isSchoolYearChange {
                 prepareGroupSubjectCandidates()
             }
         }
-        .onChange(of: store.groupIds) {
+        .onChange(of: store.groupIds) { _, _ in
             if currentStep != .schoolYear && !isSchoolYearChange {
                 prepareGroupSubjectCandidates()
             }

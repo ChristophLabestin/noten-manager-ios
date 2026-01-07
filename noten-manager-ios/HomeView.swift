@@ -1665,16 +1665,6 @@ struct SubscriptionOfferSheetView: View {
         return "1,99€"
     }
 
-#if DEBUG
-    private var debugStoreKitStatus: String {
-        let earlybirdId = storeKit.product?.id ?? "nil"
-        let yearlyId = storeKit.subscriptionProduct?.id ?? "nil"
-        let monthlyId = storeKit.monthlySubscriptionProduct?.id ?? "nil"
-        let loadError = storeKit.lastProductLoadError ?? "none"
-        return "StoreKit: earlybird=\(earlybirdId), yearly=\(yearlyId), monthly=\(monthlyId)\nLast load error: \(loadError)"
-    }
-#endif
-
     private var ctaDetailLine: String {
         let price = priceValue(for: selectedPlan)
         return "\(selectedPlan.title) • danach \(price) / \(selectedPlan.periodLabel)"

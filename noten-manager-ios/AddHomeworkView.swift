@@ -210,14 +210,12 @@ struct AddHomeworkView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
-                onDone: { hideKeyboard() }
-            )
             .onAppear {
                 applyInitialSubjectSelection()
                 shareWithGroup = !store.groupIds.isEmpty
                 selectedGroupId = store.groupIds.first
             }
-            .onChange(of: store.subjects) {
+            .onChange(of: store.subjects) { _, _ in
                 applyInitialSubjectSelection()
             }
         }

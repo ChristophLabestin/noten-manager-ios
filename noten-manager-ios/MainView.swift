@@ -24,15 +24,12 @@ struct MainView: View {
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var biometricManager: BiometricAuthManager
     @EnvironmentObject private var storeKit: StoreKitManager
-    @EnvironmentObject private var storeKit: StoreKitManager
+
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.requestReview) private var requestReview
     @AppStorage("app_first_launch_timestamp") private var firstLaunchTimestamp: Double = 0
     @AppStorage("launchMessageSeen_2026_paid") private var launchMessageSeen = false
     @AppStorage("launchOfferPurchased") private var launchOfferPurchased = false
-#if DEBUG
-    @AppStorage(LaunchOfferNotificationManager.debugForceFebruaryKey) private var debugForceFebruary = false
-#endif
     @State private var navPath = NavigationPath()
     @State private var showOnboardingFunnel: Bool = false
     @State private var offlineBannerVisible: Bool = false
@@ -153,21 +150,16 @@ struct MainView: View {
             .onChange(of: storeKit.isSubscriptionActive) { _, _ in
                 enforceSubscriptionGateIfNeeded()
             }
-#if DEBUG
-            .onChange(of: debugForceFebruary) { _, _ in
-                enforceSubscriptionGateIfNeeded()
-            }
-#endif
             .preferredColorScheme(gradesStore.preferredColorScheme)
 
         let onboardingTracking = base
             .onChange(of: gradesStore.onboardingRequired) { _, required in
                 showOnboardingFunnel = required
             }
-            .onChange(of: gradesStore.gradeYear) {
+            .onChange(of: gradesStore.gradeYear) { _, _ in
                 Task { await evaluatePfingstferienPrompt() }
             }
-            .onChange(of: gradesStore.activeSchoolYearId) {
+            .onChange(of: gradesStore.activeSchoolYearId) { _, _ in
                 Task { await evaluatePfingstferienPrompt() }
             }
             .onChange(of: gradesStore.isLoading) { _, loading in
@@ -190,7 +182,7 @@ struct MainView: View {
             .onChange(of: deeplinkDestination) { _, destination in
                 handleDeeplinkDestination(destination)
             }
-            .onChange(of: gradesStore.allExams) {
+            .onChange(of: gradesStore.allExams) { _, _ in
                 self.handleDeeplinkExam()
                 Task {
                     await ExamLiveActivityManager.syncLiveActivities(for: gradesStore.allExams)
@@ -215,7 +207,7 @@ struct MainView: View {
                     await handleOfflineToggle(active: active)
                 }
             }
-            .onChange(of: authManager.isAuthenticated) {
+            .onChange(of: authManager.isAuthenticated) { _, _ in
                 Task {
                     await refreshEmailVerification()
                     await showSubscriptionOfferIfNeeded()
@@ -981,9 +973,6 @@ struct MainView: View {
     }
 
     private var isSubscriptionGateActive: Bool {
-#if DEBUG
-        _ = debugForceFebruary
-#endif
         guard LaunchOfferNotificationManager.isSubscriptionGateActive() else { return false }
         if launchOfferPurchased { return false }
         if storeKit.isSubscriptionActive { return false }

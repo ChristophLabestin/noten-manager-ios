@@ -366,8 +366,6 @@ struct EditHomeworkView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
-                onDone: { hideKeyboard() }
-            )
             .sheet(isPresented: $showShareSheet) {
                 if let shareLinkURL {
                     ShareSheet(activityItems: [shareLinkURL])

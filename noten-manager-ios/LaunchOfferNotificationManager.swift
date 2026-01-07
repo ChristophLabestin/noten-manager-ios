@@ -5,9 +5,6 @@ enum LaunchOfferNotificationManager {
     static let categoryIdentifier = "LAUNCH_OFFER_CATEGORY"
     static let pendingOpenDefaultsKey = "launch_offer_pending_open"
     static let remindersDisabledKey = "launch_offer_reminders_disabled"
-#if DEBUG
-    static let debugForceFebruaryKey = "debug_force_february_2026"
-#endif
 
     private static let reminderHour = 12
     private static let reminderMinute = 0
@@ -127,15 +124,15 @@ enum LaunchOfferNotificationManager {
     }
 
     static func isOfferActive(on date: Date = Date()) -> Bool {
-        let effectiveDate = effectiveDate(from: date)
+        let checkingDate = date
         guard let cutoff = makeCutoffDate() else { return true }
-        return effectiveDate < cutoff
+        return checkingDate < cutoff
     }
 
     static func isSubscriptionGateActive(on date: Date = Date()) -> Bool {
-        let effectiveDate = effectiveDate(from: date)
+        let checkingDate = date
         guard let cutoff = makeCutoffDate() else { return false }
-        return effectiveDate >= cutoff
+        return checkingDate >= cutoff
     }
 
     static func isLaunchOfferNotification(_ request: UNNotificationRequest) -> Bool {
@@ -172,28 +169,6 @@ enum LaunchOfferNotificationManager {
         return calendar.date(from: components)
     }
 
-    private static func effectiveDate(from date: Date) -> Date {
-#if DEBUG
-        if UserDefaults.standard.bool(forKey: debugForceFebruaryKey) {
-            return makeDebugDate() ?? date
-        }
-#endif
-        return date
-    }
-
-#if DEBUG
-    private static func makeDebugDate() -> Date? {
-        var calendar = Calendar.current
-        calendar.timeZone = .current
-        var components = DateComponents()
-        components.year = targetYear
-        components.month = 2
-        components.day = 2
-        components.hour = 12
-        components.minute = 0
-        return calendar.date(from: components)
-    }
-#endif
 
     private static func clearPendingOpenFlag() {
         UserDefaults.standard.set(false, forKey: pendingOpenDefaultsKey)
