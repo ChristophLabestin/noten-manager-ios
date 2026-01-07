@@ -24,7 +24,10 @@ struct MainView: View {
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var biometricManager: BiometricAuthManager
     @EnvironmentObject private var storeKit: StoreKitManager
+    @EnvironmentObject private var storeKit: StoreKitManager
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.requestReview) private var requestReview
+    @AppStorage("app_first_launch_timestamp") private var firstLaunchTimestamp: Double = 0
     @AppStorage("launchMessageSeen_2026_paid") private var launchMessageSeen = false
     @AppStorage("launchOfferPurchased") private var launchOfferPurchased = false
 #if DEBUG
@@ -122,8 +125,11 @@ struct MainView: View {
                 if LaunchOfferNotificationManager.consumePendingOpen() {
                     handleOpenLaunchOfferNotification()
                 }
+                if LaunchOfferNotificationManager.consumePendingOpen() {
+                    handleOpenLaunchOfferNotification()
+                }
                 enforceSubscriptionGateIfNeeded()
-                enforceSubscriptionGateIfNeeded()
+                attemptRequestReview()
                 
                 // Native TabBar Appearance (Liquid Glass)
                 let appearance = UITabBarAppearance()
@@ -776,6 +782,25 @@ struct MainView: View {
             ErrorLoggingService.logErrorIfEnabled(error)
             needsEmailVerification = false
             hideEmailBanner()
+            hideEmailBanner()
+        }
+    }
+
+    private func attemptRequestReview() {
+        let now = Date.now.timeIntervalSince1970
+        if firstLaunchTimestamp == 0 {
+            firstLaunchTimestamp = now
+            return
+        }
+        
+        // 3 Days = 3 * 24 * 60 * 60 = 259200 seconds
+        let threeDaysCoords: TimeInterval = 259200
+        
+        if now > (firstLaunchTimestamp + threeDaysCoords) {
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                requestReview()
+            }
         }
     }
 

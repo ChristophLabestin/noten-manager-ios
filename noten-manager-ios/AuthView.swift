@@ -114,6 +114,7 @@ struct AuthView: View {
         ZStack(alignment: .top) {
             backgroundLayers
                 .ignoresSafeArea()
+                .onTapGesture { hideKeyboard() }
 
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 16) {
@@ -123,7 +124,6 @@ struct AuthView: View {
                 .padding(.top, 12)
                 .padding(.bottom, 24)
             }
-            .hideKeyboardOnTap()
             .scrollDismissesKeyboard(.interactively)
             .scrollBounceBehavior(.basedOnSize)
         }

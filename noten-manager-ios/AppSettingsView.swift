@@ -318,10 +318,9 @@ struct AppSettingsView: View {
                 }
             }
             .background(
-                ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity)
+                ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity).onTapGesture { hideKeyboard() }
             )
             .scrollDismissesKeyboard(.interactively)
-            .hideKeyboardOnTap()
             .navigationDestination(isPresented: $navigateToFinal) {
                 AbiturExamView().environmentObject(store)
             }

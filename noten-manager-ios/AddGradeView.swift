@@ -378,7 +378,7 @@ struct AddGradeView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
-            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
+            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity).onTapGesture { hideKeyboard() })
             .sheetNavigationTitle("Note erfassen")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -406,11 +406,6 @@ struct AddGradeView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
-            .hideKeyboardOnTap()
-            .keyboardNavigationToolbar(
-                focus: $focusedField,
-                fields: [.grade, .note],
-                label: nil,
                 onDone: { hideKeyboard() }
             )
             .onAppear {
