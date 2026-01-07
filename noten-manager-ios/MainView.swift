@@ -64,6 +64,41 @@ struct MainView: View {
     @State private var showExamListSheet: Bool = false
     @State private var showHomeworkListSheet: Bool = false
 
+    // Sheet States (Migrated for iOS 26+ Native TabView support)
+    @State private var showCreationMenu: Bool = false
+    @State private var showAddSubject: Bool = false
+    @State private var showAddGrade: Bool = false
+    @State private var showAddFachreferat: Bool = false
+    @State private var showFachreferatDetail: Bool = false
+    @State private var showAddHomework: Bool = false
+    @State private var showAddExam: Bool = false
+    @State private var showPractical: Bool = false
+    @State private var showSeminar: Bool = false
+    
+    @Namespace private var namespace
+
+    // Compute props for sheets
+    private var isFirstSubject: Bool { gradesStore.subjects.isEmpty }
+    private var disableAddGrade: Bool { gradesStore.encryptionKey == nil || gradesStore.subjects.isEmpty }
+    private var gradeYear: Int { gradesStore.gradeYear ?? 12 }
+    private var hasFachreferat: Bool { gradesStore.fachreferat != nil }
+    private var showPracticalTab: Bool {
+        gradesStore.schoolType == .fos && (gradeYear == 11 || gradeYear == 12)
+    }
+    private var showFachreferatAction: Bool { gradeYear == 12 }
+    private var showSeminarAction: Bool {
+        gradeYear >= 12 || gradesStore.seminarPerformance != nil
+    }
+
+    private var isFeminine: Bool { gradesStore.theme == "feminine" }
+    private var isDark: Bool { gradesStore.darkMode }
+    private var activeColor: Color {
+        if isFeminine {
+            return isDark ? Color(hex: "#f472b6") : Color(hex: "#ec4899")
+        }
+        return isDark ? Color(hex: "#60a5fa") : Color(hex: "#2563eb")
+    }
+
     var body: some View {
         let base = ZStack {
             themedBackground
@@ -88,6 +123,16 @@ struct MainView: View {
                     handleOpenLaunchOfferNotification()
                 }
                 enforceSubscriptionGateIfNeeded()
+                enforceSubscriptionGateIfNeeded()
+                
+                // Native TabBar Appearance (Liquid Glass)
+                let appearance = UITabBarAppearance()
+                appearance.configureWithDefaultBackground()
+                appearance.backgroundEffect = UIBlurEffect(style: .systemThinMaterial)
+                UITabBar.appearance().standardAppearance = appearance
+                if #available(iOS 15.0, *) {
+                    UITabBar.appearance().scrollEdgeAppearance = appearance
+                }
             }
             .onChange(of: colorScheme) { _, newScheme in
                 gradesStore.syncDarkModeWithSystem(colorScheme: newScheme)
@@ -154,7 +199,7 @@ struct MainView: View {
                 }
                 .environmentObject(gradesStore)
                 .environmentObject(authManager)
-            }
+                }
             .task {
                 await handleDataLoading()
                 await refreshEmailVerification()
@@ -736,63 +781,178 @@ struct MainView: View {
 
     @ViewBuilder
     private var navigationContainer: some View {
-        NavigationStack(path: $navPath) {
-            Group {
-                switch currentTab {
-                case .home:
-                    HomeView()
-                        .environmentObject(gradesStore)
-                case .insights:
-                    InsightsView()
-                        .environmentObject(gradesStore)
-                case .final:
-                    FinalGradeView()
-                        .environmentObject(gradesStore)
-                case .settings:
-                    AppSettingsView(scrollToAccount: scrollToAccountOnOpen)
-                        .environmentObject(gradesStore)
-                        .environmentObject(authManager)
-                        .environmentObject(offlineManager)
-                        .environmentObject(biometricManager)
-                }
-            }
-        }
-        .navigationDestination(for: Subject.self) { subject in
-            if subject.name == "Fachreferat" {
-                FachreferatDetailView(subject: subject)
-                    .environmentObject(gradesStore)
-            } else {
-                SubjectDetailView(subject: subject)
-                    .environmentObject(gradesStore)
-            }
-        }
-        .navigationDestination(isPresented: $navigateToAbiturExam) {
-            AbiturExamView().environmentObject(gradesStore)
-        }
-        .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: 100)
-        }
-        .ignoresSafeArea(.keyboard, edges: .bottom)
-        .overlay(alignment: .bottom) {
-            BottomNavView(
-                currentTab: currentTab,
-                isSubscriptionGateActive: isSubscriptionGateActive,
-                onOpenHome: { openTab(.home) },
-                onOpenFinalGrade: { openTab(.final) },
-                onOpenSettings: { openTab(.settings) },
-                onOpenInsights: { openTab(.insights) },
-                onOpenAbitur: {
-                    if isSubscriptionGateActive {
-                        presentSubscriptionGate()
-                        return
+        Group {
+            if #available(iOS 26, *) {
+                // Native TabView for iOS 26+ with Liquid Glass System Style
+                TabView(selection: $currentTab) {
+                    NavigationStack {
+                        HomeView(onOpenCreationMenu: { showCreationMenu = true })
+                            .environmentObject(gradesStore)
+                            .navigationDestination(for: Subject.self) { subject in
+                                if subject.name == "Fachreferat" {
+                                    FachreferatDetailView(subject: subject)
+                                        .environmentObject(gradesStore)
+                                } else {
+                                    SubjectDetailView(subject: subject)
+                                        .environmentObject(gradesStore)
+                                }
+                            }
+                            .navigationDestination(isPresented: $navigateToAbiturExam) {
+                                AbiturExamView().environmentObject(gradesStore)
+                            }
                     }
-                    navigateToAbiturExam = true
-                },
-                quickAddPreselectedSubjectName: quickAddSubjectName
+                    .tabItem {
+                        Label("Home", systemImage: "house.fill")
+                    }
+                    .tag(BottomNavView.Tab.home)
+
+                    if !isSubscriptionGateActive {
+                        NavigationStack {
+                            InsightsView(onOpenCreationMenu: { showCreationMenu = true })
+                                .environmentObject(gradesStore)
+                                .navigationDestination(for: Subject.self) { subject in
+                                    if subject.name == "Fachreferat" {
+                                        FachreferatDetailView(subject: subject)
+                                            .environmentObject(gradesStore)
+                                    } else {
+                                        SubjectDetailView(subject: subject)
+                                            .environmentObject(gradesStore)
+                                    }
+                                }
+                                .navigationDestination(isPresented: $navigateToAbiturExam) {
+                                    AbiturExamView().environmentObject(gradesStore)
+                                }
+                        }
+                        .tabItem {
+                            Label("Noten", systemImage: "chart.bar.fill")
+                        }
+                        .tag(BottomNavView.Tab.insights)
+                        
+                        NavigationStack {
+                            FinalGradeView(onOpenCreationMenu: { showCreationMenu = true })
+                                .environmentObject(gradesStore)
+                                .navigationDestination(isPresented: $navigateToAbiturExam) {
+                                    AbiturExamView().environmentObject(gradesStore)
+                                }
+                        }
+                        .tabItem {
+                            Label("Abi", systemImage: "graduationcap.fill")
+                        }
+                        .tag(BottomNavView.Tab.final)
+                    }
+
+                    NavigationStack {
+                        AppSettingsView(
+                            scrollToAccount: scrollToAccountOnOpen,
+                            onOpenCreationMenu: { showCreationMenu = true }
+                        )
+                            .environmentObject(gradesStore)
+                            .environmentObject(authManager)
+                            .environmentObject(offlineManager)
+                            .environmentObject(biometricManager)
+                            .navigationDestination(isPresented: $navigateToAbiturExam) {
+                                AbiturExamView().environmentObject(gradesStore)
+                            }
+                    }
+                    .tabItem {
+                        Label("Optionen", systemImage: "gearshape.fill")
+                    }
+                    .tag(BottomNavView.Tab.settings)
+                }
+                .tint(activeColor)
+                .tabBarMinimizeBehavior(.onScrollDown) // Native minimize on scroll
+            } else {
+                 // Fallback for older iOS versions (Overlay approach)
+                 NavigationStack(path: $navPath) {
+                     Group {
+                         switch currentTab {
+                         case .home:
+                             HomeView(onOpenCreationMenu: { showCreationMenu = true })
+                                 .environmentObject(gradesStore)
+                            case .insights:
+                                InsightsView(onOpenCreationMenu: { showCreationMenu = true })
+                                    .environmentObject(gradesStore)
+                            case .final:
+                                FinalGradeView(onOpenCreationMenu: { showCreationMenu = true })
+                                    .environmentObject(gradesStore)
+                            case .settings:
+                                AppSettingsView(
+                                    scrollToAccount: scrollToAccountOnOpen,
+                                    onOpenCreationMenu: { showCreationMenu = true }
+                                )
+                                    .environmentObject(gradesStore)
+                                 .environmentObject(authManager)
+                                 .environmentObject(offlineManager)
+                                 .environmentObject(biometricManager)
+                         default:
+                             EmptyView()
+                         }
+                     }
+                 }
+                 .safeAreaInset(edge: .bottom) {
+                     BottomNavView(
+                         currentTab: currentTab,
+                         isSubscriptionGateActive: isSubscriptionGateActive,
+                         onOpenHome: { currentTab = .home; navPath = NavigationPath() },
+                         onOpenFinalGrade: { currentTab = .final; navPath = NavigationPath() },
+                         onOpenSettings: { currentTab = .settings; navPath = NavigationPath() },
+                         onOpenInsights: { currentTab = .insights; navPath = NavigationPath() },
+                         onOpenAbitur: { navigateToAbiturExam = true },
+                         onOpenPractical: { showPractical = true },
+                         quickAddPreselectedSubjectName: quickAddSubjectName
+                     )
+                     .environmentObject(gradesStore)
+                     .padding(.bottom, 8)
+                 }
+            }
+        }
+        // Attach Sheet Modifiers here so they apply to both the TabView and the NavigationStack fallback
+        .sheet(isPresented: $showCreationMenu) {
+            CreationMenuView(
+                onAction: handleCreationAction,
+                isFirstSubject: isFirstSubject,
+                disableAddGrade: disableAddGrade,
+                showPractical: showPracticalTab,
+                showFachreferat: showFachreferatAction,
+                hasFachreferat: hasFachreferat,
+                showSeminar: showSeminarAction,
+                encryptionKeyLoaded: gradesStore.encryptionKey != nil
             )
             .environmentObject(gradesStore)
-            .ignoresSafeArea(.keyboard, edges: .bottom)
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showAddSubject) { AddSubjectView().environmentObject(gradesStore) }
+        .sheet(isPresented: $showAddGrade) { AddGradeView(preselectedSubjectName: quickAddSubjectName).environmentObject(gradesStore) }
+        .sheet(isPresented: $showAddFachreferat) { AddFachreferatView(preselectedSubjectName: quickAddSubjectName).environmentObject(gradesStore) }
+        .sheet(isPresented: $showFachreferatDetail) {
+            NavigationStack {
+                FachreferatDetailView(subject: Subject(name: "Fachreferat", type: 0, date: Date()))
+                    .environmentObject(gradesStore)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button {
+                                showFachreferatDetail = false
+                            } label: {
+                                Image(systemName: "chevron.down")
+                                    .imageScale(.medium)
+                            }
+                        }
+                    }
+            }
+        }
+        .sheet(isPresented: $showAddHomework) { AddHomeworkView(preselectedSubjectName: quickAddSubjectName).environmentObject(gradesStore) }
+        .sheet(isPresented: $showAddExam) { AddExamView(preselectedSubjectName: quickAddSubjectName).environmentObject(gradesStore) }
+        .sheet(isPresented: $showPractical) { NavigationStack { PraktikumDetailView().environmentObject(gradesStore) } }
+        .sheet(isPresented: $showSeminar) { SeminarPerformanceView().environmentObject(gradesStore) }
+        
+        // Retain NavigationDestinations for the fallback path ONLY? 
+        // Or if TabView uses internal headers... 
+        // TabView children usually have their own NavigationStacks if needed.
+        // The existing HomeView etc seem to rely on a parent NavigationStack in the existing architecture.
+        // For TabView, we need to wrap each tab in NavigationStack if they push views.
+        // Let's assume standard behavior: Each tab needs a NavStack.
+        // I will update the TabView content above to wrapping them.
     }
 
     private var isSubscriptionGateActive: Bool {
@@ -1022,6 +1182,32 @@ struct MainView: View {
             isFeminine: gradesStore.theme == "feminine",
             intensity: gradesStore.themeBackgroundIntensity
         )
+    }
+    private func handleCreationAction(_ action: CreationAction) {
+        showCreationMenu = false
+        if isSubscriptionGateActive {
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            switch action {
+            case .homework: showAddHomework = true
+            case .grade: showAddGrade = true
+            case .exam: showAddExam = true
+            case .subject: showAddSubject = true
+            case .practical: 
+                showPractical = true
+            case .fachreferat:
+                if hasFachreferat { showFachreferatDetail = true }
+                else { showAddFachreferat = true }
+            case .seminar: showSeminar = true
+            case .abitur: 
+                if isSubscriptionGateActive {
+                    presentSubscriptionGate()
+                    return
+                }
+                navigateToAbiturExam = true
+            }
+        }
     }
 }
 

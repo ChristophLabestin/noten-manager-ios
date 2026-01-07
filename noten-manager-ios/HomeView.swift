@@ -5,6 +5,8 @@ import FirebaseFirestore
 
 struct HomeView: View {
     @EnvironmentObject var store: GradesStore
+    @ObservedObject private var notificationInbox = NotificationInboxStore.shared
+    var onOpenCreationMenu: () -> Void = {}
 
     enum HalfYearFilter: Hashable {
         case all
@@ -16,6 +18,7 @@ struct HomeView: View {
     @State private var isEditingOrder: Bool = false
     @State private var customOrderWorkingCopy: [String] = []
     @AppStorage("isSubjectGridView") private var isGridView: Bool = false
+    @AppStorage("launchOfferPurchased") private var launchOfferPurchased = false
 
     // Navigation-States für echte Seiten (kein Sheet)
     @State private var navigateToSettings: Bool = false
@@ -25,6 +28,7 @@ struct HomeView: View {
     @State private var displayName: String = ""
     @State private var showHomeworkSheet: Bool = false
     @State private var showExamSheet: Bool = false
+    @State private var showNotifications: Bool = false
     @State private var selectedSubject: Subject? = nil
     @State private var subjectLinkActive: Bool = false
     @State private var showPraktikumDetail: Bool = false
@@ -842,10 +846,29 @@ struct HomeView: View {
         .listSectionSpacing(0)
         .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
         .navigationBarTitleDisplayMode(.inline)
-        .navigationTitle("Überblick")
         .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    showNotifications = true
+                } label: {
+                    ToolbarIcon(
+                        symbol: "bell",
+                        showDot: notificationInbox.hasUnread || (LaunchOfferNotificationManager.isOfferActive() && !launchOfferPurchased)
+                    )
+                }
+                .accessibilityLabel("Benachrichtigungen")
+            }
             ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 0) {
+                    if #available(iOS 26, *) {
+                        Button {
+                            onOpenCreationMenu()
+                        } label: {
+                            ToolbarIcon(symbol: "plus", showDot: false)
+                        }
+                        .accessibilityLabel("Neu hinzufügen")
+                    }
+                    
                     Button {
                         showExamSheet = true
                     } label: {
@@ -888,6 +911,19 @@ struct HomeView: View {
         .sheet(isPresented: $showHomeworkSheet) {
             HomeworkListView()
                 .environmentObject(store)
+        }
+        .sheet(isPresented: $showNotifications) {
+            NotificationsInboxView(
+                inbox: notificationInbox,
+                onSelectNotification: { item in
+                    handleNotificationSelection(item)
+                },
+                onOpenImportant: {
+                    // Startet den Kaufprozess via LaunchOfferNotificationManager Flow
+                    NotificationCenter.default.post(name: .openLaunchOffer, object: nil)
+                }
+            )
+            .environmentObject(store)
         }
         .sheet(isPresented: $showExamSheet) {
             ExamListView()
@@ -970,6 +1006,16 @@ struct HomeView: View {
         }
     }
 
+    private func handleNotificationSelection(_ item: NotificationInboxItem) {
+        if let _ = item.homeworkId {
+            showHomeworkSheet = true
+        } else if let _ = item.examId {
+            showExamSheet = true
+        } else if item.kind == .daily {
+            showHomeworkSheet = true
+        }
+    }
+
     private func loadUserDisplayName() async {
         if let dn = Auth.auth().currentUser?.displayName, !dn.isEmpty {
             displayName = dn
@@ -1017,6 +1063,7 @@ struct LaunchMessageSheetView: View {
 
     @State private var purchaseStatusMessage: String?
     @State private var purchaseStatusIsError: Bool = false
+    @State private var showOfferCodeSheet = false
 
     private var accentPrimary: Color {
         store.theme == "feminine" ? Color(hex: "#ec4899") : Color(hex: "#2563eb")
@@ -1138,6 +1185,14 @@ struct LaunchMessageSheetView: View {
         .task {
             if storeKit.product == nil || storeKit.subscriptionProduct == nil || storeKit.monthlySubscriptionProduct == nil {
                 await storeKit.loadProduct()
+            }
+        }
+        .offerCodeRedemption(isPresented: $showOfferCodeSheet) { result in
+            switch result {
+            case .success:
+                onPurchaseSuccess()
+            case .failure(let error):
+                print("Offer code redemption failed: \(error)")
             }
         }
     }
@@ -1333,12 +1388,6 @@ struct LaunchMessageSheetView: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
             }
-#if DEBUG
-            Button("Debug: Sheet schließen") {
-                dismiss()
-            }
-            .buttonStyle(SoftTintButtonStyle(accent: .orange))
-#endif
         }
     }
 
@@ -1351,6 +1400,16 @@ struct LaunchMessageSheetView: View {
                 .frame(maxWidth: .infinity)
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
+            Button {
+                showOfferCodeSheet = true
+            } label: {
+                Text("Code einlösen")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(ctaAccent)
+                    .underline()
+            }
+            .buttonStyle(.plain)
+
             Button {
                 handleRestore()
             } label: {
@@ -1471,6 +1530,7 @@ struct SubscriptionOfferSheetView: View {
     @State private var purchaseStatusMessage: String?
     @State private var purchaseStatusIsError: Bool = false
     @State private var selectedPlan: SubscriptionPlan = .yearly
+    @State private var showOfferCodeSheet = false
 
     private enum SubscriptionPlan: String, CaseIterable {
         case yearly
@@ -1666,13 +1726,6 @@ struct SubscriptionOfferSheetView: View {
                 Spacer(minLength: 6)
                 ctaSection
                 finePrint
-#if DEBUG
-                Button("Debug: Sheet schließen") {
-                    dismiss()
-                }
-                .buttonStyle(SoftTintButtonStyle(accent: .orange))
-                .padding(.top, 6)
-#endif
             }
             .frame(maxWidth: .infinity, minHeight: proxy.size.height, alignment: .top)
             .padding(.horizontal, 20)
@@ -1688,6 +1741,15 @@ struct SubscriptionOfferSheetView: View {
         .task {
             if storeKit.subscriptionProduct == nil || storeKit.monthlySubscriptionProduct == nil {
                 await storeKit.loadProduct()
+            }
+        }
+        .offerCodeRedemption(isPresented: $showOfferCodeSheet) { result in
+            switch result {
+            case .success:
+                onPurchaseSuccess()
+            case .failure(let error):
+                // StoreKit handles UI for failure usually, but we can log
+                print("Offer code redemption failed: \(error)")
             }
         }
     }
@@ -1868,6 +1930,16 @@ struct SubscriptionOfferSheetView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
             Button {
+                showOfferCodeSheet = true
+            } label: {
+                Text("Code einlösen")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(ctaAccent)
+                    .underline()
+            }
+            .buttonStyle(.plain)
+
+            Button {
                 handleRestore()
             } label: {
                 Text("Käufe wiederherstellen")
@@ -1877,13 +1949,6 @@ struct SubscriptionOfferSheetView: View {
             }
             .buttonStyle(.plain)
             .disabled(storeKit.isRestoring)
-#if DEBUG
-            Text(debugStoreKitStatus)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity)
-#endif
         }
         .padding(.top, 2)
     }

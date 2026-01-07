@@ -75,10 +75,8 @@ struct noten_manager_iosApp: App {
 
     var body: some Scene {
         WindowGroup {
-            NavigationStack {
-                ContentView()
-            }
-            .environmentObject(offlineManager)
+            ContentView()
+                .environmentObject(offlineManager)
         }
     }
 }

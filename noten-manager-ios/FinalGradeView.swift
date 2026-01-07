@@ -39,6 +39,10 @@ struct FinalGradeView: View {
     @State private var previousYearSnapshot: SchoolYearSnapshot?
     @State private var isLoadingPreviousYear: Bool = false
     @State private var simulatedExamPoints: [String: Double] = [:]
+    @State private var showNotifications: Bool = false
+    @AppStorage("launchOfferPurchased") private var launchOfferPurchased = false
+    @ObservedObject private var notificationInbox = NotificationInboxStore.shared
+    var onOpenCreationMenu: () -> Void = {}
 
     private struct SubjectHandle: Identifiable, Hashable {
         let id: String
@@ -263,6 +267,18 @@ struct FinalGradeView: View {
             HomeworkListView()
                 .environmentObject(store)
         }
+        .sheet(isPresented: $showNotifications) {
+            NotificationsInboxView(
+                inbox: notificationInbox,
+                onSelectNotification: { item in
+                    handleNotificationSelection(item)
+                },
+                onOpenImportant: {
+                    NotificationCenter.default.post(name: .openLaunchOffer, object: nil)
+                }
+            )
+            .environmentObject(store)
+        }
         .sheet(isPresented: $showExamSheet) {
             ExamListView()
                 .environmentObject(store)
@@ -341,17 +357,28 @@ struct FinalGradeView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .principal) {
-                VStack(spacing: 2) {
-                    Text("Abschlussnote")
-                        .font(.headline)
-                    Text("Übersicht & Status")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    showNotifications = true
+                } label: {
+                    ToolbarIcon(
+                        symbol: "bell",
+                        showDot: notificationInbox.hasUnread || (LaunchOfferNotificationManager.isOfferActive() && !launchOfferPurchased)
+                    )
                 }
+                .accessibilityLabel("Benachrichtigungen")
             }
             ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 0) {
+                    if #available(iOS 26, *) {
+                        Button {
+                            onOpenCreationMenu()
+                        } label: {
+                            ToolbarIcon(symbol: "plus", showDot: false)
+                        }
+                        .accessibilityLabel("Neu hinzufügen")
+                    }
+
                     Button {
                         showExamSheet = true
                     } label: {
@@ -2037,6 +2064,15 @@ struct FinalGradeView: View {
                     .accessibilityLabel("Schließen")
                 }
             }
+        }
+    }
+    private func handleNotificationSelection(_ item: NotificationInboxItem) {
+        if let _ = item.homeworkId {
+            showHomeworkSheet = true
+        } else if let _ = item.examId {
+            showExamSheet = true
+        } else if item.kind == .daily {
+            showHomeworkSheet = true
         }
     }
 }

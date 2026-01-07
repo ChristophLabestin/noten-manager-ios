@@ -26,6 +26,9 @@ struct AppSettingsView: View {
     @State private var showExamSheet: Bool = false
     @State private var purchaseStatusMessage: String?
     @State private var purchaseStatusIsError: Bool = false
+    @State private var showNotifications: Bool = false
+    @ObservedObject private var notificationInbox = NotificationInboxStore.shared
+    private let onOpenCreationMenu: () -> Void
 
     // Gruppen
     @State private var groupJoinCode: String = ""
@@ -51,6 +54,8 @@ struct AppSettingsView: View {
 
     // Reset
     @State private var showResetAccountSheet: Bool = false
+    @State private var showSubscriptionOffer: Bool = false
+    @State private var showOfferCodeSheet: Bool = false
     @State private var resetAccountPassword: String = ""
     @State private var resetAccountSlideDone: Bool = false
     @State private var showDeleteAccountSheet: Bool = false
@@ -87,8 +92,9 @@ struct AppSettingsView: View {
     @State private var changePasswordError: String?
     @State private var isUpdatingPassword: Bool = false
 
-    init(scrollToAccount: Bool = false) {
+    init(scrollToAccount: Bool = false, onOpenCreationMenu: @escaping () -> Void = {}) {
         self.scrollToAccount = scrollToAccount
+        self.onOpenCreationMenu = onOpenCreationMenu
     }
 
     // Typografie-Hierarchie
@@ -316,24 +322,32 @@ struct AppSettingsView: View {
             )
             .scrollDismissesKeyboard(.interactively)
             .hideKeyboardOnTap()
-            .navigationTitle("Einstellungen")
-            .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(isPresented: $navigateToFinal) {
                 AbiturExamView().environmentObject(store)
             }
             .toolbar {
-                ToolbarItem(placement: .principal) {
-                    VStack(spacing: 2) {
-                        Text("Einstellungen").font(.headline)
-                        Text("Profil & App verwalten")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button {
+                        showNotifications = true
+                    } label: {
+                        ToolbarIcon(
+                            symbol: "bell",
+                            showDot: notificationInbox.hasUnread || (LaunchOfferNotificationManager.isOfferActive() && !launchOfferPurchased)
+                        )
                     }
-                    .frame(maxWidth: .infinity)
-                    .multilineTextAlignment(.center)
+                    .accessibilityLabel("Benachrichtigungen")
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack(spacing: 0) {
+                        if #available(iOS 26, *) {
+                            Button {
+                                onOpenCreationMenu()
+                            } label: {
+                                ToolbarIcon(symbol: "plus", showDot: false)
+                            }
+                            .accessibilityLabel("Neu hinzufügen")
+                        }
+
                         Button { showExamSheet = true } label: {
                             ToolbarIcon(symbol: "calendar.badge.clock", showDot: hasOverdueExams)
                         }
@@ -357,6 +371,18 @@ struct AppSettingsView: View {
             .sheet(isPresented: $showHomeworkSheet) {
                 HomeworkListView()
                     .environmentObject(store)
+            }
+            .sheet(isPresented: $showNotifications) {
+                NotificationsInboxView(
+                    inbox: notificationInbox,
+                    onSelectNotification: { item in
+                        handleNotificationSelection(item)
+                    },
+                    onOpenImportant: {
+                        NotificationCenter.default.post(name: .openLaunchOffer, object: nil)
+                    }
+                )
+                .environmentObject(store)
             }
             .sheet(isPresented: $showSchoolYearWizard) {
                 OnboardingFunnelView(
@@ -717,6 +743,17 @@ struct AppSettingsView: View {
         }
     }
 
+    private func handleNotificationSelection(_ item: NotificationInboxItem) {
+        if let _ = item.homeworkId {
+            showHomeworkSheet = true
+        } else if let _ = item.examId {
+            showExamSheet = true
+        } else if item.kind == .daily {
+            showHomeworkSheet = true
+        }
+    }
+
+
     // MARK: - Sections
 
     private var schoolYearCard: some View {
@@ -1055,6 +1092,28 @@ struct AppSettingsView: View {
                 }
             }
         }
+        .sheet(isPresented: $showSubscriptionOffer) {
+            SubscriptionOfferSheetView(
+                onLater: {},
+                onPurchaseSuccess: {
+                    Task {
+                        await storeKit.refreshSubscriptionStatus()
+                    }
+                }
+            )
+            .environmentObject(storeKit)
+            .environmentObject(store)
+            .presentationDetents([.large])
+            .presentationDragIndicator(.hidden)
+        }
+        .offerCodeRedemption(isPresented: $showOfferCodeSheet) { result in
+            switch result {
+            case .success:
+                Task { await storeKit.refreshSubscriptionStatus() }
+            case .failure(let error):
+                print("Offer code redemption failed: \(error)")
+            }
+        }
     }
 
     private var purchaseCard: some View {
@@ -1146,7 +1205,31 @@ struct AppSettingsView: View {
                         }
                         .buttonStyle(SoftTintButtonStyle(accent: .green))
                         .disabled(storeKit.isProcessingPurchase)
+                    } else if !isSubscribed && !launchOfferPurchased {
+                         Button {
+                             showSubscriptionOffer = true
+                         } label: {
+                             HStack(spacing: 10) {
+                                 Image(systemName: "creditcard.fill")
+                                     .font(.headline.weight(.semibold))
+                                 Text("Jetzt abonnieren")
+                             }
+                             .frame(maxWidth: .infinity)
+                         }
+                         .buttonStyle(SoftTintButtonStyle(accent: .blue))
                     }
+
+                    Button {
+                        showOfferCodeSheet = true
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "gift.fill")
+                                .font(.headline.weight(.semibold))
+                            Text("Code einlösen")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(SoftTintButtonStyle(accent: .indigo))
 
                     Button {
                         Task { await restorePurchases() }
@@ -1166,35 +1249,6 @@ struct AppSettingsView: View {
                     .buttonStyle(SoftTintButtonStyle(accent: .green))
                     .disabled(storeKit.isRestoring)
 
-#if DEBUG
-                    Button {
-                        debugForceFebruary.toggle()
-                        purchaseStatusMessage = debugForceFebruary
-                            ? "Debug: Februar simuliert."
-                            : "Debug: Echtzeit aktiv."
-                        purchaseStatusIsError = false
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: debugForceFebruary ? "calendar.badge.checkmark" : "calendar")
-                                .font(.headline.weight(.semibold))
-                            Text(debugForceFebruary ? "Debug: Februar simuliert" : "Debug: Februar simulieren")
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(SoftTintButtonStyle(accent: .orange))
-
-                    Button {
-                        debugResetLaunchOfferPurchase()
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "arrow.uturn.backward")
-                                .font(.headline.weight(.semibold))
-                            Text("Debug: Kaufstatus zuruecksetzen")
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(SoftTintButtonStyle(accent: .red))
-#endif
 
                     if let message = purchaseStatusMessage, !message.isEmpty {
                         Text(message)

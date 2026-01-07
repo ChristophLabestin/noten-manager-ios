@@ -4301,6 +4301,43 @@ final class GradesStore: ObservableObject {
         }
     }
 
+    func rescheduleExam(exam: Exam, newDate: Date) async throws {
+        if exam.isShared {
+            // Shared Exam: Mark as completed for user (hide it) AND create new private copy
+            await setUserCompletedForSharedExam(examId: exam.id, completed: true, groupId: exam.groupId)
+            
+            // Create private copy
+            try await addExamToFirestore(
+                subjectName: exam.subjectName,
+                subjectKey: exam.subjectKey,
+                title: exam.title,
+                notes: exam.notes,
+                date: newDate, // NEW DATE
+                hasTime: exam.hasTime,
+                weight: exam.weight,
+                customWeight: exam.customWeight,
+                reminderAt: nil, // Reset reminder
+                requiresGrade: exam.requiresGrade
+            )
+        } else {
+            // Private Exam: Just update the date and ensure it's open
+            try await updateExamInFirestore(
+                id: exam.id,
+                subjectName: exam.subjectName,
+                subjectKey: exam.subjectKey,
+                title: exam.title,
+                notes: exam.notes,
+                date: newDate, // NEW DATE
+                hasTime: exam.hasTime,
+                weight: exam.weight,
+                customWeight: exam.customWeight,
+                reminderAt: nil, // Reset reminder
+                isCompleted: false, // Ensure it's open
+                requiresGrade: exam.requiresGrade
+            )
+        }
+    }
+
     func setFachreferatToFirestore(subjectName: String, grade: Double, date: Date, note: String?, using key: SymmetricKey) async throws {
         let offline = OfflineModeManager.shared.isOfflineModeActive
         let uid = Auth.auth().currentUser?.uid ?? ""

@@ -9,6 +9,7 @@ struct BottomNavView: View {
         case insights
         case final
         case settings
+        case add // Dummy tab for spacing
     }
 
     let currentTab: Tab
@@ -67,25 +68,45 @@ struct BottomNavView: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            navButton(tab: .home, icon: "house.fill", action: onOpenHome)
-            Spacer()
-            if !isSubscriptionGateActive {
-                navButton(tab: .insights, icon: "chart.bar.fill", action: onOpenInsights)
-                Spacer()
-                addButton
-                Spacer()
-                navButton(tab: .final, icon: "graduationcap.fill", action: onOpenFinalGrade)
-                Spacer()
+        Group {
+            // Check for iOS 26+ to use the new Liquid Glass design
+            if #available(iOS 26, *) {
+                LiquidBottomNavView(
+                    currentTab: currentTab,
+                    isSubscriptionGateActive: isSubscriptionGateActive,
+                    onOpenHome: onOpenHome,
+                    onOpenInsights: onOpenInsights,
+                    onOpenFinalGrade: onOpenFinalGrade,
+                    onOpenSettings: onOpenSettings,
+                    onOpenAdd: {
+                         let generator = UIImpactFeedbackGenerator(style: .medium)
+                         generator.impactOccurred()
+                         showCreationMenu = true
+                    }
+                )
+            } else {
+                // Fallback for older iOS versions
+                HStack(spacing: 0) {
+                    navButton(tab: .home, icon: "house.fill", action: onOpenHome)
+                    Spacer()
+                    if !isSubscriptionGateActive {
+                        navButton(tab: .insights, icon: "chart.bar.fill", action: onOpenInsights)
+                        Spacer()
+                        addButton
+                        Spacer()
+                        navButton(tab: .final, icon: "graduationcap.fill", action: onOpenFinalGrade)
+                        Spacer()
+                    }
+                    navButton(tab: .settings, icon: "gearshape.fill", action: onOpenSettings)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(navSurface)
+                .overlay(navBorder)
+                .padding(.horizontal, 20)
+                .padding(.bottom, -10)
             }
-            navButton(tab: .settings, icon: "gearshape.fill", action: onOpenSettings)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(navSurface)
-        .overlay(navBorder)
-        .padding(.horizontal, 20)
-        .padding(.bottom, -10)
         .sheet(isPresented: $showCreationMenu) {
             CreationMenuView(
                 onAction: handleCreationAction,
@@ -137,23 +158,44 @@ struct BottomNavView: View {
         } label: {
             ZStack {
                 if isSelected {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    activeColor.opacity(isDark ? 0.28 : 0.18),
-                                    activeColor.opacity(isDark ? 0.12 : 0.08)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
+                    if #available(iOS 26, *) {
+                        // Liquid Glass Lens Style for iOS 26
+                        Capsule()
+                            .fill(activeColor.opacity(0.1))
+                            .glassEffect(.regular)
+                            .overlay(
+                                Capsule()
+                                    .stroke(
+                                        LinearGradient(
+                                            colors: [.white.opacity(0.5), .white.opacity(0.1)],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        ),
+                                        lineWidth: 1.5
+                                    )
                             )
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .stroke(activeColor.opacity(isDark ? 0.45 : 0.28), lineWidth: 1)
-                        )
-                        .shadow(color: activeColor.opacity(isDark ? 0.35 : 0.2), radius: 6, x: 0, y: 3)
-                        .matchedGeometryEffect(id: "TAB_BG", in: namespace)
+                            .shadow(color: activeColor.opacity(0.3), radius: 8, x: 0, y: 4)
+                            .matchedGeometryEffect(id: "TAB_BG", in: namespace)
+                    } else {
+                        // Original Style for older iOS
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        activeColor.opacity(isDark ? 0.28 : 0.18),
+                                        activeColor.opacity(isDark ? 0.12 : 0.08)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .stroke(activeColor.opacity(isDark ? 0.45 : 0.28), lineWidth: 1)
+                            )
+                            .shadow(color: activeColor.opacity(isDark ? 0.35 : 0.2), radius: 6, x: 0, y: 3)
+                            .matchedGeometryEffect(id: "TAB_BG", in: namespace)
+                    }
                 }
                 Image(systemName: icon)
                     .font(.system(size: 20, weight: isSelected ? .bold : .medium))
@@ -326,10 +368,11 @@ struct CreationMenuView: View {
                     Button {
                         dismiss()
                     } label: {
-                        Image(systemName: "xmark")
+                        Image(systemName: "chevron.down")
                             .imageScale(.medium)
+                            .foregroundStyle(Color.primary)
                     }
-                    .accessibilityLabel("Abbrechen")
+                    .accessibilityLabel("Schließen")
                 }
             }
         }

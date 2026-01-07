@@ -6,6 +6,10 @@ struct InsightsView: View {
     @State private var showHomeworkSheet: Bool = false
     @State private var showExamSheet: Bool = false
     @State private var showWhatIfMode: Bool = false
+    @State private var showNotifications: Bool = false
+    @AppStorage("launchOfferPurchased") private var launchOfferPurchased = false
+    @ObservedObject private var notificationInbox = NotificationInboxStore.shared
+    var onOpenCreationMenu: () -> Void = {}
 
     private var subjectsWithoutFachreferat: [Subject] {
         store.sortedSubjectsForDisplay(store.subjects.filter { $0.name != "Fachreferat" })
@@ -321,17 +325,28 @@ struct InsightsView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .principal) {
-                VStack(spacing: 2) {
-                    Text("Insights")
-                        .font(.headline)
-                    Text("Deine Noten im Überblick")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    showNotifications = true
+                } label: {
+                    ToolbarIcon(
+                        symbol: "bell",
+                        showDot: notificationInbox.hasUnread || (LaunchOfferNotificationManager.isOfferActive() && !launchOfferPurchased)
+                    )
                 }
+                .accessibilityLabel("Benachrichtigungen")
             }
             ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 0) {
+                    if #available(iOS 26, *) {
+                        Button {
+                            onOpenCreationMenu()
+                        } label: {
+                            ToolbarIcon(symbol: "plus", showDot: false)
+                        }
+                        .accessibilityLabel("Neu hinzufügen")
+                    }
+
                     Button {
                         showExamSheet = true
                     } label: {
@@ -359,6 +374,18 @@ struct InsightsView: View {
         .sheet(isPresented: $showWhatIfMode) {
             WhatIfModeView()
                 .environmentObject(store)
+        }
+        .sheet(isPresented: $showNotifications) {
+            NotificationsInboxView(
+                inbox: notificationInbox,
+                onSelectNotification: { item in
+                    handleNotificationSelection(item)
+                },
+                onOpenImportant: {
+                    NotificationCenter.default.post(name: .openLaunchOffer, object: nil)
+                }
+            )
+            .environmentObject(store)
         }
         .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
     }
@@ -446,6 +473,16 @@ struct InsightsView: View {
                 .background(color.opacity(0.14))
                 .foregroundStyle(color)
                 .clipShape(Capsule())
+        }
+    }
+
+    private func handleNotificationSelection(_ item: NotificationInboxItem) {
+        if let _ = item.homeworkId {
+            showHomeworkSheet = true
+        } else if let _ = item.examId {
+            showExamSheet = true
+        } else if item.kind == .daily {
+            showHomeworkSheet = true
         }
     }
 }

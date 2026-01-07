@@ -174,6 +174,7 @@ struct ExamListView: View {
                     } label: {
                         Image(systemName: "chevron.down")
                             .imageScale(.medium)
+                            .foregroundStyle(Color.primary)
                     }
                     .accessibilityLabel("Schließen")
                 }
@@ -619,6 +620,8 @@ struct ExamDetailSheet: View {
     let exam: Exam
     let onEdit: ((Exam) -> Void)?
     @State private var noteCopied: Bool = false
+    @State private var showReschedulePicker: Bool = false
+    @State private var rescheduleDate: Date = Date()
 
     init(exam: Exam, onEdit: ((Exam) -> Void)? = nil) {
         self.exam = exam
@@ -785,9 +788,75 @@ struct ExamDetailSheet: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
+
+                if !exam.isCompleted && exam.requiresGrade == true && Date() > exam.date {
+                    SettingsCard(
+                        title: "Nachtermin",
+                        subtitle: "Prüfung verschieben",
+                        systemImage: "calendar.badge.exclamationmark",
+                        accent: .red
+                    ) {
+                        SettingsSectionBox {
+                            Button {
+                                rescheduleDate = Date()
+                                showReschedulePicker = true
+                            } label: {
+                                HStack(spacing: 12) {
+                                    ZStack {
+                                        Circle()
+                                            .fill(Color.red.opacity(0.15))
+                                            .frame(width: 36, height: 36)
+                                        Image(systemName: "arrow.uturn.right")
+                                            .foregroundStyle(.red)
+                                            .font(.subheadline.weight(.semibold))
+                                    }
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Nachtermin eintragen")
+                                            .font(.headline)
+                                            .foregroundStyle(Color.primary)
+                                        Text("Setzt Prüfung auf neuen Termin")
+                                            .font(.caption)
+                                            .foregroundStyle(Color.secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .foregroundStyle(Color.secondary)
+                                }
+                                .padding(10)
+                                .background(Color.formInputBackground)
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
             }
             .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
             .sheetNavigationTitle(examTitle)
+            .sheet(isPresented: $showReschedulePicker) {
+                NavigationStack {
+                    Form {
+                        DatePicker("Neuer Termin", selection: $rescheduleDate, displayedComponents: exam.hasTime ? [.date, .hourAndMinute] : [.date])
+                    }
+                    .navigationTitle("Nachtermin wählen")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Abbrechen") { showReschedulePicker = false }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Speichern") {
+                                Task {
+                                    try? await store.rescheduleExam(exam: exam, newDate: rescheduleDate)
+                                    showReschedulePicker = false
+                                    dismiss()
+                                }
+                            }
+                        }
+                    }
+                    .presentationDetents([.medium])
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button {
@@ -997,6 +1066,7 @@ private struct ExamAddChooserView: View {
                     } label: {
                         Image(systemName: "chevron.down")
                             .imageScale(.medium)
+                            .foregroundStyle(Color.primary)
                     }
                     .accessibilityLabel("Schließen")
                 }
