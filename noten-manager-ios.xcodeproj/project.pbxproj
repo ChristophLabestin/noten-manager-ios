@@ -9,9 +9,11 @@
 /* Begin PBXBuildFile section */
 		55050D342ED6292C0082A2EE /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 55050D332ED6292C0082A2EE /* GoogleSignIn */; };
 		55050D362ED6292C0082A2EE /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 55050D352ED6292C0082A2EE /* GoogleSignInSwift */; };
+		5515A4462F0F9E6C00A83829 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 5515A4452F0F9E6C00A83829 /* FirebaseMessaging */; };
 		5535B85D2ECC2C7A00B778F4 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 5535B85C2ECC2C7A00B778F4 /* FirebaseAuth */; };
 		5535B85F2ECC2C7F00B778F4 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5535B85E2ECC2C7F00B778F4 /* FirebaseCore */; };
 		5535B8612ECC2C8500B778F4 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 5535B8602ECC2C8500B778F4 /* FirebaseFirestore */; };
+		5535B9002ECC2C7A00B778F4 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 5535B9012ECC2C7A00B778F4 /* FirebaseMessaging */; };
 		553A0CE92EDA312F00D93B93 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 553A0CE82EDA312F00D93B93 /* WidgetKit.framework */; };
 		553A0CEB2EDA312F00D93B93 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 553A0CEA2EDA312F00D93B93 /* SwiftUI.framework */; };
 		553A0CFC2EDA313200D93B93 /* ExamCountdownWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 553A0CE72EDA312F00D93B93 /* ExamCountdownWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -97,11 +99,13 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5515A4462F0F9E6C00A83829 /* FirebaseMessaging in Frameworks */,
 				55050D362ED6292C0082A2EE /* GoogleSignInSwift in Frameworks */,
 				5535B85F2ECC2C7F00B778F4 /* FirebaseCore in Frameworks */,
 				55050D342ED6292C0082A2EE /* GoogleSignIn in Frameworks */,
 				5535B85D2ECC2C7A00B778F4 /* FirebaseAuth in Frameworks */,
 				5535B8612ECC2C8500B778F4 /* FirebaseFirestore in Frameworks */,
+				5535B9002ECC2C7A00B778F4 /* FirebaseMessaging in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -170,8 +174,10 @@
 				5535B85C2ECC2C7A00B778F4 /* FirebaseAuth */,
 				5535B85E2ECC2C7F00B778F4 /* FirebaseCore */,
 				5535B8602ECC2C8500B778F4 /* FirebaseFirestore */,
+				5535B9012ECC2C7A00B778F4 /* FirebaseMessaging */,
 				55050D332ED6292C0082A2EE /* GoogleSignIn */,
 				55050D352ED6292C0082A2EE /* GoogleSignInSwift */,
+				5515A4452F0F9E6C00A83829 /* FirebaseMessaging */,
 			);
 			productName = "noten-manager-ios";
 			productReference = 5535B84A2ECC21F600B778F4 /* noten-manager-ios.app */;
@@ -616,6 +622,11 @@
 			package = 55050D322ED6292C0082A2EE /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
 			productName = GoogleSignInSwift;
 		};
+		5515A4452F0F9E6C00A83829 /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5535B85A2ECC29C800B778F4 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
+		};
 		5535B85C2ECC2C7A00B778F4 /* FirebaseAuth */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 5535B85A2ECC29C800B778F4 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
@@ -630,6 +641,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 5535B85A2ECC29C800B778F4 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseFirestore;
+		};
+		5535B9012ECC2C7A00B778F4 /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5535B85A2ECC29C800B778F4 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

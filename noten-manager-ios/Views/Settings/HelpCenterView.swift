@@ -8,6 +8,7 @@ enum HelpCenterSection: String {
     case exams
     case pass
     case special
+    case classesGroups
     case faq
     case contact
 
@@ -19,6 +20,7 @@ enum HelpCenterSection: String {
         case .exams: return "help_exams"
         case .pass: return "help_pass"
         case .special: return "help_special"
+        case .classesGroups: return "help_groups"
         case .faq: return "help_faq"
         case .contact: return "help_contact"
         }
@@ -61,6 +63,7 @@ struct HelpCenterView: View {
     @FocusState private var searchFocused: Bool
     @State private var didScrollToInitialSection: Bool = false
     @State private var showScrollToTop: Bool = false
+    @State private var showSupportAccessSheet: Bool = false
 
     private let searchIndex: [HelpSearchEntry] = [
         HelpSearchEntry(
@@ -137,11 +140,11 @@ struct HelpCenterView: View {
         ),
         HelpSearchEntry(
             id: "groups",
-            section: .special,
-            title: "Gruppen & Teilen",
-            summary: "Gruppe erstellen oder per Code beitreten und erfahren, was synchronisiert wird.",
-            keywords: ["gruppen", "teilen", "code", "einladen", "synchronisation", "hausaufgaben", "prüfungen", "erinnerungen", "fos", "bos"],
-            icon: "person.2.wave.2.fill"
+            section: .classesGroups,
+            title: "Klassen & Gruppen",
+            summary: "Unterschied zwischen Klassen und Gruppen und Teilen von Inhalten.",
+            keywords: ["gruppen", "teilen", "code", "einladen", "synchronisation", "hausaufgaben", "prüfungen", "erinnerungen", "klassen", "fos", "bos"],
+            icon: "person.3.fill"
         ),
         HelpSearchEntry(
             id: "faq",
@@ -222,6 +225,7 @@ struct HelpCenterView: View {
                     examsCard
                     passCard
                     specialCard
+                    classesGroupsCard
                     faqCard
                     contactCard
                 }
@@ -236,7 +240,6 @@ struct HelpCenterView: View {
             .coordinateSpace(name: "help_scroll")
             .scrollDismissesKeyboard(.interactively)
             .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
-            .sheetNavigationTitle("Help Center")
             .onAppear {
                 if contactEmail.isEmpty {
                     contactEmail = Auth.auth().currentUser?.email ?? ""
@@ -550,15 +553,47 @@ struct HelpCenterView: View {
                         title: "Animationen & Darstellung",
                         text: "Unter Einstellungen ▸ Darstellung & Animationen kannst du Animationen deaktivieren, den Ferien-Hinweis umschalten und das Design-Thema wählen."
                     )
-                    infoRow(
-                        title: "Gruppen & Teilen",
-                        text: "Unter Einstellungen ▸ Gruppen kannst du Gruppen erstellen oder per Code beitreten. Gruppen-Hausaufgaben und Gruppentermine erscheinen automatisch in deiner Übersicht; Erinnerungen und Erledigt-Status werden pro Nutzer gespeichert."
-                    )
                 }
             }
         }
         .softFadeIn(enabled: animationsOn, delay: 0.20, offset: 12)
         .id("help_special")
+    }
+
+    private var classesGroupsCard: some View {
+        SettingsCard(
+            title: "Klassen & Gruppen",
+            subtitle: "Features für Zusammenarbeit und Organisation",
+            systemImage: "person.3.fill",
+            accent: .pink
+        ) {
+            SettingsSectionBox {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(highlighted("Klassen"))
+                        .font(.headline)
+                    infoRow(
+                        title: "Wofür sind Klassen?",
+                        text: "Klassen bündeln mehrere Gruppen. Das ist praktisch, um den gesamten Klassenverbund zu organisieren und schnell zwischen Gruppen zu wechseln."
+                    )
+                }
+            }
+            SettingsSectionBox {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(highlighted("Gruppen"))
+                        .font(.headline)
+                    infoRow(
+                        title: "Einfaches Teilen",
+                        text: "Gruppen sind ideal für Zweige (z. B. Sozial/Wirtschaft) oder Lerngruppen. Hier teilst du gezielt Prüfungen und Hausaufgaben."
+                    )
+                    infoRow(
+                        title: "Synchronisation",
+                        text: "Alle Mitglieder einer Gruppe sehen die gleichen Einträge. Wenn jemand eine Prüfung oder Hausaufgabe hinzufügt, erscheint sie automatisch bei allen anderen. Erinnerungen und der „Erledigt“-Status bleiben dabei aber privat für dich."
+                    )
+                }
+            }
+        }
+        .softFadeIn(enabled: animationsOn, delay: 0.22, offset: 12)
+        .id("help_groups")
     }
 
     private var faqCard: some View {
@@ -678,6 +713,31 @@ struct HelpCenterView: View {
                     .disabled(!contactFormValid || isSendingTicket)
                 }
             }
+
+            SettingsSectionBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Problem mit deinen Daten?")
+                        .font(.subheadline.weight(.semibold))
+                    Text("Wenn wir deine Daten einsehen müssen, um ein Problem zu lösen, kannst du uns temporär Zugriff gewähren.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Button {
+                        showSupportAccessSheet = true
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: store.adminAccessGranted ? "checkmark.shield.fill" : "person.badge.key.fill")
+                                .font(.subheadline.weight(.semibold))
+                            Text(store.adminAccessGranted ? "Support-Zugriff aktiv" : "Support-Zugriff anfordern")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(SoftTintButtonStyle(accent: store.adminAccessGranted ? .green : .teal))
+                }
+            }
+        }
+        .sheet(isPresented: $showSupportAccessSheet) {
+            SupportAccessRequestSheet()
+                .environmentObject(store)
         }
         .softFadeIn(enabled: animationsOn, delay: 0.28, offset: 12)
         .id("help_contact")
@@ -971,6 +1031,7 @@ struct HelpCenterView: View {
         case .exams: return "Prüfungen"
         case .pass: return "Bestehen"
         case .special: return "Spezielle Funktionen"
+        case .classesGroups: return "Klassen & Gruppen"
         case .faq: return "FAQ"
         case .contact: return "Kontakt & Support"
         }

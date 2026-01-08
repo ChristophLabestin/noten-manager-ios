@@ -20,6 +20,8 @@ struct GroupJoinView: View {
         self._code = State(initialValue: initialCode)
     }
     
+    @State private var showScanner: Bool = false
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -36,7 +38,7 @@ struct GroupJoinView: View {
                             .font(.title3.weight(.bold))
                             .softFadeIn(enabled: animationsOn, delay: 0.1, offset: 12)
                         
-                        Text("Gib den Code ein, um der Gruppe beizutreten.")
+                        Text("Gib einen oder mehrere Codes ein, um beizutreten (z.B. per Komma getrennt).")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
@@ -48,25 +50,39 @@ struct GroupJoinView: View {
                     
                     // Input Card
                     SettingsCard(
-                        title: "Gruppencode",
-                        subtitle: "Code eingeben",
+                        title: "Gruppencodes",
+                        subtitle: "Codes eingeben",
                         systemImage: "qrcode",
                         accent: .indigo
                     ) {
-                        TextField("Code", text: $code)
-                            .font(.title3.monospaced())
-                            .multilineTextAlignment(.center)
-                            .textInputAutocapitalization(.characters)
-                            .autocorrectionDisabled(true)
-                            .padding(14)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(Color.formInputBackground)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(Color.indigo.opacity(0.3), lineWidth: 1)
-                            )
+                        VStack(spacing: 12) {
+                            TextField("Code(s)...", text: $code, axis: .vertical)
+                                .font(.title3.monospaced())
+                                .multilineTextAlignment(.leading)
+                                .lineLimit(1...5)
+                                .textInputAutocapitalization(.characters)
+                                .autocorrectionDisabled(true)
+                                .padding(14)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .fill(Color.formInputBackground)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .stroke(Color.indigo.opacity(0.3), lineWidth: 1)
+                                )
+                            
+                            Button {
+                                showScanner = true
+                            } label: {
+                                Label("QR-Code scannen", systemImage: "viewfinder")
+                                    .font(.subheadline)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.indigo)
+                        }
                     }
                     .softFadeIn(enabled: animationsOn, delay: 0.2, offset: 12)
                     
@@ -114,31 +130,72 @@ struct GroupJoinView: View {
                     }
                 }
             }
+            .sheet(isPresented: $showScanner) {
+                QRScannerView { scannedCode in
+                    let newCode = extractCode(from: scannedCode)
+                    if !code.isEmpty {
+                        code += ", \(newCode)"
+                    } else {
+                        code = newCode
+                    }
+                }
+            }
         }
         .presentationDetents([.medium, .large])
     }
     
+    // Extrahiert den reinen Code aus potentiellen URL-Schemes
+    private func extractCode(from raw: String) -> String {
+        // Simple logic: if it's a URL, last component is likely the code.
+        // E.g. notenmanager://group/ABCDEF
+        if raw.contains("://") || raw.contains("http"), let url = URL(string: raw) {
+            return url.lastPathComponent
+        }
+        return raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func extractCodes(from text: String) -> [String] {
+        // Regex für 6-stellige alphanumerische Codes (grob)
+        // Oder einfach Split by Komma/Space/Newline und filtern
+        let components = text.components(separatedBy: CharacterSet.alphanumerics.inverted)
+        return components.filter { $0.count >= 4 } // Erlaube etwas Flexibilität, aber min 4 Chars
+    }
+    
     @MainActor
     private func joinGroup() async {
-        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        let codesToJoin = extractCodes(from: code)
+        guard !codesToJoin.isEmpty else { return }
         
         isJoining = true
         errorMessage = nil
         successMessage = nil
         
-        do {
-            try await store.joinSharedGroup(with: trimmed)
-            successMessage = "Erfolgreich beigetreten!"
+        let (joined, errors) = await store.joinSharedGroups(codes: codesToJoin)
+        
+        if !errors.isEmpty {
+            // Fehlermeldung bauen
+            let failureText = errors.map { "\($0.key): \($0.value)" }.joined(separator: "\n")
+            if !joined.isEmpty {
+                // Teilweise erfolgreich
+                successMessage = "\(joined.count) Gruppen beigetreten."
+                errorMessage = "Fehler bei:\n" + failureText
+                let generator = UINotificationFeedbackGenerator()
+                generator.notificationOccurred(.warning)
+            } else {
+                // Alles fehlgeschlagen
+                errorMessage = failureText
+                let generator = UINotificationFeedbackGenerator()
+                generator.notificationOccurred(.error)
+            }
+        } else {
+            // Alles gut
+            successMessage = "Allen Gruppen erfolgreich beigetreten!"
             let generator = UINotificationFeedbackGenerator()
             generator.notificationOccurred(.success)
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             dismiss()
-        } catch {
-            let generator = UINotificationFeedbackGenerator()
-            generator.notificationOccurred(.error)
-            errorMessage = error.localizedDescription
         }
+        
         isJoining = false
     }
 }

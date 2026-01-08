@@ -67,6 +67,8 @@ struct ExamListView: View {
 
     private var linkedExams: [Exam] {
         store.allExams.filter { exam in
+            // Immer anzeigen, wenn es ein Gruppen-Termin ist
+            if exam.isShared { return true }
             let trimmed = exam.subjectName.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty || trimmed.lowercased() == "fachreferat" {
                 return true
@@ -166,7 +168,6 @@ struct ExamListView: View {
                 .padding(.vertical, 12)
             }
             .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
-            .sheetNavigationTitle(sheetTitle)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button {
@@ -183,6 +184,7 @@ struct ExamListView: View {
                         showAddChooser = true
                     } label: {
                         Image(systemName: "plus")
+                            .foregroundStyle(Color.primary)
                     }
                 }
             }
@@ -832,7 +834,6 @@ struct ExamDetailSheet: View {
                 }
             }
             .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
-            .sheetNavigationTitle(examTitle)
             .sheet(isPresented: $showReschedulePicker) {
                 NavigationStack {
                     Form {
@@ -864,6 +865,7 @@ struct ExamDetailSheet: View {
                     } label: {
                         Image(systemName: "chevron.down")
                             .imageScale(.medium)
+                            .foregroundStyle(Color.primary)
                     }
                     .accessibilityLabel("Schließen")
                 }
@@ -1166,6 +1168,7 @@ struct PersonalNoteEditor: View {
                     } label: {
                         Image(systemName: "xmark")
                             .imageScale(.medium)
+                            .foregroundStyle(Color.primary)
                     }
                     .accessibilityLabel("Abbrechen")
                 }
@@ -1176,6 +1179,7 @@ struct PersonalNoteEditor: View {
                     } label: {
                         Image(systemName: "checkmark")
                             .imageScale(.medium)
+                            .foregroundStyle(Color.primary)
                     }
                     .accessibilityLabel("Speichern")
                 }

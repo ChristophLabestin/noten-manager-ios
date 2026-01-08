@@ -76,77 +76,7 @@ extension Color {
     }
 }
 
-struct AccentFilledButtonStyle: ButtonStyle {
-    var accent: Color
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.isEnabled) private var isEnabled
 
-    func makeBody(configuration: Configuration) -> some View {
-        let pressed = configuration.isPressed
-        let base = accent
-        let fillTop = base.opacity(isEnabled ? 0.52 : 0.28)
-        let fillBottom = base.opacity(isEnabled ? 0.86 : 0.48)
-        let glassTint = base.opacity(isEnabled ? 0.24 : 0.12)
-        let edgeLight = Color.white.opacity(isEnabled ? 0.38 : 0.18)
-        let edgeDark = base.opacity(isEnabled ? 0.55 : 0.26)
-        let textColor = Color.white.opacity(isEnabled ? 0.97 : 0.62)
-
-        configuration.label
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(textColor)
-            .padding(.vertical, 11)
-            .frame(maxWidth: .infinity)
-            .background(
-                ZStack {
-                    Capsule(style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [fillTop, fillBottom],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .overlay(
-                            Capsule(style: .continuous)
-                                .fill(glassTint)
-                                .blendMode(.softLight)
-                        )
-                        .overlay(
-                            Capsule(style: .continuous)
-                                .stroke(
-                                    LinearGradient(
-                                        colors: [edgeLight, edgeDark],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    lineWidth: 1.25
-                                )
-                        )
-
-                    // Glassy top sheen
-                    Capsule(style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color.white.opacity(isEnabled ? 0.35 : 0.18),
-                                    Color.white.opacity(0)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .padding(.horizontal, 1)
-                        .padding(.vertical, pressed ? 3 : 2.5)
-                        .blendMode(.screen)
-                        .opacity(isEnabled ? 1 : 0.6)
-                }
-            )
-            .scaleEffect(pressed ? 0.985 : 1)
-            .offset(y: pressed ? 1 : 0)
-            .opacity(isEnabled ? 1 : 0.7)
-            .animation(.spring(response: 0.32, dampingFraction: 0.82), value: pressed)
-    }
-}
 
 struct SoftTintButtonStyle: ButtonStyle {
     var accent: Color

@@ -255,6 +255,24 @@ struct LegacyMigrationSummary: Equatable {
     let subjectNames: [String]
 }
 
+struct SchoolClass: Identifiable, Codable {
+    let id: String // Code
+    let name: String
+    let ownerId: String
+    let groupIds: [String]
+    let createdAt: Date
+    // Display helper
+    var fetchedGroups: [GroupDetails]?
+    var memberCount: Int?
+}
+
+struct GroupDetails: Identifiable, Codable {
+    let id: String
+    let name: String
+    let memberCount: Int
+    let subjectCount: Int
+}
+
 @MainActor
 final class GradesStore: ObservableObject {
     @Published var subjects: [Subject] = []
@@ -282,6 +300,12 @@ final class GradesStore: ObservableObject {
 
     @Published var schoolYears: [String] = []
     @Published var schoolYearNames: [String: String] = [:]
+
+    // Classes (Klassen)
+    @Published var classIds: [String] = []
+    @Published var classNames: [String: String] = [:]
+    @Published var classOwners: [String: String] = [:]
+    @Published var classDetails: [String: SchoolClass] = [:]
 
     // Gemeinsame Gruppen-ID (Konzept: eine Gruppe für Klausuren & Hausaufgaben)
     var sharedGroupId: String? {
@@ -318,6 +342,7 @@ final class GradesStore: ObservableObject {
     @Published var standardRemindersEnabled: Bool = true
     @Published var encryptionSalt: String? = nil
     @Published var showHolidayHints: Bool = true
+    @Published var userName: String? = nil
 
     var preferredColorScheme: ColorScheme? {
         switch darkModeMode {
@@ -340,6 +365,11 @@ final class GradesStore: ObservableObject {
     @Published var homeworkGroupSubjects: [GroupSubject] = []
     @Published var examSubjectMapping: [String: String] = [:] // subjectKey -> local subject name
     @Published var homeworkSubjectMapping: [String: String] = [:]
+
+    // Admin support access
+    @Published var adminAccessGranted: Bool = false
+    @Published var adminAccessExpiresAt: Date? = nil
+    @Published var supportAccessRequests: [SupportAccessRequest] = []
 
     private let db = Firestore.firestore()
     private let pfingstferienPromptedKey = "grades_pfingst_prompted_year_ids"
@@ -495,6 +525,7 @@ final class GradesStore: ObservableObject {
                     }
                     // Nach dem Key-Setup ggf. weitere Listener starten
                     await self.ensureSecondaryListeners(uid: uid, userData: data)
+                    await self.loadUserClasses()
                 } else {
                     // Kein User-Dokument -> minimaler Reset
                     self.applyUserSettings(from: [:])
@@ -637,6 +668,11 @@ final class GradesStore: ObservableObject {
         pendingLegacyUserData = nil
         waitingForLegacyDecision = false
         forceSkipLegacyMigration = false
+
+        // Admin support access
+        adminAccessGranted = false
+        adminAccessExpiresAt = nil
+        supportAccessRequests = []
     }
 
     private func resetSchoolYearScopedData() {
@@ -2282,6 +2318,21 @@ final class GradesStore: ObservableObject {
             }
         }
 
+        // Admin support access
+        adminAccessGranted = (data["adminAccessGranted"] as? Bool) ?? false
+        if let ts = data["adminAccessExpiresAt"] as? Timestamp {
+            let expiresDate = ts.dateValue()
+            // Auto-expire if past expiration
+            if expiresDate > Date() {
+                adminAccessExpiresAt = expiresDate
+            } else {
+                adminAccessExpiresAt = nil
+                adminAccessGranted = false
+            }
+        } else {
+            adminAccessExpiresAt = nil
+        }
+
         persistOfflineSnapshotIfPossible()
     }
 
@@ -3060,6 +3111,7 @@ final class GradesStore: ObservableObject {
     }
 
     // Neue zentrale Gruppenerstellung (/groups)
+    // Neue zentrale Gruppenerstellung (/groups)
     func createSharedGroup(name: String, subjects: [String]) async throws -> String {
         guard let uid = Auth.auth().currentUser?.uid else {
             throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
@@ -3102,18 +3154,23 @@ final class GradesStore: ObservableObject {
         // Seed group subjects from ausgewählten Subjects
         var seededSubjects: [GroupSubject] = []
         var mapping: [String: String] = [:]
+        
         for name in subjects where !name.isEmpty {
-            guard let subj = self.subjects.first(where: { $0.name == name }) else { continue }
-            let sid = slugifySubjectName(subj.name)
+            // Try to find existing subject to copy type/alias
+            let existing = self.subjects.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame })
+            
+            let sid = slugifySubjectName(name)
             let payload: [String: Any] = [
-                "name": subj.name,
-                "type": subj.type,
-                "alias": subj.alias as Any
+                "name": name, // Use original casing if it was manual, or we could use existing.name
+                "type": existing?.type ?? 0, // Default to 0 if manual
+                "alias": existing?.alias as Any
             ]
+            
             try await db.collection("groups").document(code).collection("subjects").document(sid).setData(payload, merge: true)
-            seededSubjects.append(GroupSubject(id: sid, name: subj.name, type: subj.type, alias: subj.alias))
-            mapping[sid] = subj.name
+            seededSubjects.append(GroupSubject(id: sid, name: name, type: existing?.type ?? 0, alias: existing?.alias))
+            mapping[sid] = name
         }
+        
         groupSubjectsByGroup[code] = seededSubjects
         groupSubjectMappings[code] = mapping
         try await yearRef.collection("groupMappings").document(code).setData(["map": mapping], merge: true)
@@ -3121,6 +3178,31 @@ final class GradesStore: ObservableObject {
         updateGroupObservers(uid: uid, schoolYearId: yearRef.documentID)
 
         return code
+    }
+    
+    func deleteSharedGroup(code: String) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        
+        // 1. Verify ownership
+        let groupRef = db.collection("groups").document(code)
+        let doc = try await groupRef.getDocument()
+        guard let owner = doc.data()?["ownerId"] as? String, owner == uid else {
+            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Du bist nicht der Besitzer dieser Gruppe."])
+        }
+        
+        // 2. Delete the group document (this technically leaves subcollections as orphans in standard Firestore,
+        // but prevents it from being loaded).
+        // A Cloud Function trigger or recursive delete would be cleaner, but for client-side:
+        try await groupRef.delete()
+        
+        // 3. Clean up own reference
+        await leaveSharedGroup(code: code)
+        
+        // Remove locally immediately
+        await MainActor.run {
+            self.groupNames.removeValue(forKey: code)
+            self.groupOwners.removeValue(forKey: code)
+        }
     }
     
     func createHomeworkGroupIfNeeded(name: String? = nil) async throws -> String {
@@ -3143,13 +3225,11 @@ final class GradesStore: ObservableObject {
         // Sicherstellen, dass die Gruppe existiert
         let groupRef = db.collection("groups").document(code)
         let snap = try await groupRef.getDocument()
-        if !snap.exists {
-            try await groupRef.setData([
-                "ownerId": uid,
-                "createdAt": Date(),
-                "schoolYearId": activeSchoolYearId as Any
-            ])
-        } else if let groupYear = snap.data()?["schoolYearId"] as? String,
+        guard snap.exists else {
+             throw NSError(domain: "GradesStore", code: -3, userInfo: [NSLocalizedDescriptionKey: "Diese Gruppe existiert nicht oder wurde gelöscht."])
+        }
+        
+        if let groupYear = snap.data()?["schoolYearId"] as? String,
                   let currentYear = activeSchoolYearId,
                   !groupYear.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   groupYear != currentYear {
@@ -3180,6 +3260,303 @@ final class GradesStore: ObservableObject {
         updateGroupObservers(uid: uid, schoolYearId: activeSchoolYearId)
 
         await loadGroupName(gid: code)
+        updateGroupObservers(uid: uid, schoolYearId: activeSchoolYearId)
+        await loadGroupName(gid: code)
+    }
+
+    /// Tries to join multiple groups by code. Returns success codes and errors keyed by code.
+    func joinSharedGroups(codes: [String]) async -> (joined: [String], errors: [String: String]) {
+        var joinedCodes: [String] = []
+        var errorMap: [String: String] = [:]
+
+        for raw in codes {
+            do {
+                try await joinSharedGroup(with: raw)
+                joinedCodes.append(raw)
+            } catch {
+                errorMap[raw] = error.localizedDescription
+            }
+        }
+        return (joinedCodes, errorMap)
+    }
+
+    // MARK: - School Classes (Klassen)
+
+    func createClass(name: String) async throws -> String {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
+        }
+        
+        let code = generateExamGroupCode()
+        let classRef = db.collection("classes").document(code)
+        
+        try await classRef.setData([
+            "name": name,
+            "ownerId": uid,
+            "createdAt": Date(),
+            "groupIds": []
+        ])
+        
+        try await classRef.collection("members").document(uid).setData([
+            "joinedAt": Date()
+        ])
+        
+        let yearRef = try await requireYearRef(uid: uid)
+        try await yearRef.setData([
+            "classIds": FieldValue.arrayUnion([code])
+        ], merge: true)
+        
+        await MainActor.run {
+            if !classIds.contains(code) {
+                classIds.append(code)
+                classNames[code] = name
+                classOwners[code] = uid
+            }
+        }
+        
+        return code
+    }
+    
+    func joinClass(with rawCode: String) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        let code = normalizedExamGroupCode(rawCode)
+        guard !code.isEmpty else { return }
+        
+        let classRef = db.collection("classes").document(code)
+        let doc = try await classRef.getDocument()
+        guard doc.exists else {
+             throw NSError(domain: "GradesStore", code: -3, userInfo: [NSLocalizedDescriptionKey: "Diese Klasse existiert nicht."])
+        }
+        
+        try await classRef.collection("members").document(uid).setData([
+            "joinedAt": Date()
+        ])
+        
+        let yearRef = try await requireYearRef(uid: uid)
+        try await yearRef.setData([
+             "classIds": FieldValue.arrayUnion([code])
+         ], merge: true)
+        
+        await MainActor.run {
+             if !classIds.contains(code) {
+                 classIds.append(code)
+                 classNames[code] = doc.data()?["name"] as? String ?? "Unbenannte Klasse"
+             }
+         }
+    }
+    
+    func leaveClass(code: String) async {
+         guard let uid = Auth.auth().currentUser?.uid else { return }
+         
+         if let yearRef = try? await requireYearRef(uid: uid) {
+             try? await yearRef.updateData([
+                 "classIds": FieldValue.arrayRemove([code])
+             ])
+         }
+         
+         try? await db.collection("classes").document(code).collection("members").document(uid).delete()
+         
+         await MainActor.run {
+             classIds.removeAll { $0 == code }
+             classNames.removeValue(forKey: code)
+             classDetails.removeValue(forKey: code)
+         }
+    }
+    
+    func addGroupToClass(classId: String, groupId: String) async throws {
+         guard let uid = Auth.auth().currentUser?.uid else { return }
+         
+         // Allow any member to add
+         let memDoc = try? await db.collection("classes").document(classId).collection("members").document(uid).getDocument()
+         if memDoc?.exists != true {
+             // Fallback: check owner
+            let doc = try await db.collection("classes").document(classId).getDocument()
+            let owner = doc.data()?["ownerId"] as? String
+            if owner != uid {
+                throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Nur Mitglieder können Gruppen hinzufügen."])
+            }
+         }
+         
+         // Prevent adding a group that's already in any class
+         let allClassGroupIds = Set(classDetails.values.flatMap { $0.groupIds })
+         if allClassGroupIds.contains(groupId) {
+             throw NSError(domain: "GradesStore", code: -2, userInfo: [NSLocalizedDescriptionKey: "Diese Gruppe ist bereits einer Klasse zugeordnet."])
+         }
+         
+         try await db.collection("classes").document(classId).updateData([
+             "groupIds": FieldValue.arrayUnion([groupId])
+         ])
+         
+         await fetchClassDetails(classId: classId)
+    }
+    
+    func removeGroupFromClass(classId: String, groupId: String) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        
+        // Allow any member to remove
+        let memDoc = try? await db.collection("classes").document(classId).collection("members").document(uid).getDocument()
+        if memDoc?.exists != true {
+            // Fallback: check owner
+            let doc = try await db.collection("classes").document(classId).getDocument()
+            let owner = doc.data()?["ownerId"] as? String
+            if owner != uid {
+                throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Nur Mitglieder können Gruppen entfernen."])
+            }
+        }
+        
+        try await db.collection("classes").document(classId).updateData([
+            "groupIds": FieldValue.arrayRemove([groupId])
+        ])
+        
+        await fetchClassDetails(classId: classId)
+    }
+
+    /// Creates a group with a manually specified subject (no local subject required).
+    func createManualGroup(groupName: String, subjectName: String, type: Int) async throws -> String {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
+        }
+        
+        let code = generateExamGroupCode()
+        let yearRef = try await requireYearRef(uid: uid)
+        
+        // Group Doc
+        let groupRef = db.collection("groups").document(code)
+        try await groupRef.setData([
+            "ownerId": uid,
+            "createdAt": Date(),
+            "name": groupName,
+            "schoolYearId": activeSchoolYearId as Any
+        ])
+        
+        // Members
+        try await groupRef.collection("members").document(uid).setData([
+            "joinedAt": Date()
+        ])
+        
+        // Subject Sub-doc
+        let sid = slugifySubjectName(subjectName)
+        let payload: [String: Any] = [
+            "name": subjectName,
+            "type": type
+        ]
+        try await groupRef.collection("subjects").document(sid).setData(payload)
+        
+        // Update User
+        try await yearRef.setData([
+            "groupIds": FieldValue.arrayUnion([code]),
+            "examGroupIds": FieldValue.arrayUnion([code]),
+            "homeworkGroupIds": FieldValue.arrayUnion([code]),
+            "examGroupId": code,
+            "homeworkGroupId": code
+        ], merge: true)
+        
+        // Local Updates
+        let union = Array(Set(groupIds + [code]))
+        groupIds = union
+        examGroupIds = union
+        homeworkGroupIds = union
+        groupNames[code] = groupName
+        groupOwners[code] = uid
+        examGroupId = code
+        homeworkGroupId = code
+        
+        // Seed local mapping for creator so they see it correctly
+        groupSubjectsByGroup[code] = [GroupSubject(id: sid, name: subjectName, type: type, alias: nil)]
+        groupSubjectMappings[code] = [sid: subjectName] // Map sid to name
+        try await yearRef.collection("groupMappings").document(code).setData(["map": [sid: subjectName]], merge: true)
+        
+        updateGroupObservers(uid: uid, schoolYearId: yearRef.documentID)
+        
+        return code
+    }
+    
+    func fetchClassDetails(classId: String) async {
+        guard let doc = try? await db.collection("classes").document(classId).getDocument(),
+              let data = doc.data() else { return }
+        
+        let name = data["name"] as? String ?? ""
+        let ownerId = data["ownerId"] as? String ?? ""
+        let groupIds = data["groupIds"] as? [String] ?? []
+        let createdTs = data["createdAt"] as? Timestamp
+        let createdAt = createdTs?.dateValue() ?? Date()
+        
+        var details = SchoolClass(
+            id: classId,
+            name: name,
+            ownerId: ownerId,
+            groupIds: groupIds,
+            createdAt: createdAt,
+            fetchedGroups: nil,
+            memberCount: nil
+        )
+        
+        // Count class members
+        let classMembersRef = db.collection("classes").document(classId).collection("members")
+        if let agg = try? await classMembersRef.count.getAggregation(source: .server) {
+             details.memberCount = Int(truncating: agg.count)
+        } else if let snaps = try? await classMembersRef.getDocuments() {
+             details.memberCount = snaps.count
+        }
+        
+        if !groupIds.isEmpty {
+            var groups: [GroupDetails] = []
+            for gid in groupIds {
+                // Fetch basic group metadata
+                if let gDoc = try? await db.collection("groups").document(gid).getDocument() {
+                    let gName = gDoc.data()?["name"] as? String ?? gid
+                    
+                    // Optimize: Use Count Aggregation
+                    var memberCount = 0
+                    let membersRef = gDoc.reference.collection("members")
+                    if let agg = try? await membersRef.count.getAggregation(source: .server) {
+                         memberCount = Int(truncating: agg.count)
+                    } else if let snaps = try? await membersRef.getDocuments() {
+                         memberCount = snaps.count
+                    }
+                    
+                    var subjectCount = 0
+                    let subjectsRef = gDoc.reference.collection("subjects")
+                    if let agg = try? await subjectsRef.count.getAggregation(source: .server) {
+                         subjectCount = Int(truncating: agg.count)
+                    } else if let snaps = try? await subjectsRef.getDocuments() {
+                         subjectCount = snaps.count
+                    }
+                    
+                    groups.append(GroupDetails(id: gid, name: gName, memberCount: memberCount, subjectCount: subjectCount))
+                }
+            }
+            details.fetchedGroups = groups
+        } else {
+            details.fetchedGroups = []
+        }
+        
+        let finalDetails = details
+        await MainActor.run {
+            self.classDetails[classId] = finalDetails
+            self.classNames[classId] = name
+            self.classOwners[classId] = ownerId
+        }
+    }
+
+    func loadUserClasses() async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let yearRef = try? await requireYearRef(uid: uid) else { return }
+        
+        do {
+            let snap = try await yearRef.getDocument()
+            let cIds = snap.data()?["classIds"] as? [String] ?? []
+            
+            await MainActor.run {
+                self.classIds = cIds
+            }
+            // Fetch details for each
+            for cid in cIds {
+                await fetchClassDetails(classId: cid)
+            }
+        } catch {
+            // Optional logging
+        }
     }
 
     func joinExistingSharedGroup(with rawCode: String, allowYearCreation: Bool = true) async throws {
@@ -3800,12 +4177,12 @@ final class GradesStore: ObservableObject {
         try await ref.setData(payload)
     }
 
-    // Neue Variante: verteilt automatisch in alle passenden Gruppen (nach Subject-Mapping)
-    func addExamToGroups(subjectName: String, subjectKey: String? = nil, title: String, notes: String?, date: Date, hasTime: Bool, weight: Int?, customWeight: Double?, reminderAt: Date?, requiresGrade: Bool? = true) async throws -> [(groupId: String, docId: String)] {
+    // Neue Variante: verteilt automatisch in alle passenden Gruppen (nach Subject-Mapping) oder in die explizit angegebenen Gruppen
+    func addExamToGroups(subjectName: String, subjectKey: String? = nil, title: String, notes: String?, date: Date, hasTime: Bool, weight: Int?, customWeight: Double?, reminderAt: Date?, requiresGrade: Bool? = true, targetGroupIds explicitGids: [String]? = nil) async throws -> [(groupId: String, docId: String)] {
         guard let uid = Auth.auth().currentUser?.uid else {
             throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
         }
-        let gids = targetGroupIds(forLocalSubject: subjectName)
+        let gids = explicitGids ?? targetGroupIds(forLocalSubject: subjectName)
         guard !gids.isEmpty else { return [] }
 
         let now = Date()
@@ -3832,7 +4209,7 @@ final class GradesStore: ObservableObject {
         return created
     }
     
-    func shareExamToGroups(examId: String) async -> Bool {
+    func shareExamToGroups(examId: String, targetGroupIds: [String]? = nil) async -> Bool {
         guard let exam = exams.first(where: { $0.id == examId }) else { return false }
         do {
             let created = try await addExamToGroups(
@@ -3845,7 +4222,8 @@ final class GradesStore: ObservableObject {
                 weight: exam.weight,
                 customWeight: exam.customWeight,
                 reminderAt: exam.reminderAt,
-                requiresGrade: exam.requiresGrade
+                requiresGrade: exam.requiresGrade,
+                targetGroupIds: targetGroupIds
             )
             guard !created.isEmpty else { return false }
             await deleteExamFromFirestore(id: examId)
@@ -3890,11 +4268,11 @@ final class GradesStore: ObservableObject {
         try await ref.setData(payload)
     }
     
-    func addHomeworkToGroups(subjectName: String, title: String, dueDate: Date?, reminderAt: Date?) async throws -> [(groupId: String, docId: String)] {
+    func addHomeworkToGroups(subjectName: String, title: String, dueDate: Date?, reminderAt: Date?, targetGroupIds explicitGids: [String]? = nil) async throws -> [(groupId: String, docId: String)] {
         guard let uid = Auth.auth().currentUser?.uid else {
             throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
         }
-        let gids = targetGroupIds(forLocalSubject: subjectName)
+        let gids = explicitGids ?? targetGroupIds(forLocalSubject: subjectName)
         guard !gids.isEmpty else { return [] }
         let now = Date()
         let subjectKey = slugifySubjectName(subjectName)
@@ -3916,14 +4294,15 @@ final class GradesStore: ObservableObject {
         return created
     }
 
-    func shareHomeworkToGroups(homeworkId: String) async -> Bool {
+    func shareHomeworkToGroups(homeworkId: String, targetGroupIds: [String]? = nil) async -> Bool {
         guard let hw = homeworks.first(where: { $0.id == homeworkId }) else { return false }
         do {
             let created = try await addHomeworkToGroups(
                 subjectName: hw.subjectName,
                 title: hw.title,
                 dueDate: hw.dueDate,
-                reminderAt: hw.reminderAt
+                reminderAt: hw.reminderAt,
+                targetGroupIds: targetGroupIds
             )
             guard !created.isEmpty else { return false }
             await deleteHomeworkFromFirestore(id: homeworkId)
@@ -5178,6 +5557,29 @@ final class GradesStore: ObservableObject {
         persistOfflineSnapshotIfPossible()
     }
 
+    // MARK: - Admin Support Access
+
+    /// Grants admin access for 24 hours and creates a support request
+    func grantAdminAccess(message: String, notifyByPush: Bool, notifyByEmail: Bool, email: String?, allowGradeDecryption: Bool) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        _ = try await FirestoreService.shared.grantAdminAccess(
+            userId: uid,
+            message: message,
+            notifyByPush: notifyByPush,
+            notifyByEmail: notifyByEmail,
+            email: email,
+            allowGradeDecryption: allowGradeDecryption
+        )
+        // State will be updated via userDocListener
+    }
+
+    /// Revokes admin access immediately
+    func revokeAdminAccess() async throws {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        try await FirestoreService.shared.revokeAdminAccess(userId: uid)
+        // State will be updated via userDocListener
+    }
+
     @MainActor
     func updateAppIcon(to selection: String) async {
         let normalized = supportedAppIcons.contains(selection) ? selection : "default"
@@ -6041,7 +6443,7 @@ final class GradesStore: ObservableObject {
         return false
     }
 
-    private func targetGroupIds(forLocalSubject subjectName: String) -> [String] {
+    func targetGroupIds(forLocalSubject subjectName: String) -> [String] {
         let key = slugifySubjectName(subjectName)
         var result: [String] = []
         for gid in groupIds {

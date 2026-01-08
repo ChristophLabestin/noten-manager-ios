@@ -40,6 +40,7 @@ struct FinalGradeView: View {
     @State private var isLoadingPreviousYear: Bool = false
     @State private var simulatedExamPoints: [String: Double] = [:]
     @State private var showNotifications: Bool = false
+    @State private var showPDFSheet: Bool = false // PDF Export Sheet
     @AppStorage("launchOfferPurchased") private var launchOfferPurchased = false
     @ObservedObject private var notificationInbox = NotificationInboxStore.shared
     var onOpenCreationMenu: () -> Void = {}
@@ -317,6 +318,10 @@ struct FinalGradeView: View {
         .sheet(isPresented: $showStatusDetails) {
             statusDetailSheet
         }
+        .sheet(isPresented: $showPDFSheet) {
+            ReportCardSheet()
+                .environmentObject(store)
+        }
         .onAppear {
             syncDropSelectionsFromData()
             recomputeMaxDroppedHalfYears()
@@ -358,15 +363,24 @@ struct FinalGradeView: View {
         }
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                Button {
-                    showNotifications = true
-                } label: {
-                    ToolbarIcon(
-                        symbol: "bell",
-                        showDot: notificationInbox.hasUnread || (LaunchOfferNotificationManager.isOfferActive() && !launchOfferPurchased)
-                    )
+                HStack(spacing: 8) {
+                    Button {
+                        showNotifications = true
+                    } label: {
+                        ToolbarIcon(
+                            symbol: "bell",
+                            showDot: notificationInbox.hasUnread || (LaunchOfferNotificationManager.isOfferActive() && !launchOfferPurchased)
+                        )
+                    }
+                    .accessibilityLabel("Benachrichtigungen")
+                    
+                    Button {
+                        showPDFSheet = true
+                    } label: {
+                        ToolbarIcon(symbol: "doc.text", showDot: false)
+                    }
+                    .accessibilityLabel("Zeugnis als PDF exportieren")
                 }
-                .accessibilityLabel("Benachrichtigungen")
             }
             ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 0) {
@@ -2058,6 +2072,7 @@ struct FinalGradeView: View {
                     } label: {
                         Image(systemName: "chevron.down")
                             .imageScale(.medium)
+                            .foregroundStyle(Color.primary)
                     }
                     .accessibilityLabel("Schließen")
                 }

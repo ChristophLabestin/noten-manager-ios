@@ -137,6 +137,7 @@ struct EditPraktikumGradeView: View {
                     } label: {
                         Image(systemName: "xmark")
                             .imageScale(.medium)
+                            .foregroundStyle(Color.primary)
                     }
                     .accessibilityLabel("Abbrechen")
                 }
@@ -149,6 +150,7 @@ struct EditPraktikumGradeView: View {
                         } else {
                             Image(systemName: "checkmark")
                                 .imageScale(.medium)
+                                .foregroundStyle(Color.primary)
                         }
                     }
                     .accessibilityLabel("Speichern")

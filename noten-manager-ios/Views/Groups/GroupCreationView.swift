@@ -6,6 +6,9 @@ struct GroupCreationView: View {
     
     @State private var name: String = ""
     @State private var selectedSubjects: Set<String> = []
+    @State private var manualSubjectsList: [String] = []
+    @State private var newManualSubject: String = ""
+    @State private var selectedClassId: String? = nil
     @State private var isCreating: Bool = false
     @State private var errorMessage: String?
     
@@ -16,7 +19,28 @@ struct GroupCreationView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 16) {
+                VStack(spacing: 20) {
+                    // Header Area
+                    VStack(spacing: 4) {
+                        Image(systemName: "person.3.fill")
+                            .font(.system(size: 40))
+                            .foregroundStyle(.indigo)
+                            .padding(.bottom, 4)
+                            .softFadeIn(enabled: animationsOn, delay: 0.05, offset: 12)
+                        
+                        Text("Neue Gruppe erstellen")
+                            .font(.title3.weight(.bold))
+                            .softFadeIn(enabled: animationsOn, delay: 0.1, offset: 12)
+                        
+                        Text("Teile Noten und Termine mit anderen Studenten.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 16)
+                            .softFadeIn(enabled: animationsOn, delay: 0.15, offset: 12)
+                    }
+                    .padding(.top, 16)
+
                     // Group Name Input
                     SettingsCard(
                         title: "Gruppenname",
@@ -25,18 +49,42 @@ struct GroupCreationView: View {
                         accent: .indigo
                     ) {
                         TextField("Name", text: $name)
-                            .padding(12)
+                            .font(.title3)
+                            .padding(14)
                             .background(
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                                     .fill(Color.formInputBackground)
                             )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(Color.indigo.opacity(0.3), lineWidth: 1)
+                            )
                     }
-                    .softFadeIn(enabled: animationsOn, delay: 0.05, offset: 12)
+                    .softFadeIn(enabled: animationsOn, delay: 0.2, offset: 12)
+
+                    // Class Selection
+                    SettingsCard(
+                        title: "Zu Klasse hinzufügen",
+                        subtitle: "Optional: Gruppe einer Klasse zuordnen",
+                        systemImage: "rectangle.stack.badge.person.crop.fill",
+                        accent: .indigo
+                    ) {
+                        Picker("Klasse wählen", selection: $selectedClassId) {
+                            Text("Keine Klasse").tag(String?.none)
+                            ForEach(store.classIds, id: \.self) { cid in
+                                Text(store.classNames[cid] ?? "Unbekannt").tag(String?.some(cid))
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .tint(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .softFadeIn(enabled: animationsOn, delay: 0.22, offset: 12)
                     
                     // Subject Selection
                     SettingsCard(
                         title: "Fächer auswählen",
-                        subtitle: "Optional: Noten teilen",
+                        subtitle: "Aus vorhandenen Fächern wählen",
                         systemImage: "book.closed.fill",
                         accent: .cyan
                     ) {
@@ -81,7 +129,67 @@ struct GroupCreationView: View {
                             }
                         }
                     }
-                    .softFadeIn(enabled: animationsOn, delay: 0.1, offset: 12)
+                    .softFadeIn(enabled: animationsOn, delay: 0.25, offset: 12)
+
+                    // Manual Subjects
+                    SettingsCard(
+                        title: "Fächer manuell hinzufügen",
+                        subtitle: "Namen einzeln hinzufügen",
+                        systemImage: "plus.circle.fill",
+                        accent: .orange
+                    ) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            if !manualSubjectsList.isEmpty {
+                                FlowLayout(spacing: 8) {
+                                    ForEach(manualSubjectsList, id: \.self) { subj in
+                                        HStack(spacing: 4) {
+                                            Text(subj)
+                                                .font(.subheadline.weight(.medium))
+                                            Button {
+                                                withAnimation {
+                                                    manualSubjectsList.removeAll { $0 == subj }
+                                                }
+                                            } label: {
+                                                Image(systemName: "xmark.circle.fill")
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                        }
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 6)
+                                        .background(Color.orange.opacity(0.15))
+                                        .clipShape(Capsule())
+                                    }
+                                }
+                            }
+                            
+                            HStack {
+                                TextField("Z.B. Mathe", text: $newManualSubject)
+                                    .font(.body)
+                                    .padding(12)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .fill(Color.formInputBackground)
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+                                    )
+                                    .onSubmit { addManualSubject() }
+                                
+                                Button {
+                                    addManualSubject()
+                                } label: {
+                                    Image(systemName: "plus")
+                                        .font(.headline)
+                                        .padding(12)
+                                        .background(Circle().fill(Color.orange.opacity(0.2)))
+                                        .foregroundStyle(.orange)
+                                }
+                                .disabled(newManualSubject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            }
+                        }
+                    }
+                    .softFadeIn(enabled: animationsOn, delay: 0.28, offset: 12)
                     
                     if let error = errorMessage {
                         HStack {
@@ -110,16 +218,13 @@ struct GroupCreationView: View {
                     }
                     .buttonStyle(SoftTintButtonStyle(accent: .indigo))
                     .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isCreating)
-                    .softFadeIn(enabled: animationsOn, delay: 0.15, offset: 12)
-                    .padding(.top, 8)
+                    .softFadeIn(enabled: animationsOn, delay: 0.3, offset: 12)
+                    .padding(.top, 4)
                 }
                 .padding(16)
             }
-            .navigationTitle("Neue Gruppe")
             .navigationBarTitleDisplayMode(.inline)
-            .background(
-                ThemedBackground(isDark: isDark, isFeminine: isFeminine, intensity: store.themeBackgroundIntensity)
-            )
+            .background(ThemedBackground(isDark: isDark, isFeminine: isFeminine, intensity: store.themeBackgroundIntensity))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button {
@@ -132,6 +237,7 @@ struct GroupCreationView: View {
                 }
             }
         }
+        .presentationDetents([.medium, .large])
     }
     
     @MainActor
@@ -143,12 +249,90 @@ struct GroupCreationView: View {
         errorMessage = nil
         
         do {
-            let subjects = selectedSubjects.isEmpty ? [] : Array(selectedSubjects)
-             _ = try await store.createSharedGroup(name: trimmed, subjects: subjects)
+            var subjectsList = Array(selectedSubjects)
+            for m in manualSubjectsList {
+                if !subjectsList.contains(m) {
+                    subjectsList.append(m)
+                }
+            }
+            
+            // Auch das aktuell Getippte hinzufügen, falls noch nicht in der Liste
+            let currentManual = newManualSubject.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !currentManual.isEmpty && !subjectsList.contains(currentManual) {
+                subjectsList.append(currentManual)
+            }
+            
+            let groupId = try await store.createSharedGroup(name: trimmed, subjects: subjectsList)
+            
+            if let classId = selectedClassId {
+                try? await store.addGroupToClass(classId: classId, groupId: groupId)
+            }
+            
             dismiss()
         } catch {
             errorMessage = error.localizedDescription
         }
         isCreating = false
+    }
+    
+    private func addManualSubject() {
+        let trimmed = newManualSubject.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        
+        if !manualSubjectsList.contains(trimmed) {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                manualSubjectsList.append(trimmed)
+            }
+        }
+        newManualSubject = ""
+        
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.impactOccurred()
+    }
+}
+
+// Simple FlowLayout for chips
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        var currentX: CGFloat = 0
+        var currentY: CGFloat = 0
+        var lineHeight: CGFloat = 0
+        var totalHeight: CGFloat = 0
+        var totalWidth: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if currentX + size.width > width && currentX > 0 {
+                currentX = 0
+                currentY += lineHeight + spacing
+                lineHeight = 0
+            }
+            lineHeight = max(lineHeight, size.height)
+            currentX += size.width + spacing
+            totalWidth = max(totalWidth, currentX)
+            totalHeight = currentY + lineHeight
+        }
+        return CGSize(width: totalWidth, height: totalHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var currentX: CGFloat = bounds.minX
+        var currentY: CGFloat = bounds.minY
+        var lineHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if currentX + size.width > bounds.maxX && currentX > bounds.minX {
+                currentX = bounds.minX
+                currentY += lineHeight + spacing
+                lineHeight = 0
+            }
+            subview.place(at: CGPoint(x: currentX, y: currentY), proposal: .unspecified)
+            lineHeight = max(lineHeight, size.height)
+            currentX += size.width + spacing
+        }
     }
 }

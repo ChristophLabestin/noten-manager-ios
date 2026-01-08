@@ -239,6 +239,11 @@ struct MainView: View {
                     self.showGroupJoinSheet = true
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .openSheet)) { notification in
+                if let type = notification.object as? String {
+                    handleOpenSheet(type)
+                }
+            }
 
             .onChange(of: gradesStore.legacyMigrationSummary) { _, summary in
                 if summary != nil {
@@ -699,6 +704,31 @@ struct MainView: View {
         showNotificationsSheet = false
         pendingOpenLaunchMessageFromInbox = false
         showLaunchMessage = true
+    }
+
+    private func handleOpenSheet(_ type: String) {
+        switch type {
+        case "settings":
+            currentTab = .settings
+        case "notifications":
+            showNotificationsSheet = true
+        case "homework_list":
+            showHomeworkListSheet = true
+        case "exam_list":
+            showExamListSheet = true
+        case "launch_offer":
+            handleOpenLaunchOfferNotification()
+        case "add_homework":
+            showAddHomework = true
+        case "add_exam":
+            showAddExam = true
+        default:
+            break
+        }
+        // Ensure we are on a tab where sheets can be presented visibly if needed
+        if type != "settings" && currentTab == .settings {
+            currentTab = .home
+        }
     }
 
     private func handleNotificationsSheetDismiss() {

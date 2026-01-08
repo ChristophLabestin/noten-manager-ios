@@ -41,7 +41,8 @@ struct HomeworkListView: View {
 
     private var linkedHomeworks: [Homework] {
         store.allHomeworks.filter { hw in
-            // Nur anzeigen, wenn das Fach verknüpft ist (lokal oder via Mapping)
+            // Immer anzeigen, wenn es eine Gruppen-Hausaufgabe ist (User ist ja bereits in der Gruppe, sonst wäre sie nicht in allHomeworks)
+            if hw.isShared { return true }
             if hw.isImportedFromShare { return true }
             let cleanedSubject = hw.subjectName.trimmingCharacters(in: .whitespacesAndNewlines)
             if cleanedSubject.isEmpty || cleanedSubject == noSubjectLabel { return true }
@@ -129,7 +130,6 @@ struct HomeworkListView: View {
                 .padding(.vertical, 12)
             }
             .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
-            .sheetNavigationTitle("Hausaufgaben")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button {
@@ -137,6 +137,7 @@ struct HomeworkListView: View {
                     } label: {
                         Image(systemName: "chevron.down")
                             .imageScale(.medium)
+                            .foregroundStyle(Color.primary)
                     }
                     .accessibilityLabel("Schließen")
                 }
@@ -145,6 +146,7 @@ struct HomeworkListView: View {
                         showAddHomework()
                     } label: {
                         Image(systemName: "plus")
+                            .foregroundStyle(Color.primary)
                     }
                     .accessibilityLabel("Hausaufgabe hinzufügen")
                 }

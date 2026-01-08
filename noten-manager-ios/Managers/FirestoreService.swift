@@ -49,4 +49,71 @@ final class FirestoreService {
         let data = payload.firestoreData()
         _ = db.collection("anonymousErrorLogs").addDocument(data: data)
     }
+
+    // MARK: - Support Access
+
+    /// Grants admin access for 24 hours and creates a support access request
+    func grantAdminAccess(userId: String, message: String, notifyByPush: Bool, notifyByEmail: Bool, email: String?, allowGradeDecryption: Bool) async throws -> String {
+        let expiresAt = Date().addingTimeInterval(24 * 60 * 60) // 24 hours
+        let requestId = UUID().uuidString
+        
+        // Update user document with access flags
+        try await db.collection("users").document(userId).setData([
+            "adminAccessGranted": true,
+            "adminAccessExpiresAt": Timestamp(date: expiresAt)
+        ], merge: true)
+        
+        // Create support access request document with notification preferences
+        var requestData: [String: Any] = [
+            "id": requestId,
+            "message": message,
+            "createdAt": Timestamp(date: Date()),
+            "status": "pending",
+            "notifyByPush": notifyByPush,
+            "notifyByEmail": notifyByEmail,
+            "allowGradeDecryption": allowGradeDecryption
+        ]
+        if let email, !email.isEmpty {
+            requestData["notificationEmail"] = email
+        }
+        try await db.collection("users").document(userId)
+            .collection("supportAccessRequests").document(requestId).setData(requestData)
+        
+        return requestId
+    }
+
+    /// Revokes admin access immediately
+    func revokeAdminAccess(userId: String) async throws {
+        try await db.collection("users").document(userId).setData([
+            "adminAccessGranted": false,
+            "adminAccessExpiresAt": FieldValue.delete()
+        ], merge: true)
+    }
+
+    /// Marks a support access request as resolved (called by admin)
+    func markSupportAccessResolved(userId: String, requestId: String) async throws {
+        try await db.collection("users").document(userId)
+            .collection("supportAccessRequests").document(requestId).setData([
+                "status": "resolved",
+                "resolvedAt": Timestamp(date: Date())
+            ], merge: true)
+    }
+
+    // MARK: - Notification Tokens
+
+    func updateFcmToken(userId: String, token: String) async {
+        do {
+            try await db.collection("users").document(userId).updateData([
+                "fcmTokens": FieldValue.arrayUnion([token]),
+                "lastTokenUpdate": Timestamp(date: Date())
+            ])
+        } catch {
+            print("Error updating FCM token: \(error)")
+            // If document doesn't exist, create it (partially)
+            try? await db.collection("users").document(userId).setData([
+                "fcmTokens": [token],
+                "lastTokenUpdate": Timestamp(date: Date())
+            ], merge: true)
+        }
+    }
 }

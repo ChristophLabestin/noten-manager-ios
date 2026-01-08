@@ -63,7 +63,6 @@ struct NotificationsInboxView: View {
                     intensity: store.themeBackgroundIntensity
                 )
             )
-            .sheetNavigationTitle("Benachrichtigungen")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button {
@@ -71,6 +70,7 @@ struct NotificationsInboxView: View {
                     } label: {
                         Image(systemName: "chevron.down")
                             .imageScale(.medium)
+                            .foregroundStyle(Color.primary)
                     }
                     .accessibilityLabel("Schließen")
                 }

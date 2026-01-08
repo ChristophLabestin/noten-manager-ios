@@ -163,6 +163,7 @@ struct GradeDetailSheet: View {
                 } label: {
                     Image(systemName: "chevron.down")
                         .imageScale(.medium)
+                        .foregroundStyle(Color.primary)
                 }
                 .accessibilityLabel("Schließen")
             }

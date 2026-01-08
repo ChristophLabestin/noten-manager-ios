@@ -22,7 +22,9 @@ struct AddHomeworkView: View {
     @State private var isSaving: Bool = false
     @State private var error: String?
     @State private var shareWithGroup: Bool = false
-    @State private var selectedGroupId: String?
+    @State private var selectedGroupIds: Set<String> = []
+    @State private var selectedClassIds: Set<String> = []
+    @State private var autoSelectedGroupIds: Set<String> = []
     @FocusState private var focusedField: Field?
 
     private enum Field: Hashable {
@@ -143,8 +145,8 @@ struct AddHomeworkView: View {
                     }
 
                     SettingsCard(
-                        title: "Erinnerung & Teilen",
-                        subtitle: "Benachrichtigungen für die Aufgabe",
+                        title: "Erinnerung",
+                        subtitle: "Optionale Benachrichtigung für die Aufgabe",
                         systemImage: "bell.badge.fill",
                         accent: .orange
                     ) {
@@ -160,16 +162,18 @@ struct AddHomeworkView: View {
                                         displayedComponents: [.date, .hourAndMinute]
                                     )
                                 }
-
-                                if !store.groupIds.isEmpty && subjectName != "Allgemein" {
-                                    Toggle("Mit Gruppen teilen", isOn: $shareWithGroup)
-                                        .tint(.orange)
-                                    Text("Gruppen-Aufgaben erscheinen bei allen Gruppenmitgliedern.")
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
-                                }
                             }
                         }
+                    }
+
+                    // Visibility & Sharing
+                    if !store.groupIds.isEmpty || !store.classIds.isEmpty {
+                        ShareTargetSelector(
+                            shareWithGroup: $shareWithGroup,
+                            selectedGroupIds: $selectedGroupIds,
+                            selectedClassIds: $selectedClassIds,
+                            autoSelectedGroupIds: autoSelectedGroupIds
+                        )
                     }
 
                     if let error {
@@ -191,6 +195,7 @@ struct AddHomeworkView: View {
                     } label: {
                         Image(systemName: "xmark")
                             .imageScale(.medium)
+                            .foregroundStyle(Color.primary)
                     }
                     .accessibilityLabel("Abbrechen")
                 }
@@ -203,6 +208,7 @@ struct AddHomeworkView: View {
                         } else {
                             Image(systemName: "checkmark")
                                 .imageScale(.medium)
+                                .foregroundStyle(Color.primary)
                         }
                     }
                     .accessibilityLabel("Speichern")
@@ -212,11 +218,18 @@ struct AddHomeworkView: View {
             .scrollDismissesKeyboard(.interactively)
             .onAppear {
                 applyInitialSubjectSelection()
-                shareWithGroup = !store.groupIds.isEmpty
-                selectedGroupId = store.groupIds.first
+                // Initial update based on subject
+                updateSelectedGroupsForSubject(subjectName)
+                shareWithGroup = !selectedGroupIds.isEmpty
             }
             .onChange(of: store.subjects) { _, _ in
                 applyInitialSubjectSelection()
+            }
+            .onChange(of: subjectName) { _, newSubject in
+                updateSelectedGroupsForSubject(newSubject)
+                if !selectedGroupIds.isEmpty {
+                    shareWithGroup = true
+                }
             }
         }
     }
@@ -235,7 +248,13 @@ struct AddHomeworkView: View {
             let due: Date? = hasDueDate ? dueDate : nil
             let reminder: Date? = hasReminder ? reminderDate : nil
             if shareWithGroup {
-                let sharedIds = try await store.addHomeworkToGroups(subjectName: subjectName, title: trimmedTitle, dueDate: due, reminderAt: reminder)
+                let sharedIds = try await store.addHomeworkToGroups(
+                    subjectName: subjectName,
+                    title: trimmedTitle,
+                    dueDate: due,
+                    reminderAt: reminder,
+                    targetGroupIds: Array(selectedGroupIds.union(selectedClassIds.flatMap { store.classDetails[$0]?.groupIds ?? [] }))
+                )
                 if sharedIds.isEmpty {
                     try await store.addHomeworkToFirestore(
                         subjectName: subjectName,
@@ -287,6 +306,22 @@ struct AddHomeworkView: View {
                 subjectName = first
             } else {
                 subjectName = noSubjectLabel
+            }
+        }
+    }
+    
+    private func updateSelectedGroupsForSubject(_ subject: String) {
+        // 1. Remove previously auto-selected groups
+        selectedGroupIds.subtract(autoSelectedGroupIds)
+        autoSelectedGroupIds.removeAll()
+        
+        // 2. If subject is valid, find new matches
+        if subject != noSubjectLabel && !subject.isEmpty {
+            let matched = Set(store.targetGroupIds(forLocalSubject: subject))
+            if !matched.isEmpty {
+                // 3. Add new matches and track them
+                selectedGroupIds.formUnion(matched)
+                autoSelectedGroupIds = matched
             }
         }
     }

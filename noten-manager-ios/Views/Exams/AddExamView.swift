@@ -23,6 +23,9 @@ struct AddExamView: View {
     @State private var isSaving: Bool = false
     @State private var error: String?
     @State private var shareWithGroup: Bool = false
+    @State private var selectedGroupIds: Set<String> = []
+    @State private var selectedClassIds: Set<String> = []
+    @State private var autoSelectedGroupIds: Set<String> = []
     @FocusState private var focusedField: Field?
 
     private var subjects: [Subject] {
@@ -325,7 +328,7 @@ struct AddExamView: View {
                     }
 
                     SettingsCard(
-                        title: "Erinnerung\(isGeneralEvent || isFachreferatEvent ? "" : " & Teilen")",
+                        title: "Erinnerung",
                         subtitle: "Optionale Benachrichtigung",
                         systemImage: "bell.badge.fill",
                         accent: .orange
@@ -342,16 +345,18 @@ struct AddExamView: View {
                                         displayedComponents: [.date, .hourAndMinute]
                                     )
                                 }
-
-                                if !store.groupIds.isEmpty && !isGeneralEvent && !isFachreferatEvent {
-                                    Toggle("Mit Gruppen teilen", isOn: $shareWithGroup)
-                                        .tint(.orange)
-                                    Text("Gruppen-Termine werden für alle Gruppenmitglieder sichtbar.")
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
-                                }
                             }
                         }
+                    }
+
+                    // Visibility & Sharing
+                    if !store.groupIds.isEmpty || !store.classIds.isEmpty {
+                        ShareTargetSelector(
+                            shareWithGroup: $shareWithGroup,
+                            selectedGroupIds: $selectedGroupIds,
+                            selectedClassIds: $selectedClassIds,
+                            autoSelectedGroupIds: autoSelectedGroupIds
+                        )
                     }
 
                     if let error {
@@ -373,6 +378,7 @@ struct AddExamView: View {
                     } label: {
                         Image(systemName: "xmark")
                             .imageScale(.medium)
+                            .foregroundStyle(Color.primary)
                     }
                     .accessibilityLabel("Abbrechen")
                 }
@@ -385,6 +391,7 @@ struct AddExamView: View {
                         } else {
                             Image(systemName: "checkmark")
                                 .imageScale(.medium)
+                                .foregroundStyle(Color.primary)
                         }
                     }
                     .accessibilityLabel("Speichern")
@@ -417,7 +424,26 @@ struct AddExamView: View {
                         subjectName = ""
                     }
                 }
-                shareWithGroup = !store.groupIds.isEmpty && !isGeneralEvent && !isFachreferatEvent
+                // Initial update based on subject
+                let initialSubject = isFachreferatEvent ? fachreferatSubjectName : subjectName
+                updateSelectedGroupsForSubject(initialSubject)
+                shareWithGroup = !selectedGroupIds.isEmpty
+            }
+            .onChange(of: subjectName) { _, newSubject in
+                if !isGeneralEvent && !isFachreferatEvent {
+                    updateSelectedGroupsForSubject(newSubject)
+                    if !selectedGroupIds.isEmpty {
+                        shareWithGroup = true
+                    }
+                }
+            }
+            .onChange(of: fachreferatSubjectName) { _, newSubject in
+                if isFachreferatEvent {
+                    updateSelectedGroupsForSubject(newSubject)
+                    if !selectedGroupIds.isEmpty {
+                        shareWithGroup = true
+                    }
+                }
             }
         }
     }
@@ -455,7 +481,7 @@ struct AddExamView: View {
             let relatedSubject = (relatedSubjectRaw?.isEmpty == false) ? relatedSubjectRaw : nil
             let weightToStore: Int? = allowWeights && !useCustomWeight ? examWeight : nil
             let hasTime = includeTime
-            if shareWithGroup && !isGeneralEvent {
+            if shareWithGroup {
                 let sharedIds = try await store.addExamToGroups(
                     subjectName: effectiveSubject,
                     subjectKey: relatedSubject,
@@ -466,7 +492,8 @@ struct AddExamView: View {
                     weight: weightToStore,
                     customWeight: customWeight,
                     reminderAt: reminder,
-                    requiresGrade: requiresGrade
+                    requiresGrade: requiresGrade,
+                    targetGroupIds: Array(selectedGroupIds.union(selectedClassIds.flatMap { store.classDetails[$0]?.groupIds ?? [] }))
                 )
                 if sharedIds.isEmpty {
                     try await store.addExamToFirestore(
@@ -506,5 +533,23 @@ struct AddExamView: View {
             self.error = error.localizedDescription
         }
         isSaving = false
+    }
+    
+    private func updateSelectedGroupsForSubject(_ subject: String) {
+        // 1. Remove previously auto-selected groups
+        selectedGroupIds.subtract(autoSelectedGroupIds)
+        autoSelectedGroupIds.removeAll()
+        
+        // 2. If subject is valid, find new matches
+        // "Kein Fach" usually means subjectName is empty or a placeholder if managed that way.
+        // Assuming subjectName is passed directly.
+        if !subject.isEmpty {
+            let matched = Set(store.targetGroupIds(forLocalSubject: subject))
+            if !matched.isEmpty {
+                // 3. Add new matches and track them
+                selectedGroupIds.formUnion(matched)
+                autoSelectedGroupIds = matched
+            }
+        }
     }
 }

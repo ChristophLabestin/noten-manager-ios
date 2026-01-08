@@ -55,6 +55,7 @@ struct HelpCenterLink: View {
                             } label: {
                                 Image(systemName: "chevron.down")
                                     .imageScale(.medium)
+                                    .foregroundStyle(store.darkMode ? .white : .black)
                             }
                             .accessibilityLabel("Schließen")
                         }

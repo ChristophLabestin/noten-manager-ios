@@ -15,6 +15,8 @@ struct GroupSubjectManagementView: View {
     @State private var infoMessage: String?
     @State private var errorMessage: String?
     @State private var showMapping: Bool = false
+    @State private var showLeaveAlert: Bool = false
+    @State private var showDeleteAlert: Bool = false
 
     private var groupSubjects: [GroupSubject] {
         store.groupSubjectsByGroup[groupId] ?? []
@@ -233,6 +235,41 @@ struct GroupSubjectManagementView: View {
                         }
                     }
 
+                    SettingsCard(
+                        title: "Gefahrenzone",
+                        subtitle: "Gruppe verlassen oder löschen",
+                        systemImage: "exclamationmark.triangle.fill",
+                        accent: .red
+                    ) {
+                        SettingsSectionBox {
+                            VStack(spacing: 12) {
+                                Button(role: .destructive) {
+                                    showLeaveAlert = true
+                                } label: {
+                                    Label("Gruppe verlassen", systemImage: "rectangle.portrait.and.arrow.right")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(SoftTintButtonStyle(accent: .red))
+                                
+                                if isOwner {
+                                    Button(role: .destructive) {
+                                        showDeleteAlert = true
+                                    } label: {
+                                        Label("Gruppe löschen", systemImage: "trash.fill")
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(SoftTintButtonStyle(accent: .red))
+                                    
+                                    Text("Da du der Ersteller bist, wird die Gruppe für alle Mitglieder unwiderruflich gelöscht.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .multilineTextAlignment(.center)
+                                        .padding(.horizontal)
+                                }
+                            }
+                        }
+                    }
+
                     if let info = infoMessage {
                         StatusLabel(text: info, color: .green, icon: "checkmark.circle.fill")
                     }
@@ -250,7 +287,6 @@ struct GroupSubjectManagementView: View {
                 )
             )
             .scrollContentBackground(.hidden)
-            .sheetNavigationTitle(groupTitle)
 
             .onAppear {
                 syncSelections()
@@ -259,6 +295,28 @@ struct GroupSubjectManagementView: View {
             .sheet(isPresented: $showMapping) {
                 UnifiedMappingView(groupId: groupId)
                     .environmentObject(store)
+            }
+            .alert("Gruppe verlassen?", isPresented: $showLeaveAlert) {
+                Button("Abbrechen", role: .cancel) { }
+                Button("Verlassen", role: .destructive) {
+                    Task {
+                        await store.leaveSharedGroup(code: groupId)
+                        dismiss()
+                    }
+                }
+            } message: {
+                Text("Bist du sicher, dass du diese Gruppe verlassen möchtest? Du verlierst Zugriff auf alle geteilten Inhalte.")
+            }
+            .alert("Gruppe löschen?", isPresented: $showDeleteAlert) {
+                Button("Abbrechen", role: .cancel) { }
+                Button("Löschen", role: .destructive) {
+                    Task {
+                        try? await store.deleteSharedGroup(code: groupId)
+                        dismiss()
+                    }
+                }
+            } message: {
+                Text("Diese Aktion kann nicht rückgängig gemacht werden. Die Gruppe wird für alle Mitglieder gelöscht.")
             }
         }
     }

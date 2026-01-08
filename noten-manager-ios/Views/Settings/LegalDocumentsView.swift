@@ -25,7 +25,7 @@ struct PrivacyPolicyView: View {
                                 Text("Christoph Labestin")
                                 Text("Ödwieser Weg 7")
                                 Text("84082 Laberweinting")
-                                Link("clabestin@icloud.com", destination: URL(string: "mailto:clabestin@icloud.com")!)
+                                Link("mail@fosbos-notenmanager.de", destination: URL(string: "mailto:mail@fosbos-notenmanager.de")!)
                             }
                             .font(helperFont)
                         }
@@ -111,7 +111,7 @@ struct PrivacyPolicyView: View {
                                 HStack(alignment: .top, spacing: 6) {
                                     Text("Kontakt:")
                                         .font(.subheadline.weight(.semibold))
-                                    Link("clabestin@icloud.com", destination: URL(string: "mailto:clabestin@icloud.com")!)
+                                    Link("mail@fosbos-notenmanager.de", destination: URL(string: "mailto:mail@fosbos-notenmanager.de")!)
                                         .font(helperFont)
                                 }
                             }
@@ -210,7 +210,7 @@ struct ImprintView: View {
                         }
 
                         legalSection("Kontakt") {
-                            Link("clabestin@icloud.com", destination: URL(string: "mailto:clabestin@icloud.com")!)
+                            Link("mail@fosbos-notenmanager.de", destination: URL(string: "mailto:mail@fosbos-notenmanager.de")!)
                                 .font(.subheadline)
                         }
 
@@ -318,7 +318,7 @@ struct TermsOfUseView: View {
                         }
 
                         legalSection("Kontakt") {
-                            Link("clabestin@icloud.com", destination: URL(string: "mailto:clabestin@icloud.com")!)
+                            Link("mail@fosbos-notenmanager.de", destination: URL(string: "mailto:mail@fosbos-notenmanager.de")!)
                                 .font(helperFont)
                         }
                     }

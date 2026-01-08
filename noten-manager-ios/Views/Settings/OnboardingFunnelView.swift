@@ -284,6 +284,7 @@ struct OnboardingFunnelView: View {
                         Button(action: goBack) {
                             Image(systemName: "chevron.left")
                                 .imageScale(.medium)
+                                .foregroundStyle(Color.primary)
                         }
                         .accessibilityLabel("Zurück")
                         .disabled(!canGoBack)
@@ -294,6 +295,7 @@ struct OnboardingFunnelView: View {
                         Button(action: closeOnboarding) {
                             Image(systemName: "xmark")
                                 .imageScale(.medium)
+                                .foregroundStyle(Color.primary)
                         }
                         .accessibilityLabel("Schließen")
                     }

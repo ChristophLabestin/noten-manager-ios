@@ -73,6 +73,7 @@ struct AppSettingsView: View {
 
     @State private var showChangeEmailSheet: Bool = false
     @State private var showChangePasswordSheet: Bool = false
+    @State private var showSupportAccessSheet: Bool = false
     @State private var changeEmailCurrentPassword: String = ""
     @State private var changeEmailNewEmail: String = ""
     @State private var changeEmailConfirmEmail: String = ""
@@ -883,8 +884,33 @@ struct AppSettingsView: View {
                         .padding(.vertical, 4)
                     }
                     .buttonStyle(.plain)
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Problem mit deinen Daten?")
+                            .font(.subheadline.weight(.semibold))
+                        Text("Erhalte Hilfe, indem du uns temporär Zugriff gewährst.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Button {
+                            showSupportAccessSheet = true
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: store.adminAccessGranted ? "checkmark.shield.fill" : "person.badge.key.fill")
+                                    .font(.subheadline.weight(.semibold))
+                                Text(store.adminAccessGranted ? "Support-Zugriff aktiv" : "Support-Zugriff anfordern")
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(SoftTintButtonStyle(accent: store.adminAccessGranted ? .green : .indigo))
+                    }
                 }
             }
+        }
+        .sheet(isPresented: $showSupportAccessSheet) {
+            SupportAccessRequestSheet()
+                .environmentObject(store)
         }
         .sheet(isPresented: $showSubscriptionOffer) {
             SubscriptionOfferSheetView(
@@ -1989,6 +2015,7 @@ private struct ChangeEmailSheet: View {
                     } label: {
                         Image(systemName: "xmark")
                             .imageScale(.medium)
+                            .foregroundStyle(Color.primary)
                     }
                     .accessibilityLabel("Abbrechen")
                 }
@@ -2120,6 +2147,7 @@ private struct ChangePasswordSheet: View {
                     } label: {
                         Image(systemName: "xmark")
                             .imageScale(.medium)
+                            .foregroundStyle(Color.primary)
                     }
                     .accessibilityLabel("Abbrechen")
                 }
@@ -2416,6 +2444,7 @@ struct SchoolYearEditView: View {
                     } label: {
                         Image(systemName: "chevron.down")
                             .imageScale(.medium)
+                            .foregroundStyle(Color.primary)
                     }
                     .accessibilityLabel("Schließen")
                 }
@@ -2919,6 +2948,7 @@ private struct ResetConfirmSheet: View {
                     } label: {
                         Image(systemName: "xmark")
                             .imageScale(.medium)
+                            .foregroundStyle(Color.primary)
                     }
                     .accessibilityLabel("Abbrechen")
                 }

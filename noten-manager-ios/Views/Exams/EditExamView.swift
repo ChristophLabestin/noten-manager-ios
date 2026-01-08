@@ -29,6 +29,7 @@ struct EditExamView: View {
     @State private var shareInfo: String?
     @State private var shareError: String?
     @State private var isUnsharing: Bool = false
+    @State private var selectedGroupIds: Set<String> = []
     @FocusState private var focusedField: Field?
     @State private var fachreferatSubjectName: String = ""
     private let isFachreferatExam: Bool
@@ -421,6 +422,96 @@ struct EditExamView: View {
                             accent: .blue
                         ) {
                             VStack(alignment: .leading, spacing: 10) {
+                                if !store.classIds.isEmpty || !store.groupIds.isEmpty {
+                                    VStack(alignment: .leading, spacing: 16) {
+                                        // Classes Section
+                                        if !store.classIds.isEmpty {
+                                            VStack(alignment: .leading, spacing: 8) {
+                                                Label("Klassen", systemImage: "rectangle.stack.fill")
+                                                    .font(.footnote.weight(.semibold))
+                                                    .foregroundStyle(.secondary)
+                                                
+                                                FlowLayout(spacing: 8) {
+                                                    ForEach(store.classIds, id: \.self) { cid in
+                                                        let name = store.classNames[cid] ?? "Klasse"
+                                                        let classGroups = Set(store.classDetails[cid]?.groupIds ?? [])
+                                                        let isFullySelected = !classGroups.isEmpty && classGroups.isSubset(of: selectedGroupIds)
+                                                        
+                                                        Button {
+                                                            withAnimation(.snappy) {
+                                                                if isFullySelected {
+                                                                    selectedGroupIds.subtract(classGroups)
+                                                                } else {
+                                                                    selectedGroupIds.formUnion(classGroups)
+                                                                }
+                                                            }
+                                                        } label: {
+                                                            HStack(spacing: 6) {
+                                                                Text(name)
+                                                                if isFullySelected {
+                                                                    Image(systemName: "checkmark")
+                                                                        .font(.caption.bold())
+                                                                }
+                                                            }
+                                                            .font(.subheadline.weight(.medium))
+                                                            .padding(.horizontal, 12)
+                                                            .padding(.vertical, 8)
+                                                            .background(isFullySelected ? Color.indigo : Color.indigo.opacity(0.1))
+                                                            .foregroundStyle(isFullySelected ? .white : .indigo)
+                                                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                                        }
+                                                        .buttonStyle(.plain)
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        // Groups Section
+                                        if !store.groupIds.isEmpty {
+                                            VStack(alignment: .leading, spacing: 8) {
+                                                Label("Einzelne Gruppen", systemImage: "person.3.fill")
+                                                    .font(.footnote.weight(.semibold))
+                                                    .foregroundStyle(.secondary)
+                                                
+                                                FlowLayout(spacing: 8) {
+                                                    ForEach(store.groupIds, id: \.self) { gid in
+                                                        let name = store.groupNames[gid] ?? gid
+                                                        let isSelected = selectedGroupIds.contains(gid)
+                                                        
+                                                        Button {
+                                                            withAnimation(.snappy) {
+                                                                if isSelected {
+                                                                    selectedGroupIds.remove(gid)
+                                                                } else {
+                                                                    selectedGroupIds.insert(gid)
+                                                                }
+                                                            }
+                                                        } label: {
+                                                            HStack(spacing: 6) {
+                                                                Text(name)
+                                                                if isSelected {
+                                                                    Image(systemName: "checkmark")
+                                                                        .font(.caption.bold())
+                                                                }
+                                                            }
+                                                            .font(.subheadline.weight(.medium))
+                                                            .padding(.horizontal, 12)
+                                                            .padding(.vertical, 8)
+                                                            .background(isSelected ? Color.orange : Color.orange.opacity(0.1))
+                                                            .foregroundStyle(isSelected ? .white : .orange)
+                                                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                                        }
+                                                        .buttonStyle(.plain)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    .padding(16)
+                                    .background(Color.secondary.opacity(0.05))
+                                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                }
+
                                 Button {
                                     Task { await shareToGroups() }
                                 } label: {
@@ -432,7 +523,7 @@ struct EditExamView: View {
                                     }
                                 }
                                 .buttonStyle(SoftTintButtonStyle(accent: .blue))
-                                .disabled(isSharing)
+                                .disabled(isSharing || selectedGroupIds.isEmpty)
 
                                 if let shareInfo {
                                     Text(shareInfo)
@@ -528,6 +619,7 @@ struct EditExamView: View {
                     } label: {
                         Image(systemName: "xmark")
                             .imageScale(.medium)
+                            .foregroundStyle(Color.primary)
                     }
                     .accessibilityLabel("Abbrechen")
                 }
@@ -540,6 +632,7 @@ struct EditExamView: View {
                         } else {
                             Image(systemName: "checkmark")
                                 .imageScale(.medium)
+                                .foregroundStyle(Color.primary)
                         }
                     }
                     .accessibilityLabel("Speichern")
@@ -554,6 +647,11 @@ struct EditExamView: View {
                 if newValue.isEmpty {
                     useCustomWeight = false
                     customWeightText = ""
+                }
+            }
+            .onAppear {
+                if selectedGroupIds.isEmpty, let first = store.groupIds.first {
+                    selectedGroupIds = [first]
                 }
             }
             .alert(
@@ -668,7 +766,10 @@ struct EditExamView: View {
         shareError = nil
         shareInfo = nil
         isSharing = true
-        let success = await store.shareExamToGroups(examId: exam.id)
+        let success = await store.shareExamToGroups(
+            examId: exam.id,
+            targetGroupIds: Array(selectedGroupIds)
+        )
         await MainActor.run {
             isSharing = false
             if success {
