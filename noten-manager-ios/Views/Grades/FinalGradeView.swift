@@ -370,14 +370,12 @@ struct FinalGradeView: View {
             }
             ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 0) {
-                    if #available(iOS 26, *) {
-                        Button {
-                            onOpenCreationMenu()
-                        } label: {
-                            ToolbarIcon(symbol: "plus", showDot: false)
-                        }
-                        .accessibilityLabel("Neu hinzufügen")
+                    Button {
+                        onOpenCreationMenu()
+                    } label: {
+                        ToolbarIcon(symbol: "plus", showDot: false)
                     }
+                    .accessibilityLabel("Neu hinzufügen")
 
                     Button {
                         showExamSheet = true

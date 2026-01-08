@@ -24,6 +24,7 @@ struct HomeView: View {
     @State private var navigateToSettings: Bool = false
     @State private var navigateToFinalGrade: Bool = false
 
+
     @State private var greeting: String = ""
     @State private var displayName: String = ""
     @State private var showHomeworkSheet: Bool = false
@@ -605,6 +606,8 @@ struct HomeView: View {
         }
     }
 
+
+
     private func holidayNoticeCard(info: HolidayWindow) -> some View {
         SettingsCard(
             title: "Ferien voraus",
@@ -761,6 +764,8 @@ struct HomeView: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
 
+
+
             sortingModeSection
                 .softFadeIn(enabled: animationsOn, delay: 0.12, offset: 10)
         }
@@ -860,14 +865,12 @@ struct HomeView: View {
             }
             ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 0) {
-                    if #available(iOS 26, *) {
-                        Button {
-                            onOpenCreationMenu()
-                        } label: {
-                            ToolbarIcon(symbol: "plus", showDot: false)
-                        }
-                        .accessibilityLabel("Neu hinzufügen")
+                    Button {
+                        onOpenCreationMenu()
+                    } label: {
+                        ToolbarIcon(symbol: "plus", showDot: false)
                     }
+                    .accessibilityLabel("Neu hinzufügen")
                     
                     Button {
                         showExamSheet = true
@@ -908,6 +911,7 @@ struct HomeView: View {
         .navigationDestination(isPresented: $navigateToFinalGrade) {
             AbiturExamView().environmentObject(store)
         }
+
         .sheet(isPresented: $showHomeworkSheet) {
             HomeworkListView()
                 .environmentObject(store)

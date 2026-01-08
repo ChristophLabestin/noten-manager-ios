@@ -251,21 +251,7 @@ struct GroupSubjectManagementView: View {
             )
             .scrollContentBackground(.hidden)
             .sheetNavigationTitle(groupTitle)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "chevron.down")
-                            .imageScale(.medium)
-                    }
-                    .accessibilityLabel("Schließen")
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Fertig") { dismiss() }
-                        .disabled(isAdding || isImporting)
-                }
-            }
+
             .onAppear {
                 syncSelections()
                 Task { await refreshOwnership() }

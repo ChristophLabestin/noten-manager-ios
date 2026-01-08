@@ -54,6 +54,8 @@ struct MainView: View {
     @State private var subscriptionOfferShownThisSession: Bool = false
     @State private var showLaunchPurchaseSuccess: Bool = false
     @State private var pendingLaunchPurchaseSuccess: Bool = false
+    @State private var showGroupJoinSheet: Bool = false
+    @State private var pendingGroupJoinCode: String = ""
 
     // Von SubjectDetail per Preference gemeldetes Fach für „Note hinzufügen“
     @State private var quickAddSubjectName: String? = nil
@@ -74,6 +76,7 @@ struct MainView: View {
     @State private var showAddExam: Bool = false
     @State private var showPractical: Bool = false
     @State private var showSeminar: Bool = false
+    @State private var showGroupCreation: Bool = false
     
     @Namespace private var namespace
 
@@ -230,6 +233,13 @@ struct MainView: View {
             .onReceive(NotificationCenter.default.publisher(for: .openLaunchOffer)) { _ in
                 handleOpenLaunchOfferNotification()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .openGroupJoin)) { notification in
+                if let code = notification.object as? String {
+                    self.pendingGroupJoinCode = code
+                    self.showGroupJoinSheet = true
+                }
+            }
+
             .onChange(of: gradesStore.legacyMigrationSummary) { _, summary in
                 if summary != nil {
                     showOnboardingFunnel = true
@@ -323,6 +333,10 @@ struct MainView: View {
             }
             .sheet(item: $deeplinkHomework) { homework in
                 HomeworkDetailSheet(homework: homework, onEdit: { _ in })
+                    .environmentObject(gradesStore)
+            }
+            .sheet(isPresented: $showGroupJoinSheet) {
+                GroupJoinView(initialCode: pendingGroupJoinCode)
                     .environmentObject(gradesStore)
             }
             .toolbar {
@@ -799,11 +813,41 @@ struct MainView: View {
     @ViewBuilder
     private var navigationContainer: some View {
         Group {
-            if #available(iOS 26, *) {
-                // Native TabView for iOS 26+ with Liquid Glass System Style
-                TabView(selection: $currentTab) {
+            // Native TabView for all iOS versions with Liquid Glass System Style
+            TabView(selection: $currentTab) {
+                NavigationStack {
+                    HomeView(onOpenCreationMenu: { showCreationMenu = true })
+                        .environmentObject(gradesStore)
+                        .navigationDestination(for: Subject.self) { subject in
+                            if subject.name == "Fachreferat" {
+                                FachreferatDetailView(subject: subject)
+                                    .environmentObject(gradesStore)
+                            } else {
+                                SubjectDetailView(subject: subject)
+                                    .environmentObject(gradesStore)
+                            }
+                        }
+                        .navigationDestination(isPresented: $navigateToAbiturExam) {
+                            AbiturExamView().environmentObject(gradesStore)
+                        }
+                }
+                .tabItem {
+                    Label("Home", systemImage: "house.fill")
+                }
+                .tag(BottomNavView.Tab.home)
+
+                NavigationStack {
+                    GroupsListView(onOpenCreationMenu: { showCreationMenu = true })
+                        .environmentObject(gradesStore)
+                }
+                .tabItem {
+                    Label("Gruppen", systemImage: "person.3.fill")
+                }
+                .tag(BottomNavView.Tab.groups)
+
+                if !isSubscriptionGateActive {
                     NavigationStack {
-                        HomeView(onOpenCreationMenu: { showCreationMenu = true })
+                        InsightsView(onOpenCreationMenu: { showCreationMenu = true })
                             .environmentObject(gradesStore)
                             .navigationDestination(for: Subject.self) { subject in
                                 if subject.name == "Fachreferat" {
@@ -819,111 +863,45 @@ struct MainView: View {
                             }
                     }
                     .tabItem {
-                        Label("Home", systemImage: "house.fill")
+                        Label("Noten", systemImage: "chart.bar.fill")
                     }
-                    .tag(BottomNavView.Tab.home)
-
-                    if !isSubscriptionGateActive {
-                        NavigationStack {
-                            InsightsView(onOpenCreationMenu: { showCreationMenu = true })
-                                .environmentObject(gradesStore)
-                                .navigationDestination(for: Subject.self) { subject in
-                                    if subject.name == "Fachreferat" {
-                                        FachreferatDetailView(subject: subject)
-                                            .environmentObject(gradesStore)
-                                    } else {
-                                        SubjectDetailView(subject: subject)
-                                            .environmentObject(gradesStore)
-                                    }
-                                }
-                                .navigationDestination(isPresented: $navigateToAbiturExam) {
-                                    AbiturExamView().environmentObject(gradesStore)
-                                }
-                        }
-                        .tabItem {
-                            Label("Noten", systemImage: "chart.bar.fill")
-                        }
-                        .tag(BottomNavView.Tab.insights)
-                        
-                        NavigationStack {
-                            FinalGradeView(onOpenCreationMenu: { showCreationMenu = true })
-                                .environmentObject(gradesStore)
-                                .navigationDestination(isPresented: $navigateToAbiturExam) {
-                                    AbiturExamView().environmentObject(gradesStore)
-                                }
-                        }
-                        .tabItem {
-                            Label("Abi", systemImage: "graduationcap.fill")
-                        }
-                        .tag(BottomNavView.Tab.final)
-                    }
-
+                    .tag(BottomNavView.Tab.insights)
+                    
                     NavigationStack {
-                        AppSettingsView(
-                            scrollToAccount: scrollToAccountOnOpen,
-                            onOpenCreationMenu: { showCreationMenu = true }
-                        )
+                        FinalGradeView(onOpenCreationMenu: { showCreationMenu = true })
                             .environmentObject(gradesStore)
-                            .environmentObject(authManager)
-                            .environmentObject(offlineManager)
-                            .environmentObject(biometricManager)
                             .navigationDestination(isPresented: $navigateToAbiturExam) {
                                 AbiturExamView().environmentObject(gradesStore)
                             }
                     }
                     .tabItem {
-                        Label("Optionen", systemImage: "gearshape.fill")
+                        Label("Abi", systemImage: "graduationcap.fill")
                     }
-                    .tag(BottomNavView.Tab.settings)
+                    .tag(BottomNavView.Tab.final)
                 }
-                .tint(activeColor)
-                .tabBarMinimizeBehavior(.onScrollDown) // Native minimize on scroll
-            } else {
-                 // Fallback for older iOS versions (Overlay approach)
-                 NavigationStack(path: $navPath) {
-                     Group {
-                         switch currentTab {
-                         case .home:
-                             HomeView(onOpenCreationMenu: { showCreationMenu = true })
-                                 .environmentObject(gradesStore)
-                            case .insights:
-                                InsightsView(onOpenCreationMenu: { showCreationMenu = true })
-                                    .environmentObject(gradesStore)
-                            case .final:
-                                FinalGradeView(onOpenCreationMenu: { showCreationMenu = true })
-                                    .environmentObject(gradesStore)
-                            case .settings:
-                                AppSettingsView(
-                                    scrollToAccount: scrollToAccountOnOpen,
-                                    onOpenCreationMenu: { showCreationMenu = true }
-                                )
-                                    .environmentObject(gradesStore)
-                                 .environmentObject(authManager)
-                                 .environmentObject(offlineManager)
-                                 .environmentObject(biometricManager)
-                         default:
-                             EmptyView()
-                         }
-                     }
-                 }
-                 .safeAreaInset(edge: .bottom) {
-                     BottomNavView(
-                         currentTab: currentTab,
-                         isSubscriptionGateActive: isSubscriptionGateActive,
-                         onOpenHome: { currentTab = .home; navPath = NavigationPath() },
-                         onOpenFinalGrade: { currentTab = .final; navPath = NavigationPath() },
-                         onOpenSettings: { currentTab = .settings; navPath = NavigationPath() },
-                         onOpenInsights: { currentTab = .insights; navPath = NavigationPath() },
-                         onOpenAbitur: { navigateToAbiturExam = true },
-                         onOpenPractical: { showPractical = true },
-                         quickAddPreselectedSubjectName: quickAddSubjectName
-                     )
-                     .environmentObject(gradesStore)
-                     .padding(.bottom, 8)
-                 }
+
+                NavigationStack {
+                    AppSettingsView(
+                        scrollToAccount: scrollToAccountOnOpen,
+                        onOpenCreationMenu: { showCreationMenu = true }
+                    )
+                        .environmentObject(gradesStore)
+                        .environmentObject(authManager)
+                        .environmentObject(offlineManager)
+                        .environmentObject(biometricManager)
+                        .navigationDestination(isPresented: $navigateToAbiturExam) {
+                            AbiturExamView().environmentObject(gradesStore)
+                        }
+                }
+                .tabItem {
+                    Label("Optionen", systemImage: "gearshape.fill")
+                }
+                .tag(BottomNavView.Tab.settings)
             }
+            .tint(activeColor)
+            .safeTabBarMinimizeBehavior() // Native minimize on scroll (iOS 26+)
         }
-        // Attach Sheet Modifiers here so they apply to both the TabView and the NavigationStack fallback
+        // Attach Sheet Modifiers to the Group
         .sheet(isPresented: $showCreationMenu) {
             CreationMenuView(
                 onAction: handleCreationAction,
@@ -962,14 +940,9 @@ struct MainView: View {
         .sheet(isPresented: $showAddExam) { AddExamView(preselectedSubjectName: quickAddSubjectName).environmentObject(gradesStore) }
         .sheet(isPresented: $showPractical) { NavigationStack { PraktikumDetailView().environmentObject(gradesStore) } }
         .sheet(isPresented: $showSeminar) { SeminarPerformanceView().environmentObject(gradesStore) }
+        .sheet(isPresented: $showGroupCreation) { GroupCreationView().environmentObject(gradesStore) }
         
-        // Retain NavigationDestinations for the fallback path ONLY? 
-        // Or if TabView uses internal headers... 
-        // TabView children usually have their own NavigationStacks if needed.
-        // The existing HomeView etc seem to rely on a parent NavigationStack in the existing architecture.
-        // For TabView, we need to wrap each tab in NavigationStack if they push views.
-        // Let's assume standard behavior: Each tab needs a NavStack.
-        // I will update the TabView content above to wrapping them.
+        // Retain NavigationDestinations logic by wrapping tabs as above.
     }
 
     private var isSubscriptionGateActive: Bool {
@@ -983,7 +956,7 @@ struct MainView: View {
         if !isSubscriptionGateActive {
             return true
         }
-        return tab == .home || tab == .settings
+        return tab == .home || tab == .settings || tab == .groups
     }
 
     @MainActor
@@ -1220,6 +1193,8 @@ struct MainView: View {
                     return
                 }
                 navigateToAbiturExam = true
+            case .group:
+                showGroupCreation = true
             }
         }
     }
@@ -1420,5 +1395,16 @@ struct LegacyMigrationPromptView: View {
 
     private var shadowColor: Color {
         Color.black.opacity(colorScheme == .dark ? 0.38 : 0.16)
+    }
+}
+
+extension View {
+    @ViewBuilder
+    func safeTabBarMinimizeBehavior() -> some View {
+        if #available(iOS 26, *) {
+            self.tabBarMinimizeBehavior(.onScrollDown)
+        } else {
+            self
+        }
     }
 }

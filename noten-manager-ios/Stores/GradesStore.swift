@@ -273,6 +273,7 @@ final class GradesStore: ObservableObject {
     @Published var groupIds: [String] = []
     @Published var groupNames: [String: String] = [:] // gid -> name
     @Published var groupOwners: [String: String] = [:] // gid -> ownerId
+    @Published var groupMemberIds: [String: Set<String>] = [:] // gid -> userIds
     @Published var groupSubjectsByGroup: [String: [GroupSubject]] = [:] // gid -> subjects
     @Published var groupSubjectMappings: [String: [String: String]] = [:] // gid -> subjectKey -> local name
     @Published var groupExamsByGroup: [String: [Exam]] = [:]
@@ -380,6 +381,7 @@ final class GradesStore: ObservableObject {
     private var groupSubjectsListeners: [String: ListenerRegistration] = [:]
     private var groupMappingsListeners: [String: ListenerRegistration] = [:]
     private var groupNameListeners: [String: ListenerRegistration] = [:]
+    private var groupMembersListeners: [String: ListenerRegistration] = [:]
     private var groupExamsListeners: [String: ListenerRegistration] = [:]
     private var groupHomeworksListeners: [String: ListenerRegistration] = [:]
 
@@ -2390,7 +2392,29 @@ final class GradesStore: ObservableObject {
         updateExamSubjectMappingListenerIfNeeded(uid: uid, forceReload: true)
         updateHomeworkSubjectMappingListenerIfNeeded(uid: uid, forceReload: true)
 
+        Task {
+            await repairGroupMemberships(uid: uid)
+        }
+
         persistOfflineSnapshotIfPossible()
+    }
+    
+    private func repairGroupMemberships(uid: String) async {
+        let key = "didRunGroupMembershipRepair_v1"
+        if UserDefaults.standard.bool(forKey: key) { return }
+        
+        for gid in groupIds {
+             let ref = db.collection("groups").document(gid).collection("members").document(uid)
+             do {
+                 let snap = try await ref.getDocument()
+                 if !snap.exists {
+                     try await ref.setData(["joinedAt": Date()])
+                 }
+             } catch {
+                 // Ignore errors
+             }
+        }
+        UserDefaults.standard.set(true, forKey: key)
     }
 
     private func deriveKeyIfNeeded(from data: [String: Any], uid: String) async {
@@ -3054,6 +3078,10 @@ final class GradesStore: ObservableObject {
             "schoolYearId": activeYearId as Any
         ], merge: true)
 
+        try await groupRef.collection("members").document(uid).setData([
+            "joinedAt": Date()
+        ])
+
         try await yearRef.setData([
             "groupIds": FieldValue.arrayUnion([code]),
             "examGroupIds": FieldValue.arrayUnion([code]),      // Kompatibilität
@@ -3137,6 +3165,10 @@ final class GradesStore: ObservableObject {
             "homeworkGroupId": code
         ], merge: true)
 
+        try await groupRef.collection("members").document(uid).setData([
+            "joinedAt": Date()
+        ])
+
         let union = Array(Set(groupIds + [code]))
         groupIds = union
         examGroupIds = union
@@ -3193,6 +3225,10 @@ final class GradesStore: ObservableObject {
             "homeworkGroupId": code
         ], merge: true)
 
+        try await groupRef.collection("members").document(uid).setData([
+            "joinedAt": Date()
+        ])
+
         let union = Array(Set(groupIds + [code]))
         groupIds = union
         examGroupIds = union
@@ -3246,6 +3282,8 @@ final class GradesStore: ObservableObject {
                 "examGroupIds": FieldValue.arrayRemove([target]),
                 "homeworkGroupIds": FieldValue.arrayRemove([target])
             ])
+            
+            try await db.collection("groups").document(target).collection("members").document(uid).delete()
         } catch {
             ErrorLoggingService.logErrorIfEnabled(error)
             // optional loggen
@@ -5743,12 +5781,18 @@ final class GradesStore: ObservableObject {
             groupNames.removeValue(forKey: gid)
             groupOwners.removeValue(forKey: gid)
         }
+        for (gid, l) in groupMembersListeners where !current.contains(gid) {
+            l.remove()
+            groupMembersListeners.removeValue(forKey: gid)
+            groupMemberIds.removeValue(forKey: gid)
+        }
 
         // Starte Listener für aktuelle Gruppen
         for gid in current {
             startGroupSubjectsListener(for: gid)
             startGroupMappingsListener(for: gid, uid: uid, schoolYearId: sid)
             startGroupNameListener(for: gid)
+            startGroupMembersListener(for: gid)
             startGroupExamsListener(for: gid)
             startGroupHomeworksListener(for: gid)
         }
@@ -5812,6 +5856,21 @@ final class GradesStore: ObservableObject {
             }
         }
     }
+
+    private func startGroupMembersListener(for gid: String) {
+        if groupMembersListeners[gid] != nil { return }
+        groupMembersListeners[gid] = db.collection("groups").document(gid).collection("members").addSnapshotListener { [weak self] snap, error in
+            // Error intentionally ignored or lightweight logging
+            Task { @MainActor in
+                guard let self else { return }
+                let docs = snap?.documents ?? []
+                let ids = docs.map { $0.documentID }
+                self.groupMemberIds[gid] = Set(ids)
+            }
+        }
+    }
+
+
 
     private func startGroupExamsListener(for gid: String) {
         if groupExamsListeners[gid] != nil { return }

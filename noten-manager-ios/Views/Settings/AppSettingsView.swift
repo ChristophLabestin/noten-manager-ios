@@ -285,8 +285,7 @@ struct AppSettingsView: View {
                             .softFadeIn(enabled: animationsOn, delay: 0.08, offset: 12)
                         schoolYearCard
                             .softFadeIn(enabled: animationsOn, delay: 0.12, offset: 12)
-                        groupsCard
-                            .softFadeIn(enabled: animationsOn, delay: 0.16, offset: 12)
+
                         onboardingCard
                             .softFadeIn(enabled: animationsOn, delay: 0.20, offset: 12)
                         helpCard
@@ -335,14 +334,12 @@ struct AppSettingsView: View {
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack(spacing: 0) {
-                        if #available(iOS 26, *) {
-                            Button {
-                                onOpenCreationMenu()
-                            } label: {
-                                ToolbarIcon(symbol: "plus", showDot: false)
-                            }
-                            .accessibilityLabel("Neu hinzufügen")
+                        Button {
+                            onOpenCreationMenu()
+                        } label: {
+                            ToolbarIcon(symbol: "plus", showDot: false)
                         }
+                        .accessibilityLabel("Neu hinzufügen")
 
                         Button { showExamSheet = true } label: {
                             ToolbarIcon(symbol: "calendar.badge.clock", showDot: hasOverdueExams)
@@ -854,205 +851,6 @@ struct AppSettingsView: View {
     }
 
     
-
-    private var groupsCard: some View {
-        SettingsCard(
-            title: "Gruppen & Sync",
-            subtitle: "Gemeinsame Gruppen für Klausurentermine und Hausaufgaben",
-            systemImage: "person.3.sequence.fill",
-            accent: .indigo
-        ) {
-            VStack(alignment: .leading, spacing: 12) {
-                //SettingsSectionBox {
-                        if store.groupIds.isEmpty {
-                            Text("Lege eine Gruppe an oder tritt mit einem Code bei. Fächer werden gruppenbezogen geteilt.")
-                                .font(helperFont)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            VStack(spacing: 10) {
-                                ForEach(store.groupIds, id: \.self) { gid in
-                                    let isCopied = copiedGroupId == gid
-                                    let isOwner = store.groupOwners[gid] == Auth.auth().currentUser?.uid
-                                    VStack(alignment: .leading, spacing: 10) {
-                                        HStack(alignment: .top) {
-                                            VStack(alignment: .leading, spacing: 4) {
-                                                Text(store.groupNames[gid] ?? "Ohne Namen")
-                                                    .font(.headline)
-                                                Text("Code: \(gid)")
-                                                    .font(.caption)
-                                                    .foregroundStyle(.secondary)
-                                            }
-                                            Spacer()
-                                            Button {
-                                                UIPasteboard.general.string = gid
-                                                withAnimation { copiedGroupId = gid }
-                                                Task {
-                                                    try? await Task.sleep(nanoseconds: 1_200_000_000)
-                                                    await MainActor.run {
-                                                        if copiedGroupId == gid {
-                                                            withAnimation { copiedGroupId = nil }
-                                                        }
-                                                    }
-                                                }
-                                            } label: {
-                                                Label(isCopied ? "kopiert" : "Kopieren", systemImage: isCopied ? "checkmark" : "doc.on.doc")
-                                            }
-                                            .buttonStyle(PillActionButtonStyle(accent: isCopied ? .green : .indigo))
-                                            .accessibilityLabel("Gruppencode kopieren")
-                                        }
-
-                                        HStack(spacing: 8) {
-                                            if isOwner {
-                                                Button {
-                                                    manageGroupId = gid
-                                                } label: {
-                                                    Label("Verwalten", systemImage: "square.grid.2x2")
-                                                }
-                                                .buttonStyle(PillActionButtonStyle(accent: .indigo))
-                                            }
-
-                                            Button {
-                                                showMappingGroupId = gid
-                                            } label: {
-                                                Label("Abgleichen", systemImage: "arrow.triangle.2.circlepath")
-                                            }
-                                            .buttonStyle(PillActionButtonStyle(accent: .teal))
-
-                                            Spacer()
-
-                                            Button(role: .destructive) {
-                                                groupPendingLeave = gid
-                                            } label: {
-                                                Label("Verlassen", systemImage: "rectangle.portrait.and.arrow.right")
-                                            }
-                                            .buttonStyle(PillActionButtonStyle(accent: .red))
-                                            .accessibilityLabel("Gruppe verlassen")
-                                        }
-                                    }
-                                    .padding(12)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                            .fill(Color(.secondarySystemBackground))
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                            .stroke(Color.indigo.opacity(0.12), lineWidth: 1)
-                                    )
-                                }
-                            }
-                        }
-                //}
-
-                SettingsSectionBox {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Neue Gruppe erstellen")
-                            .font(sectionHeaderFont)
-                        TextField("Gruppenname (Pflichtfeld)", text: $groupNameInput)
-                            .padding(12)
-                            .background(Color.formInputBackground)
-                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Fächer einbringen")
-                                .font(helperFont)
-                            if store.availableSubjectsForNewGroup().isEmpty {
-                                Text("Alle Fächer sind bereits einer Gruppe zugeordnet.")
-                                    .font(helperFont)
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                ForEach(store.availableSubjectsForNewGroup(), id: \.name) { subj in
-                                    Toggle(subj.name, isOn: Binding(
-                                        get: { selectedSubjectsForNewGroup.contains(subj.name) },
-                                        set: { val in
-                                            if val { selectedSubjectsForNewGroup.insert(subj.name) }
-                                            else { selectedSubjectsForNewGroup.remove(subj.name) }
-                                        }
-                                    ))
-                                }
-                            }
-                        }
-                        Button {
-                            Task {
-                                guard !isCreatingGroup else { return }
-                                let trimmedName = groupNameInput.trimmingCharacters(in: .whitespacesAndNewlines)
-                                guard !trimmedName.isEmpty else {
-                                    groupErrorMessage = "Bitte einen Gruppennamen eingeben."
-                                    return
-                                }
-                                let subjects = selectedSubjectsForNewGroup.isEmpty ? store.availableSubjectsForNewGroup().map { $0.name } : Array(selectedSubjectsForNewGroup)
-                                guard !subjects.isEmpty else {
-                                    groupErrorMessage = "Keine verfügbaren Fächer für diese Gruppe."
-                                    return
-                                }
-                                isCreatingGroup = true
-                                groupErrorMessage = nil
-                                groupInfoMessage = nil
-                                defer { isCreatingGroup = false }
-                                do {
-                                    let code = try await store.createSharedGroup(name: trimmedName, subjects: subjects)
-                                    groupJoinCode = code
-                                    groupInfoMessage = "Neue Gruppe erstellt. Teile den Code mit deinen Mitschülern."
-                                    groupNameInput = ""
-                                    selectedSubjectsForNewGroup = []
-                                } catch {
-                                    ErrorLoggingService.logErrorIfEnabled(error)
-                                    groupErrorMessage = error.localizedDescription
-                                }
-                            }
-                        } label: {
-                            if isCreatingGroup { ProgressView() } else { Text("Gruppe erstellen") }
-                        }
-                        .buttonStyle(SoftTintButtonStyle(accent: .indigo))
-                        .disabled(groupNameInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-                }
-
-                SettingsSectionBox {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Einer Gruppe beitreten")
-                            .font(sectionHeaderFont)
-                        TextField("Gruppencode", text: $groupJoinCode)
-                            .textInputAutocapitalization(.characters)
-                            .autocorrectionDisabled(true)
-                            .padding(12)
-                            .background(Color.formInputBackground)
-                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        Button {
-                            Task {
-                                guard !isJoiningGroup else { return }
-                                isJoiningGroup = true
-                                groupErrorMessage = nil
-                                groupInfoMessage = nil
-                                defer { isJoiningGroup = false }
-                                do {
-                                    try await store.joinSharedGroup(with: groupJoinCode)
-                                    groupInfoMessage = "Erfolgreich der Gruppe beigetreten."
-                                } catch {
-                                    ErrorLoggingService.logErrorIfEnabled(error)
-                                    groupErrorMessage = error.localizedDescription
-                                }
-                            }
-                        } label: {
-                            if isJoiningGroup { ProgressView() } else { Text("Mit Code beitreten") }
-                        }
-                        .buttonStyle(SoftTintButtonStyle(accent: .indigo))
-                        .disabled(groupJoinCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                        if let msg = groupInfoMessage {
-                            Text(msg)
-                                .font(helperFont)
-                                .foregroundStyle(.green)
-                        }
-                        if let err = groupErrorMessage {
-                            Text(err)
-                                .font(helperFont)
-                                .foregroundStyle(.red)
-                        }
-                    }
-                }
-            }
-        }
-    }
 
     private var helpCard: some View {
         SettingsCard(

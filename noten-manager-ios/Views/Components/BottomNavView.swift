@@ -6,6 +6,7 @@ struct BottomNavView: View {
 
     enum Tab {
         case home
+        case groups
         case insights
         case final
         case settings
@@ -35,6 +36,7 @@ struct BottomNavView: View {
     @State private var showAddExam: Bool = false
     @State private var showPractical: Bool = false
     @State private var showSeminar: Bool = false
+    @State private var showGroupCreation: Bool = false
 
     private var isFirstSubject: Bool { store.subjects.isEmpty }
     private var disableAddGrade: Bool { store.encryptionKey == nil || store.subjects.isEmpty }
@@ -145,6 +147,7 @@ struct BottomNavView: View {
         .sheet(isPresented: $showAddExam) { AddExamView(preselectedSubjectName: quickAddPreselectedSubjectName).environmentObject(store) }
         .sheet(isPresented: $showPractical) { NavigationStack { PraktikumDetailView().environmentObject(store) } }
         .sheet(isPresented: $showSeminar) { SeminarPerformanceView().environmentObject(store) }
+        .sheet(isPresented: $showGroupCreation) { GroupCreationView().environmentObject(store) }
     }
 
     private func navButton(tab: Tab, icon: String, action: (() -> Void)?) -> some View {
@@ -322,13 +325,19 @@ struct BottomNavView: View {
                 else { showAddFachreferat = true }
             case .seminar: showSeminar = true
             case .abitur: onOpenAbitur?()
+            case .group: showGroupCreation = true
             }
         }
     }
 }
 
 enum CreationAction {
-    case homework, grade, exam, subject, practical, fachreferat, seminar, abitur
+    case homework, grade, exam, subject
+    case practical
+    case fachreferat
+    case seminar
+    case abitur
+    case group
 }
 
 struct CreationMenuView: View {
@@ -422,6 +431,7 @@ struct CreationMenuView: View {
                 listActionRow(title: "Seminarfach", icon: "doc.text.magnifyingglass", color: .purple, disabled: !encryptionKeyLoaded, action: .seminar)
             }
             listActionRow(title: "Abitur", icon: "graduationcap.fill", color: .red, disabled: isFirstSubject, action: .abitur)
+            listActionRow(title: "Gruppe", icon: "person.3.fill", color: .indigo, action: .group)
         }
     }
     

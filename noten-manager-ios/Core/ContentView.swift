@@ -382,6 +382,15 @@ struct ContentView: View {
                 deeplinkDestination = .examList
             case "homework":
                 deeplinkDestination = .homeworkList
+            case "group":
+                // notenmanager://group/join?code=XYZ
+                if let action = url.pathComponents.filter({ $0 != "/" }).first,
+                   action == "join",
+                   let components = URLComponents(url: url, resolvingAgainstBaseURL: true),
+                   let code = components.queryItems?.first(where: { $0.name == "code" })?.value {
+                    // Send notification to open join sheet with code
+                    NotificationCenter.default.post(name: .openGroupJoin, object: code)
+                }
             default:
                 break
             }
@@ -392,6 +401,8 @@ struct ContentView: View {
 extension Notification.Name {
     static let openExamDetail = Notification.Name("openExamDetail")
     static let openLaunchOffer = Notification.Name("openLaunchOffer")
+    static let openGroupJoin = Notification.Name("openGroupJoin")
+
 }
 
 private struct PreAuthOnboardingView: View {
