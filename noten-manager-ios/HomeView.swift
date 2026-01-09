@@ -1736,7 +1736,10 @@ struct SubscriptionOfferSheetView: View {
         .offerCodeRedemption(isPresented: $showOfferCodeSheet) { result in
             switch result {
             case .success:
+                purchaseStatusMessage = nil
+                purchaseStatusIsError = false
                 onPurchaseSuccess()
+                dismiss()
             case .failure(let error):
                 // StoreKit handles UI for failure usually, but we can log
                 print("Offer code redemption failed: \(error)")

@@ -1105,6 +1105,8 @@ struct AppSettingsView: View {
         .offerCodeRedemption(isPresented: $showOfferCodeSheet) { result in
             switch result {
             case .success:
+                purchaseStatusMessage = nil
+                purchaseStatusIsError = false
                 Task { await storeKit.refreshSubscriptionStatus() }
             case .failure(let error):
                 print("Offer code redemption failed: \(error)")
@@ -1347,7 +1349,7 @@ struct AppSettingsView: View {
         ) {
             SettingsSectionBox {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("App Version 1.4")
+                    Text("App Version 1.2.1")
                         .font(helperFont)
                         .foregroundStyle(.secondary)
 

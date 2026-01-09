@@ -63,5 +63,9 @@
 	<true/>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Face ID wird zum Entsperren des Noten Managers verwendet.</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.2.1</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
 </dict>
 </plist>
