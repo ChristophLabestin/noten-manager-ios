@@ -313,7 +313,7 @@ struct ExamListView: View {
                             .foregroundStyle(.red)
                     }
                     if exam.isShared {
-                        let name = exam.groupId.flatMap { store.contextDisplayName(forGroupId: $0) } ?? store.contextDisplayName(forGroupId: exam.groupId ?? "")
+                        let name = store.resolveContextName(groupId: exam.groupId, courseId: exam.courseId)
                         VStack(alignment: .leading, spacing: 2) {
                             HStack(spacing: 4) {
                                 Image(systemName: "person.2.fill")

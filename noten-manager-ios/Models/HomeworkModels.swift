@@ -3,6 +3,7 @@ import Foundation
 struct Homework: Codable, Identifiable, Hashable, Sendable {
     let id: String
     let groupId: String?
+    let courseId: String?
     let subjectName: String
     let subjectKey: String?
     let title: String
@@ -17,6 +18,7 @@ struct Homework: Codable, Identifiable, Hashable, Sendable {
     init(
         id: String,
         groupId: String?,
+        courseId: String? = nil,
         subjectName: String,
         subjectKey: String?,
         title: String,
@@ -30,6 +32,7 @@ struct Homework: Codable, Identifiable, Hashable, Sendable {
     ) {
         self.id = id
         self.groupId = groupId
+        self.courseId = courseId
         self.subjectName = subjectName
         self.subjectKey = subjectKey
         self.title = title

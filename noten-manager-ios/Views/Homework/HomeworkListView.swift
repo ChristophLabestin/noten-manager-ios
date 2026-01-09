@@ -230,7 +230,7 @@ struct HomeworkListView: View {
                             .lineLimit(2)
                     }
                    if hw.isShared {
-                       let name = hw.groupId.flatMap { store.contextDisplayName(forGroupId: $0) } ?? store.contextDisplayName(forGroupId: hw.groupId ?? "")
+                       let name = store.resolveContextName(groupId: hw.groupId, courseId: hw.courseId)
                        VStack(alignment: .leading, spacing: 2) {
                            HStack(spacing: 4) {
                                Image(systemName: "person.2.fill")

@@ -291,6 +291,8 @@ final class GradesStore: ObservableObject {
     // Neue gemeinsame Gruppen-Verwaltung
     @Published var groupIds: [String] = []
     @Published var groupNames: [String: String] = [:] // gid -> name
+    @Published var groupBranchNames: [String: String] = [:] // gid -> migratedBranchName
+    @Published var groupMigratedToClassIds: [String: String] = [:] // gid -> classId
     @Published var groupOwners: [String: String] = [:] // gid -> ownerId
     @Published var groupMemberIds: [String: Set<String>] = [:] // gid -> userIds
     @Published var groupSubjectsByGroup: [String: [GroupSubject]] = [:] // gid -> subjects
@@ -3884,6 +3886,7 @@ final class GradesStore: ObservableObject {
         // 9. Mark Group as Migrated (so it doesn't show in updated app versions)
         try await groupRef.updateData([
             "migratedToClassId": newClassId,
+            "migratedToBranchName": "", // Empty string indicates single-group conversion (no branch suffix)
             "migratedAt": Date()
         ])
         
@@ -3897,10 +3900,9 @@ final class GradesStore: ObservableObject {
         // 10b. Migrate other group members (Legacy + Current)
         try await migrateMembersFromGroupToClass(groupId: groupId, toClassId: newClassId, courseIds: newCourseIds)
         
-        // 11. Local Cleanup: Remove from groupIds so it doesn't show
+        // 11. Local Cleanup: Mark as migrated immediately
         await MainActor.run {
-            groupIds.removeAll { $0 == groupId }
-            groupNames.removeValue(forKey: groupId)
+            // Keep in groupIds so listeners continue (for context resolution)
             migratedGroupIds.insert(groupId)
             subscribedCourseIds.append(contentsOf: newCourseIds)
         }
@@ -4061,8 +4063,7 @@ final class GradesStore: ObservableObject {
         // 4. Local cleanup
         await MainActor.run {
             for group in groups {
-                groupIds.removeAll { $0 == group.groupId }
-                groupNames.removeValue(forKey: group.groupId)
+                // Keep in groupIds and groupNames so listeners continue (needed for context display)
                 migratedGroupIds.insert(group.groupId)
             }
             classIds.append(classCode)
@@ -4176,8 +4177,10 @@ final class GradesStore: ObservableObject {
         try await migrateMembersFromGroupToClass(groupId: groupCode, toClassId: classId, courseIds: newCourseIds)
 
         // Mark group as migrated
+        // Mark group as migrated
         try await groupRef.updateData([
             "migratedToClassId": classId,
+            "migratedToBranchName": branchName,
             "migratedAt": Date()
         ])
         
@@ -4199,8 +4202,7 @@ final class GradesStore: ObservableObject {
         
         // Local cleanup (just mark the group as migrated, no subscription changes)
         await MainActor.run {
-            groupIds.removeAll { $0 == groupCode }
-            groupNames.removeValue(forKey: groupCode)
+            // Keep in groupIds so listeners continue
             migratedGroupIds.insert(groupCode)
         }
     }
@@ -7276,16 +7278,23 @@ final class GradesStore: ObservableObject {
                 guard let self else { return }
                 if let data = snap?.data() {
                     // Check if group has been migrated
-                    if data["migratedToClassId"] != nil {
+                    if let cid = data["migratedToClassId"] as? String {
                         self.migratedGroupIds.insert(gid)
+                        self.groupMigratedToClassIds[gid] = cid
                     } else {
                         self.migratedGroupIds.remove(gid)
+                        self.groupMigratedToClassIds.removeValue(forKey: gid)
                     }
                     
                     if let name = data["name"] as? String {
                         self.groupNames[gid] = name
                     } else {
                         self.groupNames.removeValue(forKey: gid)
+                    }
+                    if let branchName = data["migratedToBranchName"] as? String {
+                        self.groupBranchNames[gid] = branchName
+                    } else {
+                        self.groupBranchNames.removeValue(forKey: gid)
                     }
                     if let owner = data["ownerId"] as? String {
                         self.groupOwners[gid] = owner
@@ -7509,16 +7518,48 @@ final class GradesStore: ObservableObject {
     }
     
     // Helper to resolve a display name for a legacy group, potentially in a branch
-    func contextDisplayName(forGroupId gid: String) -> String {
-        // Check if group belongs to a class
-        for (cid, schoolClass) in classDetails {
-            if schoolClass.groupIds.contains(gid) {
-                let className = classNames[cid] ?? "Klasse"
-                let groupName = groupNames[gid] ?? "Gruppe"
-                return "\(className) (\(groupName))"
+    // Unified helper to resolve display name from either CourseID (Modern) or GroupID (Legacy)
+    func resolveContextName(groupId: String?, courseId: String?) -> String {
+        // 1. Try resolving via CourseID (New Architecture)
+        if let courseId, let course = courses.first(where: { $0.id == courseId }) {
+            if let classId = course.classId, let className = classNames[classId] {
+                switch course.type {
+                case .mandatory: return className
+                case .branch(let bName): return "\(className) (\(bName))"
+                case .elective: return "\(course.name) (\(className))"
+                }
             }
+            return course.name
         }
-        return groupNames[gid] ?? "Gruppe"
+        
+        // 2. Fallback to GroupID (Legacy / Migrated)
+        if let gid = groupId {
+            // Check if explicitly migrated
+            if let classId = groupMigratedToClassIds[gid], let className = classNames[classId] {
+                // Only show branch name if explicitly set and non-empty
+                if let branchName = groupBranchNames[gid], !branchName.isEmpty {
+                    return branchName // Just the branch name
+                }
+                // No branch or empty branch = whole class, show class name only
+                return className
+            }
+            
+            // Check if group belongs to a class (Legacy link)
+            for (cid, schoolClass) in classDetails {
+                if schoolClass.groupIds.contains(gid) {
+                    let className = classNames[cid] ?? "Klasse"
+                    // Only show branch name if explicitly set and non-empty
+                    if let branchName = groupBranchNames[gid], !branchName.isEmpty {
+                        return branchName // Just the branch name
+                    }
+                    // No branch = whole class, show class name only
+                    return className
+                }
+            }
+            return groupNames[gid] ?? "Gruppe"
+        }
+        
+        return "Gruppe"
     }
 
     // MARK: - Public helpers for mappings

@@ -67,3 +67,5 @@ node_modules/
 
 # dataconnect generated files
 .dataconnect
+.DS_Store
+noten-manager-ios.xcodeproj/project.xcworkspace/xcuserdata/christophlabestin.xcuserdatad/UserInterfaceState.xcuserstate
