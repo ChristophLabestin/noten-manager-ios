@@ -414,6 +414,8 @@ final class GradesStore: ObservableObject {
     private var sharedHomeworkUserCompleted: Set<String> = []
     private var sharedExamUserCompletedListener: ListenerRegistration?
     private var sharedExamUserCompleted: Set<String> = []
+    private var sharedExamUserRescheduledListener: ListenerRegistration?
+    @Published private var sharedExamUserRescheduled: [String: Date] = [:] // compoundId -> rescheduled date
     private var legacySharedExams: [Exam] = []
     private var legacySharedHomeworks: [Homework] = []
 
@@ -578,6 +580,9 @@ final class GradesStore: ObservableObject {
         sharedExamUserCompletedListener?.remove()
         sharedExamUserCompletedListener = nil
         sharedExamUserCompleted = []
+        sharedExamUserRescheduledListener?.remove()
+        sharedExamUserRescheduledListener = nil
+        sharedExamUserRescheduled = [:]
         sharedHomeworksListener?.remove()
         sharedHomeworksListener = nil
         sharedHomeworksGroupId = nil
@@ -735,6 +740,7 @@ final class GradesStore: ObservableObject {
         sharedHomeworkUserReminders = [:]
         sharedHomeworkUserCompleted = []
         sharedExamUserCompleted = []
+        sharedExamUserRescheduled = [:]
         legacySharedExams = []
         legacySharedHomeworks = []
         hasBootstrappedYearData = false
@@ -1638,6 +1644,26 @@ final class GradesStore: ObservableObject {
             }
         }
 
+        if sharedExamUserRescheduledListener == nil {
+            sharedExamUserRescheduledListener = yearRef.collection("examGroupRescheduled").addSnapshotListener { [weak self] snapshot, error in
+                ErrorLoggingService.logErrorIfEnabled(error)
+                Task { @MainActor in
+                    guard let self else { return }
+                    let docs = snapshot?.documents ?? []
+                    var map: [String: Date] = [:]
+                    for doc in docs {
+                        let data = doc.data()
+                        if let ts = data["rescheduledDate"] as? Timestamp {
+                            map[doc.documentID] = ts.dateValue()
+                        }
+                    }
+                    self.sharedExamUserRescheduled = map
+                    self.applySharedExamUserRescheduledDates()
+                    self.rescheduleLocalNotifications()
+                }
+            }
+        }
+
         if sharedHomeworkUserSettingsListener == nil {
             sharedHomeworkUserSettingsListener = yearRef.collection("homeworkGroupReminders").addSnapshotListener { [weak self] snapshot, error in
                 ErrorLoggingService.logErrorIfEnabled(error)
@@ -2255,6 +2281,36 @@ final class GradesStore: ObservableObject {
                 creatorId: exam.creatorId,
                 requiresGrade: exam.requiresGrade
             )
+        }
+    }
+
+    private func applySharedExamUserRescheduledDates() {
+        guard !sharedExams.isEmpty else { return }
+        sharedExams = sharedExams.map { exam in
+            let key = compoundId(gid: exam.groupId, docId: exam.id)
+            // Check for user-specific rescheduled date
+            if let rescheduledDate = sharedExamUserRescheduled[key] ?? sharedExamUserRescheduled[exam.id] {
+                return Exam(
+                    id: exam.id,
+                    groupId: exam.groupId,
+                    courseId: exam.courseId,
+                    subjectName: exam.subjectName,
+                    subjectKey: exam.subjectKey,
+                    title: exam.title,
+                    notes: exam.notes,
+                    date: rescheduledDate, // Apply rescheduled date
+                    hasTime: exam.hasTime,
+                    weight: exam.weight,
+                    customWeight: exam.customWeight,
+                    reminderAt: nil, // Reset reminder for rescheduled exams
+                    isCompleted: false, // Rescheduled exam is open again
+                    createdAt: exam.createdAt,
+                    isShared: exam.isShared,
+                    creatorId: exam.creatorId,
+                    requiresGrade: exam.requiresGrade
+                )
+            }
+            return exam
         }
     }
 
@@ -5666,6 +5722,28 @@ final class GradesStore: ObservableObject {
         }
     }
     
+    func setUserRescheduledDateForSharedExam(examId: String, rescheduledDate: Date?, groupId: String? = nil) async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let yearRef = try? await requireYearRef(uid: uid) else { return }
+        let gid = groupId ?? sharedExams.first(where: { $0.id == examId })?.groupId
+        let key = compoundId(gid: gid, docId: examId)
+        let ref = yearRef.collection("examGroupRescheduled").document(key)
+        do {
+            if let newDate = rescheduledDate {
+                try await ref.setData(["rescheduledDate": newDate])
+                // Optimistic local update
+                sharedExamUserRescheduled[key] = newDate
+            } else {
+                try await ref.delete()
+                sharedExamUserRescheduled.removeValue(forKey: key)
+            }
+            applySharedExamUserRescheduledDates()
+            rescheduleLocalNotifications()
+        } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
+        }
+    }
+    
     func setUserReminderForSharedHomework(homeworkId: String, reminderAt: Date?, groupId: String? = nil) async throws {
         guard let uid = Auth.auth().currentUser?.uid else {
             throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
@@ -5756,22 +5834,8 @@ final class GradesStore: ObservableObject {
 
     func rescheduleExam(exam: Exam, newDate: Date) async throws {
         if exam.isShared {
-            // Shared Exam: Mark as completed for user (hide it) AND create new private copy
-            await setUserCompletedForSharedExam(examId: exam.id, completed: true, groupId: exam.groupId)
-            
-            // Create private copy
-            try await addExamToFirestore(
-                subjectName: exam.subjectName,
-                subjectKey: exam.subjectKey,
-                title: exam.title,
-                notes: exam.notes,
-                date: newDate, // NEW DATE
-                hasTime: exam.hasTime,
-                weight: exam.weight,
-                customWeight: exam.customWeight,
-                reminderAt: nil, // Reset reminder
-                requiresGrade: exam.requiresGrade
-            )
+            // Shared Exam: Set per-user rescheduled date (doesn't affect other users)
+            await setUserRescheduledDateForSharedExam(examId: exam.id, rescheduledDate: newDate, groupId: exam.groupId)
         } else {
             // Private Exam: Just update the date and ensure it's open
             try await updateExamInFirestore(

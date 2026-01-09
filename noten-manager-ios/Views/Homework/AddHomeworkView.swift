@@ -97,6 +97,7 @@ struct AddHomeworkView: View {
                                     Text("Fach")
                                         .font(.headline)
                                     Picker("Fach", selection: $subjectName) {
+                                        Text("Bitte wählen").tag("")
                                         ForEach(subjectOptions, id: \.self) { name in
                                             Text(name).tag(name)
                                         }

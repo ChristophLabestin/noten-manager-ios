@@ -200,133 +200,143 @@ struct HomeworkListView: View {
     private func homeworkRow(_ hw: Homework) -> some View {
         let autoCompleted = isAutoCompletedPastDue(hw)
         let treatedCompleted = hw.isCompleted || autoCompleted
-        let badge: (text: String, color: Color, icon: String?)? = badgeState(for: hw, treatedCompleted: treatedCompleted)
+        let badge = badgeState(for: hw, treatedCompleted: treatedCompleted)
         let personalNote = store.userNoteForHomework(hw)
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 8) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(hw.title)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                    let subjectDisplay = resolvedSubjectName(for: hw)
-                    if !subjectDisplay.isEmpty {
-                        Text(subjectDisplay)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    if let due = hw.dueDate {
-                        Text("Fällig am \(formattedDate(due))")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("Kein Fälligkeitsdatum")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    if let personalNote, !personalNote.isEmpty {
-                        Text(personalNote)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                    }
-                   if hw.isShared {
-                       let name = store.resolveContextName(groupId: hw.groupId, courseId: hw.courseId)
-                       VStack(alignment: .leading, spacing: 2) {
-                           HStack(spacing: 4) {
-                               Image(systemName: "person.2.fill")
-                                   .foregroundStyle(.blue)
-                               Text("Gruppen Hausaufgabe")
-                                   .font(.caption2)
-                                   .foregroundStyle(.blue)
-                           }
-                           if !name.isEmpty {
-                                Text(name)
-                                    .font(.caption2)
-                                    .foregroundStyle(.orange)
-                           }
-                       }
-                   } else if hw.isImportedFromShare {
-                        HStack(spacing: 4) {
-                            Image(systemName: "link.badge.plus")
-                                .foregroundStyle(.green)
-                            Text("Geteilte Hausaufgabe")
-                                .font(.caption2)
-                                .foregroundStyle(.green)
-                        }
-                    }
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 6) {
-                    if let tag = badge {
-                        attentionBadge(tag.text, color: tag.color, icon: tag.icon)
-                    }
-                    HStack(spacing: 8) {
-                        if !treatedCompleted {
-                            Button {
-                                reminderHomework = hw
-                            } label: {
-                                Image(systemName: reminderIconName(hw))
-                                    .font(.system(size: 16, weight: .regular))
-                                    .foregroundStyle(reminderIconColor(hw))
-                                    .padding(8)
-                                    .background(Color.formInputBackground)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Erinnerung bearbeiten")
-                        }
-                        if treatedCompleted && hw.isCompleted {
-                            Button {
-                                Task { await markNotCompleted(hw) }
-                            } label: {
-                                Image(systemName: "arrow.uturn.backward.circle")
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundStyle(.orange)
-                                    .padding(8)
-                                    .background(Color.formInputBackground)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Als nicht erledigt markieren")
-                        } else if !treatedCompleted {
-                            Button {
-                                Task { await markCompleted(hw) }
-                            } label: {
-                                Image(systemName: "checkmark.circle")
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundStyle(.primary)
-                                    .padding(8)
-                                    .background(Color.formInputBackground)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Als erledigt markieren")
-                        }
-                    }
-                    if let reminder = hw.reminderAt {
-                            Text(shortReminder(reminder))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.trailing)
-                                .lineLimit(2)
-                        }
-                }
-            }
+        
+        // Determine Accent Color from Badge or Default
+        let accentColor: Color = badge?.color ?? .blue
+        
+        let hasActiveReminder = hw.reminderAt != nil && (hw.reminderAt! > Date())
 
-            HStack(spacing: 10) {
-                actionButton(icon: "slider.horizontal.3", tint: .orange, label: "Bearb.") {
-                    editingHomework = hw
+        HStack(alignment: .center, spacing: 16) {
+            
+            // 1. Date Block Anchor (Left)
+            if let due = hw.dueDate {
+                VStack(spacing: 0) {
+                    Text(hwDayFormatter.string(from: due))
+                        .font(.title3.weight(.bold))
+                    Text(hwMonthFormatter.string(from: due).uppercased())
+                        .font(.caption2.weight(.bold))
                 }
-                actionButton(icon: "square.and.arrow.up", tint: .blue, label: "Teilen") {
-                    presentShareLink(for: hw)
+                .foregroundStyle(accentColor)
+                .frame(width: 50, height: 50)
+                .background(accentColor.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            } else {
+                 // Fallback Icon Block
+                ZStack {
+                     RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.secondary.opacity(0.1))
+                     Image(systemName: "doc.text")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
                 }
+                .frame(width: 50, height: 50)
             }
+            
+            // 2. Info Content (Center)
+            VStack(alignment: .leading, spacing: 4) {
+                // Top Meta Row: Subject + Context
+                HStack(spacing: 4) {
+                    let subjectName = resolvedSubjectName(for: hw)
+                    Text(subjectName.isEmpty ? "Allgemein" : subjectName.uppercased())
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    
+                    if hw.isShared {
+                        Image(systemName: "person.2.fill") // Group Icon
+                            .font(.caption2)
+                            .foregroundStyle(.blue)
+                         
+                         let contextName = store.resolveContextName(groupId: hw.groupId, courseId: hw.courseId).replacingOccurrences(of: resolvedSubjectName(for: hw), with: "").trimmingCharacters(in: .punctuationCharacters).trimmingCharacters(in: .whitespaces)
+                         if !contextName.isEmpty {
+                             Text("• \(contextName)")
+                                .font(.caption2)
+                                .foregroundStyle(.blue)
+                         }
+                    } else if hw.isImportedFromShare {
+                         Image(systemName: "link")
+                            .font(.caption2)
+                            .foregroundStyle(.green)
+                    }
+                }
+                
+                // Title
+                Text(hw.title)
+                    .font(.headline)
+                    .foregroundStyle(treatedCompleted ? .secondary : .primary)
+                    .strikethrough(treatedCompleted)
+                    .lineLimit(2)
+                
+                 if let personalNote, !personalNote.isEmpty {
+                     Text("Note: \(personalNote)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                 }
+            }
+            
+            Spacer(minLength: 0)
+            
+            // 3. Actions (Right)
+            VStack(alignment: .trailing, spacing: 12) {
+                // Reminder Bell
+                if !treatedCompleted {
+                    Button {
+                        reminderHomework = hw
+                    } label: {
+                        Image(systemName: hw.reminderAt != nil ? "bell.fill" : "bell")
+                            .font(.subheadline)
+                            .foregroundStyle(hw.reminderAt != nil ? .orange : Color.secondary)
+                            .padding(8)
+                            .background(Color.secondary.opacity(0.05))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                
+                // Completion Toggle
+                Button {
+                    Task {
+                        if treatedCompleted {
+                            await markNotCompleted(hw)
+                        } else {
+                            await markCompleted(hw)
+                        }
+                    }
+                } label: {
+                    Image(systemName: treatedCompleted ? "arrow.uturn.backward.circle" : "checkmark.circle")
+                         .font(.system(size: 28)) // Consistent size with exam row
+                         .foregroundStyle(treatedCompleted ? .orange : Color.secondary.opacity(0.3)) // Subtle checkmark if open
+                }
+                .buttonStyle(.plain)
+                
+                // Context Menu (Hidden in plain view, accessible via long press or if we add ... button)
+                // Integrating ... button into the stack if we want it explicit:
+            }
+            // Add Overlay Menu button or just rely on tap for detail?
+            // ExamRow uses a "..." menu button if no primary action. Here we almost always have primary actions.
+            // Let's add a Menu button at the bottom of the stack or replace one action?
+            // Actually, let's put the Menu on the whole row or just rely on Tap -> Detail -> Edit.
+            // The previous design had explicit "Bearbeiten" buttons.
+            // Let's Add a small "..." button at the very top or bottom of the stack if space permits?
+            // Better: User taps row for detail. Context Menu on the row.
         }
-        .padding(10)
+        .padding(12)
         .background(Color.formSectionBackground)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .contentShape(Rectangle())
         .onTapGesture { detailHomework = hw }
+        .contextMenu {
+             Button { editingHomework = hw } label: { Label("Bearbeiten", systemImage: "pencil") }
+             Button { presentShareLink(for: hw) } label: { Label("Teilen", systemImage: "square.and.arrow.up") }
+             Button { reminderHomework = hw } label: { Label("Erinnerung", systemImage: "bell") }
+             Button {
+                 Task { await treatedCompleted ? markNotCompleted(hw) : markCompleted(hw) }
+             } label: {
+                 Label(treatedCompleted ? "Als offen markieren" : "Erledigen", systemImage: treatedCompleted ? "arrow.uturn.backward" : "checkmark")
+             }
+        }
     }
 
     private func presentShareLink(for hw: Homework) {
@@ -617,5 +627,17 @@ private let hwReminderTimeFormatter: DateFormatter = {
     let fmt = DateFormatter()
     fmt.dateStyle = .none
     fmt.timeStyle = .short
+    return fmt
+}()
+
+private let hwDayFormatter: DateFormatter = {
+    let fmt = DateFormatter()
+    fmt.dateFormat = "dd"
+    return fmt
+}()
+
+private let hwMonthFormatter: DateFormatter = {
+    let fmt = DateFormatter()
+    fmt.dateFormat = "MMM"
     return fmt
 }()

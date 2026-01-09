@@ -136,6 +136,7 @@ struct AddGradeView: View {
                                     Text("Fach")
                                         .font(.headline)
                                     Picker("Fach", selection: $subjectName) {
+                                        Text("Bitte wählen").tag("")
                                         ForEach(subjects, id: \.name) { s in
                                             Text(s.name).tag(s.name)
                                         }
