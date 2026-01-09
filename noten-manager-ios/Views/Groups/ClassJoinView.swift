@@ -10,6 +10,15 @@ struct ClassJoinView: View {
     @State private var successMessage: String?
     @State private var showScanner: Bool = false
     
+    @State private var joinContext: ClassJoinContext?
+    @State private var showCourseSelection: Bool = false
+    
+    struct ClassJoinContext: Identifiable {
+        let id: String
+        let name: String
+        let config: ClassConfiguration
+    }
+    
     // Reuse QR Scanner logic if desired, but let's stick to manual first for Classes to simplify scope
     
     private var animationsOn: Bool { store.animationsEnabled }
@@ -93,12 +102,12 @@ struct ClassJoinView: View {
                     
                     // Join Button
                     Button {
-                        Task { await joinClass() }
+                        Task { await checkAndJoin() }
                     } label: {
                         if isJoining {
                             ProgressView().tint(.indigo)
                         } else {
-                            Text("Beitreten")
+                            Text("Weiter")
                         }
                     }
                     .buttonStyle(SoftTintButtonStyle(accent: .indigo))
@@ -111,6 +120,18 @@ struct ClassJoinView: View {
             .sheet(isPresented: $showScanner) {
                 QRScannerView { scannedCode in
                     code = extractCode(from: scannedCode)
+                }
+            }
+            .navigationDestination(isPresented: $showCourseSelection) {
+                if let ctx = joinContext {
+                    CourseJoinView(
+                        classId: ctx.id,
+                        className: ctx.name,
+                        config: ctx.config,
+                        onJoinSuccess: {
+                            dismiss()
+                        }
+                    )
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -138,17 +159,27 @@ struct ClassJoinView: View {
     }
     
     @MainActor
-    private func joinClass() async {
+    private func checkAndJoin() async {
         isJoining = true
         errorMessage = nil
         successMessage = nil
         do {
-            try await store.joinClass(with: code)
-            successMessage = "Erfolgreich beigetreten!"
-            let generator = UINotificationFeedbackGenerator()
-            generator.notificationOccurred(.success)
-            try? await Task.sleep(nanoseconds: 800_000_000)
-            dismiss()
+            // Check Class Details first
+            let info = try await store.fetchClassInfo(with: code)
+            
+            if let config = info.config {
+                // New System -> Course Selection
+                self.joinContext = ClassJoinContext(id: info.id, name: info.name, config: config)
+                self.showCourseSelection = true
+            } else {
+                // Legacy System -> Direct Join
+                try await store.joinClass(with: code)
+                successMessage = "Erfolgreich beigetreten!"
+                let generator = UINotificationFeedbackGenerator()
+                generator.notificationOccurred(.success)
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                dismiss()
+            }
         } catch {
             errorMessage = error.localizedDescription
             let generator = UINotificationFeedbackGenerator()

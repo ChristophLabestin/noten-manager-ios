@@ -24,7 +24,9 @@ struct AddHomeworkView: View {
     @State private var shareWithGroup: Bool = false
     @State private var selectedGroupIds: Set<String> = []
     @State private var selectedClassIds: Set<String> = []
+    @State private var selectedCourseIds: Set<String> = []
     @State private var autoSelectedGroupIds: Set<String> = []
+    @State private var autoSelectedCourseIds: Set<String> = []
     @FocusState private var focusedField: Field?
 
     private enum Field: Hashable {
@@ -167,12 +169,23 @@ struct AddHomeworkView: View {
                     }
 
                     // Visibility & Sharing
-                    if !store.groupIds.isEmpty || !store.classIds.isEmpty {
+                    // Visibility & Sharing
+                    if !store.groupIds.isEmpty || !store.classIds.isEmpty || !store.courses.isEmpty {
+                        // Filter courses relevant to the current subject
+                        let availableCourses: [Course] = {
+                            let targetIds = Set(store.targetCourseIds(forLocalSubject: subjectName))
+                            let matches = store.courses.filter { targetIds.contains($0.id) }
+                            return Array(Dictionary(grouping: matches, by: { $0.id }).values.compactMap(\.first))
+                        }()
+                        
                         ShareTargetSelector(
                             shareWithGroup: $shareWithGroup,
                             selectedGroupIds: $selectedGroupIds,
                             selectedClassIds: $selectedClassIds,
-                            autoSelectedGroupIds: autoSelectedGroupIds
+                            selectedCourseIds: $selectedCourseIds,
+                            availableCourses: availableCourses,
+                            autoSelectedGroupIds: autoSelectedGroupIds,
+                            autoSelectedCourseIds: autoSelectedCourseIds
                         )
                     }
 
@@ -247,35 +260,58 @@ struct AddHomeworkView: View {
         do {
             let due: Date? = hasDueDate ? dueDate : nil
             let reminder: Date? = hasReminder ? reminderDate : nil
+            
             if shareWithGroup {
-                let sharedIds = try await store.addHomeworkToGroups(
-                    subjectName: subjectName,
-                    title: trimmedTitle,
-                    dueDate: due,
-                    reminderAt: reminder,
-                    targetGroupIds: Array(selectedGroupIds.union(selectedClassIds.flatMap { store.classDetails[$0]?.groupIds ?? [] }))
-                )
-                if sharedIds.isEmpty {
-                    try await store.addHomeworkToFirestore(
+                var createdAny = false
+                
+                // 1. Share to Courses
+                for courseId in selectedCourseIds {
+                    _ = try await store.addHomeworkToCourse(
+                        courseId: courseId,
+                        title: trimmedTitle,
+                        dueDate: due,
+                        reminderAt: reminder
+                    )
+                    createdAny = true
+                }
+                
+                // 2. Share to Groups (Legacy)
+                let targetGroups = Array(selectedGroupIds.union(selectedClassIds.flatMap { store.classDetails[$0]?.groupIds ?? [] }))
+                if !targetGroups.isEmpty {
+                    let sharedIds = try await store.addHomeworkToGroups(
+                        subjectName: subjectName,
+                        title: trimmedTitle,
+                        dueDate: due,
+                        reminderAt: reminder,
+                        targetGroupIds: targetGroups
+                    )
+                    
+                    if !sharedIds.isEmpty {
+                        createdAny = true
+                        if let reminder {
+                            for item in sharedIds {
+                                try await store.setUserReminderForSharedHomework(homeworkId: item.docId, reminderAt: reminder, groupId: item.groupId)
+                            }
+                        }
+                    }
+                }
+                
+                // Fallback
+                if !createdAny {
+                     try await store.addHomeworkToFirestore(
                         subjectName: subjectName,
                         title: trimmedTitle,
                         dueDate: due,
                         reminderAt: reminder,
                         importedFromShare: prefill != nil
                     )
-                } else if let reminder {
-                    // Reminder nur für die angelegten geteilten Einträge setzen
-                    for item in sharedIds {
-                        try await store.setUserReminderForSharedHomework(homeworkId: item.docId, reminderAt: reminder, groupId: item.groupId)
-                    }
                 }
             } else {
                 try await store.addHomeworkToFirestore(
                     subjectName: subjectName,
                     title: trimmedTitle,
                     dueDate: due,
-                    reminderAt: reminder,
-                    importedFromShare: prefill != nil
+                    reminderAt: reminder
                 )
             }
             dismiss()
@@ -311,17 +347,24 @@ struct AddHomeworkView: View {
     }
     
     private func updateSelectedGroupsForSubject(_ subject: String) {
-        // 1. Remove previously auto-selected groups
+        // 1. Remove previously auto-selected groups & courses
         selectedGroupIds.subtract(autoSelectedGroupIds)
         autoSelectedGroupIds.removeAll()
+        selectedCourseIds.subtract(autoSelectedCourseIds)
+        autoSelectedCourseIds.removeAll()
         
         // 2. If subject is valid, find new matches
         if subject != noSubjectLabel && !subject.isEmpty {
-            let matched = Set(store.targetGroupIds(forLocalSubject: subject))
-            if !matched.isEmpty {
-                // 3. Add new matches and track them
-                selectedGroupIds.formUnion(matched)
-                autoSelectedGroupIds = matched
+            let matchedGroups = Set(store.targetGroupIds(forLocalSubject: subject))
+            if !matchedGroups.isEmpty {
+                selectedGroupIds.formUnion(matchedGroups)
+                autoSelectedGroupIds = matchedGroups
+            }
+            
+            let matchedCourses = Set(store.targetCourseIds(forLocalSubject: subject))
+            if !matchedCourses.isEmpty {
+                selectedCourseIds.formUnion(matchedCourses)
+                autoSelectedCourseIds = matchedCourses
             }
         }
     }

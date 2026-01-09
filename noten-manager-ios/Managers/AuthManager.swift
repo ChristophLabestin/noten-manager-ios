@@ -22,6 +22,12 @@ final class AuthManager: ObservableObject {
         Auth.auth().currentUser
     }
 
+    init() {
+        if Auth.auth().currentUser != nil {
+            self.isAuthenticated = true
+        }
+    }
+
     private var authHandle: AuthStateDidChangeListenerHandle?
     private var appleAuthHandler: AppleAuthHandler?
 
@@ -75,7 +81,7 @@ final class AuthManager: ObservableObject {
             let uid = result.user.uid
 
             let saltB64 = CryptoService.generateSalt(length: 16)
-            let profile = UserProfile(id: uid, name: name, email: email, encryptionSalt: saltB64)
+            let profile = UserProfile(id: uid, name: name, email: email, encryptionSalt: saltB64, activeClassId: nil, subscribedCourseIds: nil)
             try await FirestoreService.shared.setUserProfile(profile: profile, onboardingCompleted: false)
             OfflineModeManager.shared.recordOnlineLogin(uid: uid)
 
@@ -302,7 +308,9 @@ final class AuthManager: ObservableObject {
                     id: authResult.user.uid,
                     name: resolvedName,
                     email: email,
-                    encryptionSalt: salt
+                    encryptionSalt: salt,
+                    activeClassId: nil,
+                    subscribedCourseIds: nil
                 )
                 try? await FirestoreService.shared.setUserProfile(
                     profile: profile,

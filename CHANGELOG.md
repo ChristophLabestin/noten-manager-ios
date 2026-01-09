@@ -11,6 +11,8 @@ All notable changes to this project will be documented in this file.
     - **Class Creation**: Added functionality to `ClassCreationView` to select independent groups during the creation process.
     - **Class Joining**: Integrated QR code scanning into `ClassJoinView` for faster onboarding.
     - **Class Detail View**: Redesigned the groups list into a single, cohesive `SettingsCard` with status-colored icons and badges.
+    - **Branch Management**: Owners can now manually add new branches to existing classes. Users can subscribe to specific branches or individual courses.
+    - **Robust Migration**: Converting a Group to a Class now ensures all members (including legacy users) are correctly migrated and subscribed.
 - **Report Card PDF Export**:
     - **Elegant Design**: Completely redesigned the PDF Report Card to match the app's aesthetic, featuring rounded fonts, clean typography, and a "floating paper" preview.
     - **Customization**: Users can now select custom document titles (e.g., "Zwischenzeugnis", "Jahresübersicht") from the preview sheet.

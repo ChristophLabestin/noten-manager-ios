@@ -28,7 +28,14 @@ final class FirestoreService {
         else {
             return nil
         }
-        return UserProfile(id: id, name: name, email: email, encryptionSalt: encryptionSalt)
+        return UserProfile(
+            id: id,
+            name: name,
+            email: email,
+            encryptionSalt: encryptionSalt,
+            activeClassId: data["activeClassId"] as? String,
+            subscribedCourseIds: data["subscribedCourseIds"] as? [String]
+        )
     }
 
     func createSupportTicket(userId: String, email: String?, subject: String, message: String) async throws {

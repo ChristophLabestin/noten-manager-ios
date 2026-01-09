@@ -5,14 +5,20 @@ struct ShareTargetSelector: View {
     @Binding var shareWithGroup: Bool
     @Binding var selectedGroupIds: Set<String>
     @Binding var selectedClassIds: Set<String>
+    // New: Course Selection
+    @Binding var selectedCourseIds: Set<String>
     
-    // Optional: Highlight groups that are auto-selected (e.g. by subject match)
+    // Courses filtered and passed from parent
+    var availableCourses: [Course] = []
+    
+    // Optional: Highlight groups/courses that are auto-selected (e.g. by subject match)
     var autoSelectedGroupIds: Set<String> = []
+    var autoSelectedCourseIds: Set<String> = []
     
     var body: some View {
         SettingsCard(
             title: "Sichtbarkeit & Teilen",
-            subtitle: shareWithGroup ? "Wird mit ausgewählten Gruppen geteilt" : "Nur für dich sichtbar",
+            subtitle: shareWithGroup ? "Wird mit ausgewählten Kurse/Gruppen geteilt" : "Nur für dich sichtbar",
             systemImage: shareWithGroup ? "person.3.fill" : "lock.fill",
             accent: shareWithGroup ? .indigo : .secondary
         ) {
@@ -21,7 +27,7 @@ struct ShareTargetSelector: View {
                     // Main Toggle
                     Toggle(isOn: $shareWithGroup.animation(.snappy)) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Mit Gruppe teilen")
+                            Text("Mit Kursen/Gruppen teilen")
                                 .font(.body)
                                 .foregroundStyle(.primary)
                             if !shareWithGroup {
@@ -34,16 +40,16 @@ struct ShareTargetSelector: View {
                     .tint(.indigo)
                     
                     if shareWithGroup {
-                        if store.groupIds.isEmpty && store.classIds.isEmpty {
+                        if store.courses.isEmpty && store.groupIds.isEmpty && store.classIds.isEmpty {
                             // No groups available
                             HStack(spacing: 12) {
                                 Image(systemName: "person.3.slash.fill")
                                     .font(.largeTitle)
                                     .foregroundStyle(.secondary.opacity(0.5))
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text("Keine Gruppen gefunden")
+                                    Text("Keine Kurse oder Gruppen")
                                         .font(.headline)
-                                    Text("Du bist noch keinen Gruppen oder Klassen beigetreten.")
+                                    Text("Du bist noch keinen Kursen beigetreten.")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -53,15 +59,44 @@ struct ShareTargetSelector: View {
                             // Selection Area
                             VStack(alignment: .leading, spacing: 20) {
                                 
-                                // Classes Section
-                                if !store.classIds.isEmpty {
+                                // 1. Courses Section (Branch Level)
+                                if !availableCourses.isEmpty {
                                     VStack(alignment: .leading, spacing: 10) {
-                                        Label("Klassen", systemImage: "rectangle.stack.fill")
+                                        Label("Klassen / Zweige", systemImage: "macwindow.on.rectangle")
                                             .font(.footnote.weight(.semibold))
                                             .foregroundStyle(.secondary)
                                         
+                                        // Courses filtered by parent. Sort by label.
+                                        let uniqueCourses = availableCourses.sorted { c1, c2 in
+                                            courseLabel(for: c1) < courseLabel(for: c2)
+                                        }
+                                        
                                         FlowLayout(spacing: 8) {
-                                            ForEach(store.classIds, id: \.self) { cid in
+                                            ForEach(uniqueCourses, id: \.id) { course in
+                                                CourseSelectionChip(
+                                                    course: course,
+                                                    label: courseLabel(for: course),
+                                                    isSelected: selectedCourseIds.contains(course.id),
+                                                    isAutoSelected: autoSelectedCourseIds.contains(course.id)
+                                                ) {
+                                                    toggleCourse(course.id)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // 2. Classes Section (Legacy/Groups)
+                                if !store.classIds.isEmpty {
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        Label("Klassen (Gruppen)", systemImage: "rectangle.stack.fill")
+                                            .font(.footnote.weight(.semibold))
+                                            .foregroundStyle(.secondary)
+                                        
+                                        // Deduplicate class IDs to prevent crashes
+                                        let uniqueClassIds = Array(Set(store.classIds)).sorted()
+                                        FlowLayout(spacing: 8) {
+                                            ForEach(uniqueClassIds, id: \.self) { cid in
                                                 ClassSelectionChip(
                                                     classId: cid,
                                                     isSelected: selectedClassIds.contains(cid)
@@ -73,15 +108,21 @@ struct ShareTargetSelector: View {
                                     }
                                 }
                                 
-                                // Groups Section
-                                if !store.groupIds.isEmpty {
+                                // 3. Groups Section (Legacy)
+                                let classAssociatedGroupIds = Set(store.classDetails.values.flatMap(\.groupIds))
+                                let hiddenGroupIds = store.migratedGroupIds.union(classAssociatedGroupIds)
+                                let visibleGroupIds = store.groupIds.filter { !hiddenGroupIds.contains($0) }
+                                
+                                if !visibleGroupIds.isEmpty {
                                     VStack(alignment: .leading, spacing: 10) {
                                         Label("Gruppen", systemImage: "person.3.fill")
                                             .font(.footnote.weight(.semibold))
                                             .foregroundStyle(.secondary)
                                         
+                                        // Deduplicate group IDs
+                                        let uniqueGroupIds = Array(Set(visibleGroupIds)).sorted()
                                         FlowLayout(spacing: 8) {
-                                            ForEach(store.groupIds, id: \.self) { gid in
+                                            ForEach(uniqueGroupIds, id: \.self) { gid in
                                                 GroupSelectionChip(
                                                     groupId: gid,
                                                     isSelected: selectedGroupIds.contains(gid),
@@ -100,7 +141,8 @@ struct ShareTargetSelector: View {
                                     Image(systemName: "info.circle.fill")
                                         .font(.caption)
                                         .foregroundStyle(.indigo)
-                                    Text("Geteilte Einträge sind für alle Mitglieder der ausgewählten Gruppen sichtbar und können von diesen bearbeitet werden (z.B. Notizen).")
+                                        .padding(.top, 2)
+                                    Text("Geteilte Einträge sind für alle Mitglieder sichtbar.")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -116,23 +158,27 @@ struct ShareTargetSelector: View {
         }
     }
     
+    private func toggleCourse(_ id: String) {
+        if selectedCourseIds.contains(id) {
+            selectedCourseIds.remove(id)
+        } else {
+            selectedCourseIds.insert(id)
+        }
+    }
+    
     private func toggleClass(_ cid: String) {
-        withAnimation(.snappy) {
-            if selectedClassIds.contains(cid) {
-                selectedClassIds.remove(cid)
-            } else {
-                selectedClassIds.insert(cid)
-            }
+        if selectedClassIds.contains(cid) {
+            selectedClassIds.remove(cid)
+        } else {
+            selectedClassIds.insert(cid)
         }
     }
     
     private func toggleGroup(_ gid: String) {
-        withAnimation(.snappy) {
-            if selectedGroupIds.contains(gid) {
-                selectedGroupIds.remove(gid)
-            } else {
-                selectedGroupIds.insert(gid)
-            }
+        if selectedGroupIds.contains(gid) {
+            selectedGroupIds.remove(gid)
+        } else {
+            selectedGroupIds.insert(gid)
         }
     }
     
@@ -145,15 +191,93 @@ struct ShareTargetSelector: View {
         }
         return false
     }
+    
+    private func courseLabel(for course: Course) -> String {
+        if let classId = course.classId, let className = store.classNames[classId] {
+            switch course.type {
+            case .mandatory:
+                return className
+            case .branch(let branchName):
+                return "\(className) (\(branchName))"
+            case .elective:
+                return "\(course.name) (\(className))"
+            }
+        }
+        return course.name
+    }
+}
+
+struct CourseSelectionChip: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let course: Course
+    let label: String
+    let isSelected: Bool
+    let isAutoSelected: Bool
+    let action: () -> Void
+    
+    private var backgroundColor: Color {
+        if isSelected {
+            return .indigo
+        }
+        // Safe alternative to Color.formInputBackground avoiding UI dynamic provider crash
+        if colorScheme == .dark {
+            return Color(red: 0.16, green: 0.16, blue: 0.18)
+        } else {
+            return Color(uiColor: .systemGray6)
+        }
+    }
+    
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Text(label)
+                    .lineLimit(1)
+                
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.caption)
+                } else if isAutoSelected {
+                    Image(systemName: "sparkles")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
+            .font(.subheadline.weight(.medium))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(backgroundColor)
+            )
+            .foregroundStyle(isSelected ? .white : .primary)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(isSelected ? Color.clear : Color.primary.opacity(0.1), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
 }
 
 // MARK: - Subviews
 
 struct ClassSelectionChip: View {
     @EnvironmentObject var store: GradesStore
+    @Environment(\.colorScheme) private var colorScheme
     let classId: String
     let isSelected: Bool
     let action: () -> Void
+    
+    private var backgroundColor: Color {
+        if isSelected {
+            return .indigo
+        }
+        if colorScheme == .dark {
+            return Color(red: 0.16, green: 0.16, blue: 0.18)
+        } else {
+            return Color(uiColor: .systemGray6)
+        }
+    }
     
     var body: some View {
         Button(action: action) {
@@ -171,7 +295,7 @@ struct ClassSelectionChip: View {
             .padding(.vertical, 10)
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(isSelected ? Color.indigo : Color.formInputBackground)
+                    .fill(backgroundColor)
             )
             .foregroundStyle(isSelected ? .white : .primary)
             .overlay(
@@ -185,11 +309,26 @@ struct ClassSelectionChip: View {
 
 struct GroupSelectionChip: View {
     @EnvironmentObject var store: GradesStore
+    @Environment(\.colorScheme) private var colorScheme
     let groupId: String
     let isSelected: Bool
     let isAutoSelected: Bool
     let isImplicitlySelected: Bool
     let action: () -> Void
+    
+    private var backgroundColor: Color {
+        if isSelected {
+            return .indigo
+        }
+        if isImplicitlySelected {
+            return .indigo.opacity(0.3)
+        }
+        if colorScheme == .dark {
+            return Color(red: 0.16, green: 0.16, blue: 0.18)
+        } else {
+            return Color(uiColor: .systemGray6)
+        }
+    }
     
     var body: some View {
         Button(action: action) {
@@ -214,7 +353,7 @@ struct GroupSelectionChip: View {
             .padding(.vertical, 10)
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(isSelected ? Color.indigo : (isImplicitlySelected ? Color.indigo.opacity(0.3) : Color.formInputBackground))
+                    .fill(backgroundColor)
             )
             .foregroundStyle(isSelected ? .white : (isImplicitlySelected ? .white : .primary))
             .overlay(
@@ -223,13 +362,6 @@ struct GroupSelectionChip: View {
             )
         }
         .buttonStyle(.plain)
-        .disabled(isImplicitlySelected) // Maybe disable explicit toggle if implicitly selected? Or allow overriding? 
-        // User wants "share it seperately so i can share it with everyone in the class and/or with specific groups"
-        // If I select a class, it shares with everyone in the class (all groups).
-        // If I deselect a class, I might want to keep one group.
-        // So they should be independent.
-        // But if I select the class, the group is effectively selected.
-        // Let's keep it simple: Class selection implies group selection backend-wise, but visual state can separate them.
-        // If I select class, I show group as implicitly selected.
+        .disabled(isImplicitlySelected)
     }
 }

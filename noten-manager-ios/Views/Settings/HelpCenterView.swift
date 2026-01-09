@@ -591,6 +591,20 @@ struct HelpCenterView: View {
                     )
                 }
             }
+            SettingsSectionBox {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(highlighted("Zweige & Abonnements"))
+                        .font(.headline)
+                    infoRow(
+                        title: "Was sind Zweige?",
+                        text: "In einer Klasse können Fächer in Zweige (z. B. Sozial, Technik) unterteilt sein. Du wählst beim Beitreten deinen Zweig, kannst ihn aber jederzeit ändern."
+                    )
+                    infoRow(
+                        title: "Fächer abonnieren",
+                        text: "Du siehst nur Fächer, die du abonniert hast. Tippe im Klassen-Detail auf einen Zweig, um einzelne Fächer ein- oder auszublenden."
+                    )
+                }
+            }
         }
         .softFadeIn(enabled: animationsOn, delay: 0.22, offset: 12)
         .id("help_groups")

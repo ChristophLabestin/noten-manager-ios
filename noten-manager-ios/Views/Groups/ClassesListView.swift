@@ -7,13 +7,16 @@ struct ClassesListView: View {
     @State private var showJoinSheet = false
     @State private var copiedClassId: String?
     @State private var classPendingLeave: String?
+    @State private var classPendingDelete: String?
     @State private var showCreateGroupSheet = false
     @State private var groupPendingLeave: String?
     @State private var copiedGroupId: String?
     @State private var showGroupJoinSheet = false
+    @State private var groupPendingMigration: String?
     @State private var showScannerSheet = false
     @State private var scanError: String?
     @State private var showScanErrorAlert = false
+    @State private var showGroupMergeSheet = false
     
     private var animationsOn: Bool { store.animationsEnabled }
     
@@ -77,6 +80,10 @@ struct ClassesListView: View {
                 handleScannedCode(scannedCode)
             }
         }
+        .sheet(isPresented: $showGroupMergeSheet) {
+            GroupMergeView()
+                .environmentObject(store)
+        }
         .alert("Fehler beim Beitreten", isPresented: $showScanErrorAlert) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -110,12 +117,47 @@ struct ClassesListView: View {
         } message: {
             Text("Möchtest du diese Gruppe wirklich verlassen?")
         }
+        .alert("Klasse löschen?", isPresented: Binding(
+            get: { classPendingDelete != nil },
+            set: { if !$0 { classPendingDelete = nil } }
+        )) {
+            Button("Abbrechen", role: .cancel) { classPendingDelete = nil }
+            Button("Löschen", role: .destructive) {
+                if let cid = classPendingDelete {
+                     Task {
+                        try? await store.deleteClass(code: cid)
+                     }
+                }
+                classPendingDelete = nil
+            }
+        } message: {
+            Text("Möchtest du diese Klasse wirklich unwiderruflich löschen? Alle zugehörigen Kurse werden ebenfalls gelöscht.")
+        }
+        .alert("In Klasse umwandeln?", isPresented: Binding(
+            get: { groupPendingMigration != nil },
+            set: { if !$0 { groupPendingMigration = nil } }
+        )) {
+            Button("Abbrechen", role: .cancel) { groupPendingMigration = nil }
+            Button("Umwandeln", role: .none) {
+                if let gid = groupPendingMigration {
+                     Task {
+                        try? await store.migrateGroupToClass(groupId: gid)
+                     }
+                }
+                groupPendingMigration = nil
+            }
+        } message: {
+            Text("Es wird eine neue Klasse basierend auf dieser Gruppe erstellt. Die alte Gruppe bleibt für Nutzer älterer Versionen erhalten.")
+        }
     }
+
     
-    // Independent groups: Groups not in any known class list
+    // Independent groups: Groups not in any known class list and not migrated
     private var independentGroups: [String] {
         let allClassGroups = Set(store.classDetails.values.flatMap { $0.groupIds })
-        return store.groupIds.filter { !allClassGroups.contains($0) }
+        return store.groupIds.filter { 
+            !allClassGroups.contains($0) && !store.migratedGroupIds.contains($0)
+        }
     }
     
     private var headerSection: some View {
@@ -153,18 +195,27 @@ struct ClassesListView: View {
     }
     
     private var classesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let sortedClasses = store.classIds.sorted { id1, id2 in
+            let c1Courses = store.courses.filter { $0.classId == id1 }.count
+            let c2Courses = store.courses.filter { $0.classId == id2 }.count
+            return c1Courses > c2Courses
+        }
+        
+        return VStack(alignment: .leading, spacing: 12) {
             Text("Meine Klassen")
                 .font(.headline)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
             
-            ForEach(Array(store.classIds.enumerated()), id: \.element) { index, cid in
+            ForEach(Array(sortedClasses.enumerated()), id: \.element) { index, cid in
                 ClassCardView(
                     classId: cid,
                     isOwner: store.classOwners[cid] == Auth.auth().currentUser?.uid,
                     memberCount: store.classDetails[cid]?.memberCount ?? 0,
-                    onLeave: { classPendingLeave = cid }
+                    courseCount: store.courses.filter { $0.classId == cid }.count,
+                    branchCount: store.classDetails[cid]?.config?.branches.count ?? 0,
+                    onLeave: { classPendingLeave = cid },
+                    onDelete: { classPendingDelete = cid }
                 )
                 .softFadeIn(enabled: animationsOn, delay: 0.15 + (Double(index) * 0.05), offset: 12)
             }
@@ -183,7 +234,8 @@ struct ClassesListView: View {
                     groupId: gid,
                     isOwner: store.groupOwners[gid] == Auth.auth().currentUser?.uid,
                     memberCount: store.groupMemberIds[gid]?.count ?? 0,
-                    onLeave: { groupPendingLeave = gid }
+                    onLeave: { groupPendingLeave = gid },
+                    onMigrate: { groupPendingMigration = gid }
                 )
             }
         }
@@ -206,42 +258,33 @@ struct ClassesListView: View {
                 .buttonStyle(SoftTintButtonStyle(accent: .indigo))
                 
                 Button {
-                    showJoinSheet = true
-                } label: {
-                    Label("Klasse beitreten", systemImage: "person.badge.plus")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(SoftTintButtonStyle(accent: .indigo))
-                
-                Divider()
-                    .padding(.vertical, 4)
-                
-                Button {
-                    showCreateGroupSheet = true
-                } label: {
-                    Label("Neue Gruppe erstellen", systemImage: "person.3.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(SoftTintButtonStyle(accent: .orange))
-                
-                Button {
-                    showGroupJoinSheet = true
-                } label: {
-                    Label("Gruppe beitreten", systemImage: "person.badge.plus.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(SoftTintButtonStyle(accent: .orange))
-                
-                Divider()
-                    .padding(.vertical, 4)
-                
-                Button {
                     showScannerSheet = true
                 } label: {
-                    Label("QR Code scannen", systemImage: "qrcode.viewfinder")
+                    Label("Klasse beitreten (QR)", systemImage: "qrcode.viewfinder")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(SoftTintButtonStyle(accent: .cyan))
+                
+                Button {
+                    showJoinSheet = true
+                } label: {
+                    Label("Code eingeben", systemImage: "keyboard")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(SoftTintButtonStyle(accent: .gray))
+                
+                if !independentGroups.isEmpty {
+                    Divider()
+                        .padding(.vertical, 4)
+                    
+                    Button {
+                        showGroupMergeSheet = true
+                    } label: {
+                        Label("Gruppen zusammenführen", systemImage: "arrow.triangle.merge")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(SoftTintButtonStyle(accent: .purple))
+                }
             }
         }
     }
@@ -276,13 +319,12 @@ private struct ClassCardView: View {
     let classId: String
     let isOwner: Bool
     let memberCount: Int
+    let courseCount: Int
+    let branchCount: Int
     let onLeave: () -> Void
+    let onDelete: () -> Void
     
     @State private var showShareSheet = false
-    
-    private var groupCount: Int {
-        store.classDetails[classId]?.groupIds.count ?? 0
-    }
     
     var body: some View {
         SettingsCard(
@@ -300,19 +342,19 @@ private struct ClassCardView: View {
                 // Stats Row
                 HStack(spacing: 16) {
                     HStack(spacing: 6) {
-                        Image(systemName: "person.2.fill")
+                        Image(systemName: "book.fill")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Text("\(memberCount) Mitglieder")
+                        Text("\(courseCount) Kurse")
                             .font(.caption.weight(.medium))
                             .foregroundStyle(.secondary)
                     }
                     
                     HStack(spacing: 6) {
-                        Image(systemName: "person.3.fill")
+                        Image(systemName: "arrow.triangle.branch")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Text("\(groupCount) Gruppen")
+                        Text("\(branchCount) Zweige")
                             .font(.caption.weight(.medium))
                             .foregroundStyle(.secondary)
                     }
@@ -348,10 +390,18 @@ private struct ClassCardView: View {
             }
         }
         .contextMenu {
-            Button(role: .destructive) {
-                onLeave()
-            } label: {
-                Label("Verlassen", systemImage: "rectangle.portrait.and.arrow.right")
+            if isOwner {
+                Button(role: .destructive) {
+                    onDelete()
+                } label: {
+                    Label("Klasse löschen", systemImage: "trash")
+                }
+            } else {
+                Button(role: .destructive) {
+                    onLeave()
+                } label: {
+                    Label("Verlassen", systemImage: "rectangle.portrait.and.arrow.right")
+                }
             }
         }
         .sheet(isPresented: $showShareSheet) {
@@ -370,6 +420,7 @@ private struct IndependentGroupCardView: View {
     let isOwner: Bool
     let memberCount: Int
     let onLeave: () -> Void
+    let onMigrate: () -> Void
     
     @State private var showShareSheet = false
     
@@ -441,6 +492,14 @@ private struct IndependentGroupCardView: View {
                 onLeave()
             } label: {
                 Label("Verlassen", systemImage: "rectangle.portrait.and.arrow.right")
+            }
+            
+            if isOwner {
+                Button {
+                    onMigrate()
+                } label: {
+                    Label("In Klasse umwandeln", systemImage: "arrow.up.circle")
+                }
             }
         }
         .sheet(isPresented: $showShareSheet) {
