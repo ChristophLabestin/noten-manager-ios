@@ -172,9 +172,17 @@ final class OfflineModeManager: ObservableObject {
 
     private func persist(snapshot: OfflineSnapshot) async {
         do {
+            // Encode on the main actor (sync) but offload file I/O to a background task.
             let data = try encoder.encode(snapshot)
-            try data.write(to: snapshotURL(), options: .atomic)
-            persistSnapshotToSharedContainer(data)
+            let targetURL = snapshotURL()
+            let sharedURL = sharedSnapshotURL()
+            try await Task.detached(priority: .utility) {
+                try data.write(to: targetURL, options: .atomic)
+                if let sharedURL {
+                    try? FileManager.default.createDirectory(at: sharedURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try data.write(to: sharedURL, options: .atomic)
+                }
+            }.value
             cachedSnapshot = snapshot
             refreshWidgets()
         } catch {
@@ -193,8 +201,11 @@ final class OfflineModeManager: ObservableObject {
     }
 
     private func snapshotURL() -> URL {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        return dir.appendingPathComponent(snapshotFileName)
+        if let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            return dir.appendingPathComponent(snapshotFileName)
+        }
+        // Extremely defensive: fall back to temporary directory to avoid crashing if documentsDir is unavailable.
+        return FileManager.default.temporaryDirectory.appendingPathComponent(snapshotFileName)
     }
 
     private func sharedSnapshotURL() -> URL? {

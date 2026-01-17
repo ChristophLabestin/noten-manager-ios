@@ -59,6 +59,14 @@ enum HomeworkNotificationManager {
         standardReminderEnabled: Bool = true
     ) {
         // Ensure categories (actions) are registered before scheduling
+        struct State {
+            static var lastRun: Date?
+        }
+        let nowGate = Date()
+        if let last = State.lastRun, nowGate.timeIntervalSince(last) < 2 {
+            return
+        }
+        State.lastRun = nowGate
         configureCategories()
         requestAuthorizationIfNeeded()
 

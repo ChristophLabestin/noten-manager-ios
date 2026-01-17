@@ -15,6 +15,10 @@ struct CourseJoinView: View {
     @State private var errorMessage: String?
     @State private var isJoining: Bool = false
     
+    // Subject Mapping
+    @State private var showSubjectMapping: Bool = false
+    @State private var missingCourses: [Course] = []
+    
     // Theme
     private var isFeminine: Bool { store.theme == "feminine" }
     private var isDark: Bool { store.darkMode }
@@ -51,6 +55,11 @@ struct CourseJoinView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Abbrechen") { dismiss() }
                 }
+            }
+            .sheet(isPresented: $showSubjectMapping, onDismiss: {
+                onJoinSuccess()
+            }) {
+                SubjectMappingView(classId: classId, missingCourses: missingCourses)
             }
         }
     }
@@ -166,7 +175,15 @@ struct CourseJoinView: View {
             
             let generator = UINotificationFeedbackGenerator()
             generator.notificationOccurred(.success)
-            onJoinSuccess() // Dismiss parent
+            
+            // Check for missing mappings
+            let missing = store.missingSubjects(for: classId)
+            if !missing.isEmpty {
+                self.missingCourses = missing
+                self.showSubjectMapping = true
+            } else {
+                onJoinSuccess()
+            }
         } catch {
             errorMessage = error.localizedDescription
             let generator = UINotificationFeedbackGenerator()

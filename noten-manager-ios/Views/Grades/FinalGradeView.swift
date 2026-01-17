@@ -24,10 +24,10 @@ private enum HalfYearDropOption: Equatable {
 struct FinalGradeView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var store: GradesStore
+    @EnvironmentObject var biometricManager: BiometricAuthManager
 
     @State private var dropSelections: [String: HalfYearDropOption] = [:]
     @State private var maxDroppedHalfYears: Int = 3
-    @State private var examPointsBySubject: [String: Double?] = [:]
     @State private var finalGradeToFixed: Int = 1
     @State private var finalGradeTapState: Int = 0 // 0 -> 1 Nachkommastelle, 1 -> 2, 2 -> 3
     @State private var showHomeworkSheet: Bool = false
@@ -145,7 +145,7 @@ struct FinalGradeView: View {
     private var gradeYear: Int { store.gradeYear ?? 12 }
     private var hasExamSimulation: Bool { !simulatedExamPoints.isEmpty }
     private var activeExamPointsBySubject: [String: Double?] {
-        var merged = examPointsBySubject
+        var merged = store.examPoints
         for (key, value) in simulatedExamPoints {
             merged[key] = value
         }
@@ -264,10 +264,6 @@ struct FinalGradeView: View {
         }
         .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $showHomeworkSheet) {
-            HomeworkListView()
-                .environmentObject(store)
-        }
         .sheet(isPresented: $showNotifications) {
             NotificationsInboxView(
                 inbox: notificationInbox,
@@ -280,10 +276,6 @@ struct FinalGradeView: View {
             )
             .environmentObject(store)
         }
-        .sheet(isPresented: $showExamSheet) {
-            ExamListView()
-                .environmentObject(store)
-        }
         .sheet(isPresented: $showWhatIfGradesSheet) {
             WhatIfModeView()
                 .environmentObject(store)
@@ -291,12 +283,12 @@ struct FinalGradeView: View {
         .sheet(isPresented: $showWhatIfExamSheet) {
             FinalGradeWhatIfView(
                 subjectNames: examSubjectHandles.map { $0.subject.name }.sorted(),
-                existingPoints: examPointsBySubject,
+                existingPoints: store.examPoints,
                 existingSimulation: simulatedExamPoints,
                 baselineGradeText: baselineFinalGradeText,
                 baselineGradeValue: baselineFinalGradeValue,
                 computePreview: { overrides in
-                    let merged = mergedExamPoints(base: examPointsBySubject, overrides: overrides)
+                    let merged = mergedExamPoints(base: store.examPoints, overrides: overrides)
                     let text = finalGradeText(for: merged)
                     let value = finalGradeValue(using: merged)
                     return (text, value)
@@ -325,13 +317,11 @@ struct FinalGradeView: View {
         .onAppear {
             syncDropSelectionsFromData()
             recomputeMaxDroppedHalfYears()
-            Task { await loadExamPoints() }
             Task { await loadPreviousYearSnapshotIfNeeded() }
         }
         .onChange(of: store.subjects) { _, _ in
             syncDropSelectionsFromData()
             recomputeMaxDroppedHalfYears()
-            Task { await loadExamPoints() }
         }
         .onChange(of: store.gradeYear) { _, _ in
             recomputeMaxDroppedHalfYears()
@@ -348,7 +338,6 @@ struct FinalGradeView: View {
             syncDropSelectionsFromData()
             recomputeMaxDroppedHalfYears()
             simulatedExamPoints = [:]
-            Task { await loadExamPoints() }
             Task { await loadPreviousYearSnapshotIfNeeded() }
         }
         .onChange(of: previousYearSnapshot?.id) { _, _ in
@@ -357,7 +346,6 @@ struct FinalGradeView: View {
         }
         .onChange(of: store.encryptionKey == nil) { _, _ in
             Task {
-                await loadExamPoints()
                 await loadPreviousYearSnapshotIfNeeded()
             }
         }
@@ -375,6 +363,16 @@ struct FinalGradeView: View {
                     .accessibilityLabel("Benachrichtigungen")
                     
                     Button {
+                        handlePrivacyToggle()
+                    } label: {
+                        ToolbarIcon(
+                            symbol: store.isPrivacyModeActive ? "eye.slash.fill" : "eye.fill",
+                            showDot: false
+                        )
+                    }
+                    .accessibilityLabel(store.isPrivacyModeActive ? "Privatsphäre-Modus deaktivieren" : "Privatsphäre-Modus aktivieren")
+                    
+                    Button {
                         showPDFSheet = true
                     } label: {
                         ToolbarIcon(symbol: "doc.text", showDot: false)
@@ -382,28 +380,19 @@ struct FinalGradeView: View {
                     .accessibilityLabel("Zeugnis als PDF exportieren")
                 }
             }
-            ToolbarItem(placement: .navigationBarTrailing) {
+            ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 0) {
+                    NavigationLink(destination: CalendarPageView().environmentObject(store)) {
+                        ToolbarIcon(symbol: "calendar", showDot: false)
+                    }
+                    .accessibilityLabel("Kalender öffnen")
+
                     Button {
                         onOpenCreationMenu()
                     } label: {
                         ToolbarIcon(symbol: "plus", showDot: false)
                     }
                     .accessibilityLabel("Neu hinzufügen")
-
-                    Button {
-                        showExamSheet = true
-                    } label: {
-                        ToolbarIcon(symbol: "calendar.badge.clock", showDot: hasOverdueExams)
-                    }
-                    .accessibilityLabel("Klausurtermine anzeigen")
-
-                    Button {
-                        showHomeworkSheet = true
-                    } label: {
-                        ToolbarIcon(symbol: "checklist", showDot: hasOverdueHomeworks || hasHomeworkDueTomorrow)
-                    }
-                    .accessibilityLabel("Aktive Hausaufgaben anzeigen")
                 }
             }
         }
@@ -545,6 +534,7 @@ struct FinalGradeView: View {
                             .background(finalGradeColor(finalGradeValueForColor).opacity(0.15))
                             .foregroundStyle(finalGradeColor(finalGradeValueForColor))
                             .clipShape(Capsule())
+                            .privacyBlur()
                             .onTapGesture { toggleFinalGradeToFixed() }
                         Text("antippen")
                             .font(.caption)
@@ -728,6 +718,7 @@ struct FinalGradeView: View {
                                     .background(gradeColor(entry.final).opacity(0.15))
                                     .foregroundStyle(gradeColor(entry.final))
                                     .clipShape(Capsule())
+                                    .privacyBlur()
                             }
                         }
                         if let avg = abiturExamAverage {
@@ -743,6 +734,7 @@ struct FinalGradeView: View {
                                     .background(gradeColor(avg).opacity(0.15))
                                     .foregroundStyle(gradeColor(avg))
                                     .clipShape(Capsule())
+                                    .privacyBlur()
                             }
                         }
                     }
@@ -771,6 +763,7 @@ struct FinalGradeView: View {
                             .background(gradeColor(seminarFinalPoints).opacity(0.15))
                             .foregroundStyle(gradeColor(seminarFinalPoints))
                             .clipShape(Capsule())
+                            .privacyBlur()
                     }
 
                     if let topic = seminarTopic, !topic.isEmpty {
@@ -974,8 +967,6 @@ struct FinalGradeView: View {
         let disableHalfYear2 = ((limitReached || maxDroppedHalfYears <= 0) && !isHalfYear2Selected) || isHalfYear1Selected
 
         let subjectGrades = handle.grades
-        let hasHalfYear1 = subjectGrades.contains { $0.halfYear == 1 }
-        let hasHalfYear2 = subjectGrades.contains { $0.halfYear == 2 }
         let firstHalfYearAverage = calculateHalfYearAverageForSubject(subjectGrades, handle.subject.type, 1)
         let secondHalfYearAverage = calculateHalfYearAverageForSubject(subjectGrades, handle.subject.type, 2)
         let subjectAverage = subjectAverageFor(handle: handle)
@@ -1007,6 +998,7 @@ struct FinalGradeView: View {
                         .background(gradeColor(subjectAverage).opacity(0.15))
                         .foregroundStyle(gradeColor(subjectAverage))
                         .clipShape(Capsule())
+                        .privacyBlur()
                 }
 
                 HStack {
@@ -1018,6 +1010,7 @@ struct FinalGradeView: View {
                         .background(gradeColor(firstHalfYearAverage).opacity(0.15))
                         .foregroundStyle(gradeColor(firstHalfYearAverage))
                         .clipShape(Capsule())
+                        .privacyBlur()
                         .opacity(isHalfYear1Selected ? 0.6 : 1.0)
                     Toggle("", isOn: Binding(
                         get: { isHalfYear1Selected },
@@ -1026,7 +1019,7 @@ struct FinalGradeView: View {
                     .labelsHidden()
                     .tint(.indigo)
                     .accessibilityLabel("1. Halbjahr streichen")
-                    .disabled(disableHalfYear1 || !hasHalfYear1)
+                    .disabled(disableHalfYear1)
                 }
 
                 HStack {
@@ -1038,6 +1031,7 @@ struct FinalGradeView: View {
                         .background(gradeColor(secondHalfYearAverage).opacity(0.15))
                         .foregroundStyle(gradeColor(secondHalfYearAverage))
                         .clipShape(Capsule())
+                        .privacyBlur()
                         .opacity(isHalfYear2Selected ? 0.6 : 1.0)
                     Toggle("", isOn: Binding(
                         get: { isHalfYear2Selected },
@@ -1046,7 +1040,7 @@ struct FinalGradeView: View {
                     .labelsHidden()
                     .tint(.indigo)
                     .accessibilityLabel("2. Halbjahr streichen")
-                    .disabled(disableHalfYear2 || !hasHalfYear2)
+                    .disabled(disableHalfYear2)
                 }
             }
         }
@@ -1218,11 +1212,11 @@ struct FinalGradeView: View {
     }
 
     private var baselineFinalGradeText: String {
-        finalGradeText(for: examPointsBySubject)
+        finalGradeText(for: store.examPoints)
     }
 
     private var baselineFinalGradeValue: Double? {
-        finalGradeValue(using: examPointsBySubject)
+        finalGradeValue(using: store.examPoints)
     }
 
     private var simulatedFinalGradeValue: Double? {
@@ -1620,39 +1614,30 @@ struct FinalGradeView: View {
                                                                               maxPoints: Int,
                                                                               grade: Double?,
                                                                               gradeRaw: Double?) {
-        let examCount = examSubjectsWithPoints(using: examPoints).count
-        let examWeightDouble = examWeightFactor
-        var examPointsDouble = 0.0
-        for s in examSubjectsWithPoints(using: examPoints) {
-            if let raw = examPoint(for: s.subject.name, points: examPoints) {
-                let v = roundedExamPoints(raw) ?? raw
-                examPointsDouble += v * examWeightDouble
-            }
+        let subjects = eligibleSubjectHandles.map {
+            GradeCalculationService.SubjectData(id: $0.id, subject: $0.subject, grades: $0.grades, isEligible: $0.isEligible)
         }
-        let halfYearCount = halfYearSummary.count
-        let halfYearPoints = halfYearSummary.totalPoints
-        let includeFachreferat = gradeYear <= 12
-        let fachreferatCount = includeFachreferat ? fachreferatHalfYearSummary.count : 0
-        let fachreferatPoints = includeFachreferat ? fachreferatHalfYearSummary.totalPoints : 0
-        let practicalCount = practicalYearSummary.count
-        let practicalPoints = practicalYearSummary.totalPoints
-        let seminarCount = (hasSeminarRequirement && seminarFinalPoints != nil) ? 2 : 0
-        let seminarPoints = hasSeminarRequirement ? seminarPointsDouble : 0
-
-        let examWeightInt = Int(examWeightDouble.rounded())
-        let units = examCount * examWeightInt + halfYearCount + fachreferatCount + practicalCount + seminarCount
-        if units == 0 {
-            return (examCount, halfYearCount, 0, 0, 0, 0, 0, nil, nil)
+        
+        var dropMap: [String: Int?] = [:]
+        for h in allSubjectHandles {
+            dropMap[h.id] = dropSelections[h.id]?.persistedValue
         }
-        let maxPoints = units * 15
-        let totalPoints = examPointsDouble + halfYearPoints + fachreferatPoints + practicalPoints + seminarPoints
-        let gradeRaw = 17.0 / 3.0 - (5.0 * totalPoints) / Double(maxPoints)
-
-        let gradeRounded = (gradeRaw * 10.0).rounded(.toNearestOrAwayFromZero) / 10.0
-        let grade = max(1, gradeRounded)
-
-        return (examCount, halfYearCount, examPointsDouble, halfYearPoints, seminarPoints, totalPoints, maxPoints, grade, gradeRaw)
+        
+        let res = GradeCalculationService.makeFobosoSummary(
+            schoolType: schoolType,
+            gradeYear: gradeYear,
+            subjects: subjects,
+            examPoints: examPoints ?? activeExamPointsBySubject,
+            dropSelections: dropMap,
+            fachreferat: store.fachreferat,
+            practicalPerformance: practicalPerformanceForDisplay,
+            seminarPerformance: seminarPerformanceForDisplay,
+            effectiveGradeWeight: { type, weight in store.effectiveGradeWeight(subjectType: type, rawWeight: weight) }
+        )
+        
+        return (res.examCount, res.halfYearCount, res.examPointsDouble, res.halfYearPoints, res.seminarPointsDouble, res.totalPoints, res.maxPoints, res.grade, res.gradeRaw)
     }
+
 
     private var fobosoSummary: (examCount: Int,
                                 halfYearCount: Int,
@@ -1675,7 +1660,7 @@ struct FinalGradeView: View {
                                         maxPoints: Int,
                                         grade: Double?,
                                         gradeRaw: Double?) {
-        makeFobosoSummary(examPoints: examPointsBySubject)
+        makeFobosoSummary(examPoints: store.examPoints)
     }
 
     private func hasAllExamPoints(using points: [String: Double?]? = nil) -> Bool {
@@ -1845,11 +1830,7 @@ struct FinalGradeView: View {
     }
 
     private var availableHalfYearCount: Int {
-        eligibleSubjectHandles.reduce(0) { sum, handle in
-            let hasFirst = handle.grades.contains { $0.halfYear == 1 }
-            let hasSecond = handle.grades.contains { $0.halfYear == 2 }
-            return sum + (hasFirst ? 1 : 0) + (hasSecond ? 1 : 0)
-        }
+        eligibleSubjectHandles.count * 2
     }
 
     private func syncDropSelectionsFromData() {
@@ -1970,32 +1951,6 @@ struct FinalGradeView: View {
         maxDroppedHalfYears = computed
     }
 
-    private func loadExamPoints() async {
-        guard let key = store.encryptionKey else {
-            examPointsBySubject = [:]
-            return
-        }
-        var next: [String: Double?] = [:]
-        for s in store.subjects {
-            var examPoints: Double? = nil
-            if let enc = s.examPointsEncrypted {
-                do {
-                    let decrypted = try CryptoService.decryptString(enc, key: key)
-                    if let num = Double(decrypted), num.isFinite {
-                        examPoints = num
-                    } else {
-                        examPoints = nil
-                    }
-                } catch {
-                    ErrorLoggingService.logErrorIfEnabled(error)
-                    examPoints = nil
-                }
-            }
-            next[s.name] = examPoints
-        }
-        examPointsBySubject = next
-    }
-
     private func practicalLabel(for entry: PracticalGradeEntry) -> String {
         if let hy = entry.halfYear {
             return hy == 1 ? "1. Praktikum" : "2. Praktikum"
@@ -2079,6 +2034,23 @@ struct FinalGradeView: View {
             }
         }
     }
+    private func handlePrivacyToggle() {
+        if store.isPrivacyModeActive {
+            if biometricManager.isEnabledForActiveUser {
+                Task {
+                    let success = await biometricManager.authenticate(reason: "Noten anzeigen")
+                    if success {
+                        store.updatePrivacyMode(active: false)
+                    }
+                }
+            } else {
+                store.updatePrivacyMode(active: false)
+            }
+        } else {
+            store.updatePrivacyMode(active: true)
+        }
+    }
+
     private func handleNotificationSelection(_ item: NotificationInboxItem) {
         if let _ = item.homeworkId {
             showHomeworkSheet = true

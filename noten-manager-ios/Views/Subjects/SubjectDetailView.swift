@@ -99,10 +99,7 @@ struct SubjectDetailView: View {
         _currentIsElective = State(initialValue: subject.isElective)
     }
     
-    private var subjectTitle: String {
-        let trimmed = currentSubjectName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "Fach" : trimmed
-    }
+
     
     private var allGrades: [GradeWithId] {
         store.gradesBySubject[currentSubjectName] ?? []
@@ -144,16 +141,12 @@ struct SubjectDetailView: View {
     }
     
     private func averageForSubject() -> Double? {
-        guard !filteredGrades.isEmpty else { return nil }
-        var total = 0.0
-        var totalWeight = 0.0
-        for g in filteredGrades {
-            let w = store.effectiveGradeWeight(subjectType: currentSubjectType, rawWeight: g.weight)
-            total += g.grade * w
-            totalWeight += w
-        }
-        guard totalWeight > 0 else { return nil }
-        return total / totalWeight
+        GradeCalculationService.calculateSubjectAverage(
+            subject: subject,
+            grades: filteredGrades,
+            dropValue: halfYear == .all ? subject.droppedHalfYear : nil,
+            effectiveGradeWeight: store.effectiveGradeWeight
+        )
     }
     
     private func formatAverage(_ v: Double?) -> String {
@@ -266,7 +259,9 @@ struct SubjectDetailView: View {
         ) {
             VStack(alignment: .leading, spacing: 12) {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                    StatChip(title: "Gesamt", value: formatAverage(averageForSubject()), accent: .indigo)
+                    let avg = averageForSubject()
+                    let isDropped = (halfYear == .all && subject.droppedHalfYear != nil && !filteredGrades.isEmpty && avg == nil)
+                    StatChip(title: "Gesamt", value: formatAverage(avg), accent: .indigo, isGreyedOut: isDropped)
                     StatChip(title: "Noten", value: "\(allGrades.count)", accent: .orange)
                     StatChip(title: "Klausuren", value: "\(upcomingExamsCount)", accent: .mint)
                 }
@@ -797,7 +792,7 @@ struct SubjectDetailView: View {
         } message: {
             Text("Dieses Fach und alle zugehörigen Noten werden dauerhaft gelöscht.")
         }
-        .navigationTitle(subjectTitle)
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -1384,6 +1379,7 @@ struct SubjectDetailView: View {
                         .background(gradeColor(grade.grade).opacity(0.18))
                         .foregroundStyle(gradeColor(grade.grade))
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .privacyBlur()
                 }
                 
                 HStack(spacing: 10) {

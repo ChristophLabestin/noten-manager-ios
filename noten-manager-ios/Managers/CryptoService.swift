@@ -17,7 +17,10 @@ enum CryptoService {
     static func generateSalt(length: Int = 16) -> String {
         var bytes = [UInt8](repeating: 0, count: length)
         let status = SecRandomCopyBytes(kSecRandomDefault, length, &bytes)
-        precondition(status == errSecSuccess)
+        if status != errSecSuccess {
+            // Fallback to pseudo-random to avoid crashing the app; still sufficient for salt purposes.
+            bytes = (0..<length).map { _ in UInt8.random(in: 0..<UInt8.max) }
+        }
         return Data(bytes).base64EncodedString()
     }
 
@@ -33,7 +36,9 @@ enum CryptoService {
         // 12-Byte IV
         var iv = [UInt8](repeating: 0, count: 12)
         let status = SecRandomCopyBytes(kSecRandomDefault, iv.count, &iv)
-        precondition(status == errSecSuccess)
+        if status != errSecSuccess {
+            iv = (0..<12).map { _ in UInt8.random(in: 0..<UInt8.max) }
+        }
         let nonce = try AES.GCM.Nonce(data: Data(iv))
 
         let sealed = try AES.GCM.seal(Data(plain.utf8), using: key, nonce: nonce)

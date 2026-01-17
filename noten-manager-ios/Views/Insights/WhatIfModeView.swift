@@ -21,6 +21,7 @@ struct WhatIfModeView: View {
     @State private var customWeightText: String = ""
     @State private var halfYearSelection: Int = 0
     @State private var error: String?
+    @State private var excludedRealGradeIds: Set<String> = []
     @FocusState private var focusedField: Field?
 
     private enum WeightChoice: Hashable {
@@ -42,11 +43,11 @@ struct WhatIfModeView: View {
     }
 
     private var currentAverage: Double? {
-        overallAverage(using: baseGradesBySubject)
+        overallAverage(using: realGradesBySubject)
     }
 
     private var simulatedAverage: Double? {
-        overallAverage(using: combinedGradesBySubject)
+        overallAverage(using: whatIfGradesBySubject)
     }
 
     private var deltaAverage: Double? {
@@ -55,7 +56,7 @@ struct WhatIfModeView: View {
         return simulatedAverage - currentAverage
     }
 
-    private var baseGradesBySubject: [String: [Grade]] {
+    private var realGradesBySubject: [String: [Grade]] {
         var dict: [String: [Grade]] = [:]
         for (key, list) in store.gradesBySubject {
             dict[key] = list.map {
@@ -72,8 +73,26 @@ struct WhatIfModeView: View {
         return dict
     }
 
-    private var combinedGradesBySubject: [String: [Grade]] {
-        var dict = baseGradesBySubject
+    private var whatIfGradesBySubject: [String: [Grade]] {
+        var dict: [String: [Grade]] = [:]
+        
+        // 1. Add real grades, but filter out excluded ones
+        for (subjectName, list) in store.gradesBySubject {
+            let filtered = list.compactMap { gw -> Grade? in
+                if excludedRealGradeIds.contains(gw.id) { return nil }
+                return Grade(
+                    grade: gw.grade,
+                    weight: gw.weight,
+                    date: gw.date,
+                    note: gw.note,
+                    halfYear: gw.halfYear,
+                    linkedExamId: gw.linkedExamId
+                )
+            }
+            dict[subjectName] = filtered
+        }
+        
+        // 2. Add simulated grades
         for entry in simulatedGrades {
             let grade = Grade(
                 grade: entry.grade,
@@ -90,7 +109,21 @@ struct WhatIfModeView: View {
 
     private var subjectsWithSimulation: [Subject] {
         let names = Set(simulatedGrades.map { $0.subjectName })
-        return subjects.filter { names.contains($0.name) }
+        let excludedNames = Set(excludedGradesWithSubject.map { $0.subjectName })
+        let allNames = names.union(excludedNames)
+        return subjects.filter { allNames.contains($0.name) }
+    }
+
+    private var excludedGradesWithSubject: [(subjectName: String, grade: GradeWithId)] {
+        var result: [(subjectName: String, grade: GradeWithId)] = []
+        for (subjectName, grades) in store.gradesBySubject {
+            for g in grades {
+                if excludedRealGradeIds.contains(g.id) {
+                    result.append((subjectName, g))
+                }
+            }
+        }
+        return result.sorted(by: { $0.grade.date > $1.grade.date })
     }
 
     private var canAdd: Bool {
@@ -271,24 +304,123 @@ struct WhatIfModeView: View {
                         }
                     }
 
+                    let realGradesForSubject = store.gradesBySubject[subjectName] ?? []
+                    if !realGradesForSubject.isEmpty {
+                        SettingsCard(
+                            title: "Vorhandene Noten anpassen",
+                            subtitle: "Tippe, um Noten testweise auszuschließen",
+                            systemImage: "checklist",
+                            accent: .blue
+                        ) {
+                            SettingsSectionBox {
+                                VStack(spacing: 1) {
+                                    let sortedReal = realGradesForSubject.sorted(by: { $0.date > $1.date })
+                                    ForEach(sortedReal) { gw in
+                                        let isExcluded = excludedRealGradeIds.contains(gw.id)
+                                        Button {
+                                            if isExcluded {
+                                                excludedRealGradeIds.remove(gw.id)
+                                            } else {
+                                                excludedRealGradeIds.insert(gw.id)
+                                            }
+                                        } label: {
+                                            HStack {
+                                                VStack(alignment: .leading, spacing: 2) {
+                                                    Text("Note \(formatGrade(gw.grade))")
+                                                        .font(.subheadline.weight(.semibold))
+                                                        .strikethrough(isExcluded)
+                                                    Text(weightLabel(for: gw.weight, isCustom: false, subjectType: subjectType))
+                                                        .font(.caption2)
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                                Spacer()
+                                                Image(systemName: isExcluded ? "eye.slash" : "eye")
+                                                    .font(.caption)
+                                                    .foregroundStyle(isExcluded ? .red : .blue)
+                                            }
+                                            .padding(.vertical, 8)
+                                            .contentShape(Rectangle())
+                                        }
+                                        .buttonStyle(.plain)
+                                        .opacity(isExcluded ? 0.5 : 1.0)
+                                        
+                                        if gw.id != sortedReal.last?.id {
+                                            Divider()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     SettingsCard(
-                        title: "Simulierte Noten",
-                        subtitle: "Nur hier sichtbar",
+                        title: "Anpassungen & Simulationen",
+                        subtitle: "Zusammenfassung aller Änderungen",
                         systemImage: "tray.full.fill",
                         accent: .orange
                     ) {
-                        if simulatedGrades.isEmpty {
-                            Text("Noch keine fiktiven Noten erfasst. Ergänze oben eine Note, um den Effekt auf deinen Schnitt zu sehen.")
+                        if simulatedGrades.isEmpty && excludedRealGradeIds.isEmpty {
+                            Text("Noch keine Anpassungen vorgenommen. Ergänze oben eine Note oder schließe eine vorhandene aus.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         } else {
                             SettingsSectionBox {
-                                VStack(spacing: 10) {
+                                VStack(spacing: 8) {
+                                    // 1. Show Excluded Grades
+                                    ForEach(excludedGradesWithSubject, id: \.grade.id) { item in
+                                        HStack(alignment: .top, spacing: 10) {
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                HStack(spacing: 6) {
+                                                    Text(item.subjectName)
+                                                        .font(.subheadline.weight(.semibold))
+                                                    Text("Entfernt")
+                                                        .font(.system(size: 8, weight: .bold))
+                                                        .padding(.horizontal, 4)
+                                                        .padding(.vertical, 1)
+                                                        .background(Color.red.opacity(0.15))
+                                                        .foregroundStyle(.red)
+                                                        .clipShape(Capsule())
+                                                }
+                                                Text("Note \(formatGrade(item.grade.grade)) · \(weightLabel(for: item.grade.weight, isCustom: false, subjectType: subjectTypeForName(item.subjectName)))\(halfYearLabel(for: item.grade.halfYear))")
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                                    .strikethrough()
+                                            }
+                                            Spacer()
+                                            Button {
+                                                excludedRealGradeIds.remove(item.grade.id)
+                                            } label: {
+                                                Image(systemName: "arrow.uturn.backward")
+                                                    .font(.caption2)
+                                                    .foregroundStyle(.blue)
+                                                    .padding(8)
+                                                    .background(Color.blue.opacity(0.1))
+                                                    .clipShape(Circle())
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
+                                        .padding(10)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                .fill(Color(.secondarySystemBackground))
+                                        )
+                                    }
+
+                                    // 2. Show Simulated Grades
                                     ForEach(simulatedGrades) { entry in
                                         HStack(alignment: .top, spacing: 10) {
                                             VStack(alignment: .leading, spacing: 4) {
-                                                Text(entry.subjectName)
-                                                    .font(.subheadline.weight(.semibold))
+                                                HStack(spacing: 6) {
+                                                    Text(entry.subjectName)
+                                                        .font(.subheadline.weight(.semibold))
+                                                    Text("Hinzugefügt")
+                                                        .font(.system(size: 8, weight: .bold))
+                                                        .padding(.horizontal, 4)
+                                                        .padding(.vertical, 1)
+                                                        .background(Color.green.opacity(0.15))
+                                                        .foregroundStyle(.green)
+                                                        .clipShape(Capsule())
+                                                }
                                                 Text("Note \(formatGrade(entry.grade)) · \(weightLabel(for: entry.weight, isCustom: entry.isCustomWeight, subjectType: subjectTypeForName(entry.subjectName)))\(halfYearLabel(for: entry.halfYear))")
                                                     .font(.caption)
                                                     .foregroundStyle(.secondary)
@@ -298,6 +430,7 @@ struct WhatIfModeView: View {
                                                 remove(entry)
                                             } label: {
                                                 Image(systemName: "trash")
+                                                    .font(.caption2)
                                                     .foregroundStyle(.red)
                                                     .padding(8)
                                                     .background(Color.red.opacity(0.1))
@@ -326,8 +459,8 @@ struct WhatIfModeView: View {
                             SettingsSectionBox {
                                 VStack(spacing: 10) {
                                     ForEach(subjectsWithSimulation, id: \.name) { subject in
-                                        let current = subjectAverage(subject, using: baseGradesBySubject)
-                                        let simulated = subjectAverage(subject, using: combinedGradesBySubject)
+                                        let current = subjectAverage(subject, using: realGradesBySubject)
+                                        let simulated = subjectAverage(subject, using: whatIfGradesBySubject)
                                         HStack {
                                             VStack(alignment: .leading, spacing: 4) {
                                                 Text(subject.name)
@@ -431,32 +564,48 @@ struct WhatIfModeView: View {
 
     private func subjectAverage(_ subject: Subject, using dict: [String: [Grade]]) -> Double? {
         let list = dict[subject.name] ?? []
-        guard !list.isEmpty else { return nil }
-        var total = 0.0
-        var totalWeight = 0.0
-        for grade in list {
-            let weight = store.calculateGradeWeightForOverall(subject: subject, grade: grade)
-            total += grade.grade * weight
-            totalWeight += weight
-        }
-        guard totalWeight > 0 else { return nil }
-        return total / totalWeight
+        return GradeCalculationService.calculateSubjectAverage(
+            subject: subject,
+            grades: list,
+            dropValue: subject.droppedHalfYear,
+            effectiveGradeWeight: store.effectiveGradeWeight
+        )
     }
 
     private func overallAverage(using dict: [String: [Grade]]) -> Double? {
-        guard !subjects.isEmpty else { return nil }
-        var total = 0.0
-        var totalWeight = 0.0
-        for subject in subjects where !subject.isElective {
-            let list = dict[subject.name] ?? []
-            for grade in list {
-                let weight = store.calculateGradeWeightForOverall(subject: subject, grade: grade)
-                total += grade.grade * weight
-                totalWeight += weight
+        let subjectsData = store.subjects.map { s in
+            let gradesForSubject = dict[s.name] ?? []
+            let wrappedGrades = gradesForSubject.map { g in
+                GradeWithId(
+                    id: UUID().uuidString,
+                    grade: g.grade,
+                    weight: g.weight,
+                    date: g.date,
+                    note: g.note,
+                    halfYear: g.halfYear,
+                    linkedExamId: g.linkedExamId
+                )
             }
+            return GradeCalculationService.SubjectData.from(subject: s, grades: wrappedGrades)
         }
-        guard totalWeight > 0 else { return nil }
-        return total / totalWeight
+        
+        var dropSelections: [String: Int?] = [:]
+        for s in store.subjects {
+            dropSelections[s.name] = s.droppedHalfYear
+        }
+        
+        let res = GradeCalculationService.makeFobosoSummary(
+            schoolType: store.schoolType,
+            gradeYear: store.gradeYear ?? 12,
+            subjects: subjectsData,
+            examPoints: store.examPoints,
+            dropSelections: dropSelections,
+            fachreferat: store.fachreferat,
+            practicalPerformance: store.practicalPerformance,
+            seminarPerformance: store.seminarPerformance,
+            effectiveGradeWeight: store.effectiveGradeWeight
+        )
+        return res.grade
     }
 
     private func selectedHalfYear() -> Int? {
@@ -532,12 +681,12 @@ struct WhatIfModeView: View {
 
     private func formatAverage(_ value: Double?) -> String {
         guard let value else { return "-" }
-        return String(format: "%.2f", value)
+        return String(format: "%.1f", value)
     }
 
     private func formatDelta(_ value: Double?) -> String {
         guard let value else { return "-" }
-        if abs(value) < 0.005 { return "0.00" }
+        if abs(value) < 0.005 { return "±0.00" }
         let prefix = value > 0 ? "+" : ""
         return "\(prefix)\(String(format: "%.2f", value))"
     }

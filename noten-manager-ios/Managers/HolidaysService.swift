@@ -38,48 +38,62 @@ final class HolidaysService {
         decoder.dateDecodingStrategy = .custom { decoder in
             let container = try decoder.singleValueContainer()
             let string = try container.decode(String.self)
-
-            let iso = ISO8601DateFormatter()
-            iso.timeZone = TimeZone(secondsFromGMT: 0)
-            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let date = iso.date(from: string) { return date }
-
-            let fallback = DateFormatter()
-            fallback.calendar = Calendar(identifier: .gregorian)
-            fallback.locale = Locale(identifier: "de_DE_POSIX")
-            fallback.dateFormat = "yyyy-MM-dd"
-            if let date = fallback.date(from: string) { return date }
+            
+            // Extract just the date part (yyyy-MM-dd) to avoid timezone issues
+            let dateString = String(string.prefix(10))
+            
+            let formatter = DateFormatter()
+            formatter.calendar = Calendar(identifier: .gregorian)
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = "yyyy-MM-dd"
+            // Ensure we stick to noon to avoid boundary issues, or just standard start of day
+            // By default DateFormatter uses local time 00:00 if no time is present.
+            // This is safer than parsing 23:59Z which might be next day in local time.
+            if let date = formatter.date(from: dateString) {
+                return date
+            }
+            
             throw DecodingError.dataCorruptedError(in: container, debugDescription: "Ungültiges Datumsformat: \(string)")
         }
         return decoder
     }
 
-    private func fetchHolidays(year: Int) async throws -> [HolidayPeriod] {
+    func fetchHolidays(year: Int) async -> [HolidayPeriod] {
         if let cached = holidaysCache[year] { return cached }
         guard let url = URL(string: "https://schulferien-api.de/api/v1/\(year)/BY") else { return [] }
-        let (data, _) = try await session.data(from: url)
-        let holidays = try decoder().decode([HolidayPeriod].self, from: data)
-        holidaysCache[year] = holidays
-        return holidays
+        
+        var request = URLRequest(url: url)
+        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
+        
+        do {
+            let (data, _) = try await session.data(for: request)
+            let holidays = try decoder().decode([HolidayPeriod].self, from: data)
+            holidaysCache[year] = holidays
+            return holidays
+        } catch {
+            print("Error fetching school holidays for year \(year): \(error)")
+            return []
+        }
     }
 
     private func combinedHolidays(around date: Date = Date()) async -> [HolidayPeriod] {
         let calendar = Calendar(identifier: .gregorian)
         let year = calendar.component(.year, from: date)
         var result: [HolidayPeriod] = []
-        if let current = try? await fetchHolidays(year: year) {
-            result.append(contentsOf: current)
-        }
-        if let next = try? await fetchHolidays(year: year + 1) {
-            result.append(contentsOf: next)
-        }
+        let current = await fetchHolidays(year: year)
+        result.append(contentsOf: current)
+        let next = await fetchHolidays(year: year + 1)
+        result.append(contentsOf: next)
         return result
     }
 
     func pfingstferienEndDate(forYear year: Int) async -> Date? {
         if let cached = pfingstferienCache[year] { return cached }
-        guard let holidays = try? await fetchHolidays(year: year) else { return nil }
-        let endDate = holidays
+        guard let holidays = await fetchHolidays(year: year).first(where: { _ in true }) != nil ? holidaysCache[year] : nil else { return nil }
+        
+        // Use cached directly since fetchHolidays returns [HolidayPeriod] and populates cache
+        let list = holidaysCache[year] ?? []
+        let endDate = list
             .filter { $0.name.lowercased().contains("pfingstferien") }
             .map { $0.end }
             .max()
@@ -91,8 +105,9 @@ final class HolidaysService {
 
     func summerHolidayEnd(forYear year: Int) async -> Date? {
         if let cached = summerEndCache[year] { return cached }
-        guard let holidays = try? await fetchHolidays(year: year) else { return nil }
-        let endDate = holidays
+        _ = await fetchHolidays(year: year) // Ensure loaded
+        let list = holidaysCache[year] ?? []
+        let endDate = list
             .filter { $0.name.lowercased().contains("sommerferien") }
             .map { $0.end }
             .max()
@@ -101,7 +116,7 @@ final class HolidaysService {
         }
         return endDate
     }
-
+    
     func schoolStartDate(forYear year: Int) async -> Date? {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "Europe/Berlin") ?? .current
@@ -135,5 +150,64 @@ final class HolidaysService {
             .map { HolidayWindow(name: $0.nameCp ?? $0.name, start: $0.start, end: $0.end) }
 
         return candidates.sorted(by: { $0.start < $1.start }).first
+    }
+
+    // MARK: - Public Holidays (Feiertage)
+    
+    // Response is [StateCode: [HolidayName: HolidayDetail]]
+    // e.g. "BY": { "Neujahrstag": { "datum": "2026-01-01", "hinweis": "" } }
+    private typealias FeiertagResponse = [String: [String: FeiertagDetail]]
+    
+    private struct FeiertagDetail: Decodable {
+        let datum: String
+        let hinweis: String
+    }
+    
+    private var feiertageCache: [Int: [HolidayPeriod]] = [:] // year -> periods
+
+    func fetchPublicHolidays(year: Int) async -> [HolidayPeriod] {
+        if let cached = feiertageCache[year] { return cached }
+        // New API: https://feiertage-api.de/api/?jahr=2026
+        guard let url = URL(string: "https://feiertage-api.de/api/?jahr=\(year)") else { return [] }
+        
+        var request = URLRequest(url: url)
+        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
+        
+        do {
+            let (data, _) = try await session.data(for: request)
+            
+            let decoder = JSONDecoder()
+            let response = try decoder.decode(FeiertagResponse.self, from: data)
+            
+            // Extract Bavaria (BY)
+            guard let bayern = response["BY"] else {
+                return []
+            }
+            
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy-MM-dd"
+            
+            let periods = bayern.compactMap { (name, detail) -> HolidayPeriod? in
+                guard let date = dateFormatter.date(from: detail.datum) else { return nil }
+                
+                // New API already provides nice names as keys (e.g. "Heilige Drei Könige")
+                // So we can use 'name' directly and also set as 'nameCp'
+                return HolidayPeriod(
+                    start: date,
+                    end: date,
+                    year: year,
+                    name: name,
+                    stateCode: "BY",
+                    nameCp: name
+                )
+            }
+            
+            let sortedPeriods = periods.sorted { $0.start < $1.start }
+            feiertageCache[year] = sortedPeriods
+            return sortedPeriods
+        } catch {
+            print("Error fetching public holidays for year \(year): \(error)")
+            return []
+        }
     }
 }

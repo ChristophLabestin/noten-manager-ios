@@ -99,7 +99,7 @@ struct Exam: Codable, Identifiable, Hashable, Sendable {
         reminderAt = try container.decodeIfPresent(Date.self, forKey: .reminderAt)
         isCompleted = try container.decode(Bool.self, forKey: .isCompleted)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
-        isShared = try container.decode(Bool.self, forKey: .isShared)
+        isShared = try container.decodeIfPresent(Bool.self, forKey: .isShared) ?? false
         creatorId = try container.decodeIfPresent(String.self, forKey: .creatorId)
         requiresGrade = try container.decodeIfPresent(Bool.self, forKey: .requiresGrade)
     }

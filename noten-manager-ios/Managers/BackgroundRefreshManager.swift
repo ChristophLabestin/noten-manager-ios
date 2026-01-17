@@ -50,10 +50,10 @@ enum BackgroundRefreshManager {
 
     static func register() {
         guard #available(iOS 13.0, *) else { return }
-        BGTaskScheduler.shared.register(forTaskWithIdentifier: refreshTaskId, using: nil) { task in
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: refreshTaskId, using: .main) { task in
             handle(task: task, kind: .appRefresh)
         }
-        BGTaskScheduler.shared.register(forTaskWithIdentifier: liveActivityTaskId, using: nil) { task in
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: liveActivityTaskId, using: .main) { task in
             handle(task: task, kind: .processing)
         }
     }
@@ -66,6 +66,16 @@ enum BackgroundRefreshManager {
 
     @available(iOS 13.0, *)
     private static func handle(task: BGTask, kind: TaskKind) {
+        task.expirationHandler = {
+            os_log(
+                "BGTask expired kind=%{public}@ id=%{public}@",
+                log: makeLog(),
+                type: .info,
+                kind.rawValue,
+                task.identifier
+            )
+        }
+
         switch kind {
         case .appRefresh:
             guard task is BGAppRefreshTask else {
@@ -101,6 +111,18 @@ enum BackgroundRefreshManager {
             task.identifier,
             Thread.isMainThread ? 1 : 0
         )
+
+        if UIApplication.shared.isProtectedDataAvailable == false {
+            os_log(
+                "BGTask aborted (protected data) kind=%{public}@ id=%{public}@",
+                log: makeLog(),
+                type: .info,
+                kind.rawValue,
+                task.identifier
+            )
+            task.setTaskCompleted(success: false)
+            return
+        }
 
         let completion = CompletionGate(task: task)
         let taskId = completion.taskId
@@ -166,18 +188,6 @@ enum BackgroundRefreshManager {
                     result.success ? 1 : 0
                 )
             }
-        }
-
-        task.expirationHandler = {
-            os_log(
-                "BGTask expired kind=%{public}@ id=%{public}@",
-                log: makeLog(),
-                type: .info,
-                kind.rawValue,
-                taskId
-            )
-            work.cancel()
-            completion.complete(success: false)
         }
     }
 
@@ -282,38 +292,34 @@ enum BackgroundRefreshManager {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
-        if let sharedURL = sharedSnapshotURL(),
-           let data = try? Data(contentsOf: sharedURL) {
+        func decode(at url: URL) -> OfflineSnapshot? {
             do {
+                let data = try Data(contentsOf: url)
                 return try decoder.decode(OfflineSnapshot.self, from: data)
             } catch {
                 Task { @MainActor in
                     ErrorLoggingService.logErrorIfEnabled(error)
                 }
                 os_log(
-                    "Failed to decode shared snapshot: %{public}@",
+                    "Failed to decode snapshot at %{public}@ error=%{public}@",
                     log: makeLog(),
                     type: .error,
+                    url.path,
                     String(describing: error)
                 )
+                return nil
             }
         }
 
+        if let sharedURL = sharedSnapshotURL(),
+           FileManager.default.isReadableFile(atPath: sharedURL.path),
+           let snapshot = decode(at: sharedURL) {
+            return snapshot
+        }
+
         if let url = snapshotURL(),
-           let data = try? Data(contentsOf: url) {
-            do {
-                return try decoder.decode(OfflineSnapshot.self, from: data)
-            } catch {
-                Task { @MainActor in
-                    ErrorLoggingService.logErrorIfEnabled(error)
-                }
-                os_log(
-                    "Failed to decode local snapshot: %{public}@",
-                    log: makeLog(),
-                    type: .error,
-                    String(describing: error)
-                )
-            }
+           FileManager.default.isReadableFile(atPath: url.path) {
+            return decode(at: url)
         }
 
         return nil

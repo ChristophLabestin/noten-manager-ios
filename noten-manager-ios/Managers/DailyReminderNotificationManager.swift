@@ -71,6 +71,15 @@ enum DailyReminderNotificationManager {
         minute: Int,
         enabled: Bool = true
     ) {
+        // Simple debounce to avoid thrashing when multiple updates arrive rapidly.
+        struct State {
+            static var lastRun: Date?
+        }
+        let nowGate = Date()
+        if let last = State.lastRun, nowGate.timeIntervalSince(last) < 2 {
+            return
+        }
+        State.lastRun = nowGate
         HomeworkNotificationManager.requestAuthorizationIfNeeded()
 
         Task {
@@ -124,7 +133,7 @@ enum DailyReminderNotificationManager {
             let reminderHour = max(0, min(23, hour))
             let reminderMinute = max(0, min(59, minute))
 
-            var comps = calendar.dateComponents([.year, .month, .day], from: now)
+            var comps = calendar.dateComponents([.year, .month, .day], from: tomorrow)
             comps.hour = reminderHour
             comps.minute = reminderMinute
             let reminderDate = calendar.date(from: comps)

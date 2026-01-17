@@ -330,14 +330,15 @@ final class AuthManager: ObservableObject {
     }
 
     private func randomNonceString(length: Int = 32) -> String {
-        precondition(length > 0)
+        guard length > 0 else { return "" }
         let charset: [Character] = Array("0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._")
         var result = ""
         for _ in 0..<length {
             var random: UInt8 = 0
             let status = SecRandomCopyBytes(kSecRandomDefault, 1, &random)
             if status != errSecSuccess {
-                fatalError("Unable to generate nonce. SecRandomCopyBytes failed with OSStatus \(status)")
+                // Fallback to a weaker source instead of crashing; still better than aborting login flow.
+                random = UInt8.random(in: 0..<UInt8.max)
             }
             result.append(charset[Int(random % UInt8(charset.count))])
         }

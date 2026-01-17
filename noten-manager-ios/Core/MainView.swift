@@ -125,9 +125,6 @@ struct MainView: View {
                 if LaunchOfferNotificationManager.consumePendingOpen() {
                     handleOpenLaunchOfferNotification()
                 }
-                if LaunchOfferNotificationManager.consumePendingOpen() {
-                    handleOpenLaunchOfferNotification()
-                }
                 enforceSubscriptionGateIfNeeded()
                 attemptRequestReview()
                 
@@ -340,12 +337,11 @@ struct MainView: View {
                 HomeworkDetailSheet(homework: homework, onEdit: { _ in })
                     .environmentObject(gradesStore)
             }
-            .sheet(isPresented: $showGroupJoinSheet) {
-                GroupJoinView(initialCode: pendingGroupJoinCode)
-                    .environmentObject(gradesStore)
-            }
-            .toolbar {
-                if navPath.isEmpty {
+                .sheet(isPresented: $showGroupJoinSheet) {
+                    GroupJoinView(initialCode: pendingGroupJoinCode)
+                        .environmentObject(gradesStore)
+                }
+                .toolbar {
                     ToolbarItemGroup(placement: .navigationBarLeading) {
                         notificationsToolbarButton
                         if offlineManager.isOfflineModeActive {
@@ -356,7 +352,6 @@ struct MainView: View {
                         }
                     }
                 }
-            }
             .alert("Neues Schuljahr anlegen?", isPresented: $showPfingstferienPrompt, presenting: nextSchoolYearSuggestion) { yearId in
                 Button("Ja, \(yearId) erstellen") {
                     Task {
@@ -701,9 +696,13 @@ struct MainView: View {
         guard !launchOfferPurchased else { return }
         guard LaunchOfferNotificationManager.isOfferActive() else { return }
         currentTab = .home
-        showNotificationsSheet = false
-        pendingOpenLaunchMessageFromInbox = false
-        showLaunchMessage = true
+        
+        if showNotificationsSheet {
+            pendingOpenLaunchMessageFromInbox = true
+            showNotificationsSheet = false
+        } else {
+            showLaunchMessage = true
+        }
     }
 
     private func handleOpenSheet(_ type: String) {
@@ -712,10 +711,6 @@ struct MainView: View {
             currentTab = .settings
         case "notifications":
             showNotificationsSheet = true
-        case "homework_list":
-            showHomeworkListSheet = true
-        case "exam_list":
-            showExamListSheet = true
         case "launch_offer":
             handleOpenLaunchOfferNotification()
         case "add_homework":
@@ -732,14 +727,17 @@ struct MainView: View {
     }
 
     private func handleNotificationsSheetDismiss() {
-        if pendingOpenLaunchMessageFromInbox {
-            pendingOpenLaunchMessageFromInbox = false
-            showLaunchMessage = true
-            return
+        // Small delay to ensure sheet is fully dismissed before presenting next one
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            if self.pendingOpenLaunchMessageFromInbox {
+                self.pendingOpenLaunchMessageFromInbox = false
+                self.showLaunchMessage = true
+                return
+            }
+            guard let item = self.pendingNotificationAction else { return }
+            self.pendingNotificationAction = nil
+            self.openInboxNotification(item)
         }
-        guard let item = pendingNotificationAction else { return }
-        pendingNotificationAction = nil
-        openInboxNotification(item)
     }
 
     private func openInboxNotification(_ item: NotificationInboxItem) {
@@ -860,6 +858,7 @@ struct MainView: View {
                         .navigationDestination(isPresented: $navigateToAbiturExam) {
                             AbiturExamView().environmentObject(gradesStore)
                         }
+
                 }
                 .tabItem {
                     Label("Home", systemImage: "house.fill")
@@ -869,6 +868,7 @@ struct MainView: View {
                 NavigationStack {
                     GroupsListView(onOpenCreationMenu: { showCreationMenu = true })
                         .environmentObject(gradesStore)
+
                 }
                 .tabItem {
                     Label("Gruppen", systemImage: "person.3.fill")

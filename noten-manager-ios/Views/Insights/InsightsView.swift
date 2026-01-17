@@ -2,6 +2,7 @@ import SwiftUI
 
 struct InsightsView: View {
     @EnvironmentObject var store: GradesStore
+    @EnvironmentObject var biometricManager: BiometricAuthManager
 
     @State private var showHomeworkSheet: Bool = false
     @State private var showExamSheet: Bool = false
@@ -15,64 +16,70 @@ struct InsightsView: View {
         store.sortedSubjectsForDisplay(store.subjects.filter { $0.name != "Fachreferat" })
     }
 
-    private func grades(for subject: Subject) -> [Grade] {
-        let list = store.gradesBySubject[subject.name] ?? []
-        return list.map { gw in
-            Grade(
-                grade: gw.grade,
-                weight: gw.weight,
-                date: gw.date,
-                note: gw.note,
-                halfYear: gw.halfYear,
-                linkedExamId: gw.linkedExamId
-            )
-        }
+    private func subjectAverage(_ subject: Subject) -> Double? {
+        GradeCalculationService.calculateSubjectAverage(
+            subject: subject,
+            grades: store.gradesBySubject[subject.name] ?? [],
+            dropValue: subject.droppedHalfYear,
+            effectiveGradeWeight: store.effectiveGradeWeight
+        )
     }
 
-    private func subjectAverage(_ subject: Subject) -> Double? {
-        let list = grades(for: subject)
-        guard !list.isEmpty else { return nil }
-        var total = 0.0
-        var totalWeight = 0.0
-        for g in list {
-            let w = store.calculateGradeWeightForOverall(subject: subject, grade: g)
-            total += g.grade * w
-            totalWeight += w
+    private var overallComputedResult: GradeCalculationService.CalculationResult {
+        let subjects = store.subjects.map {
+            GradeCalculationService.SubjectData.from(subject: $0, grades: store.gradesBySubject[$0.name] ?? [])
         }
-        guard totalWeight > 0 else { return nil }
-        return total / totalWeight
+        
+        var dropSelections: [String: Int?] = [:]
+        for s in store.subjects {
+            dropSelections[s.name] = s.droppedHalfYear
+        }
+        
+        return GradeCalculationService.makeFobosoSummary(
+            schoolType: store.schoolType,
+            gradeYear: store.gradeYear ?? 12,
+            subjects: subjects,
+            examPoints: store.examPoints,
+            dropSelections: dropSelections,
+            fachreferat: store.fachreferat,
+            practicalPerformance: store.practicalPerformance,
+            seminarPerformance: store.seminarPerformance,
+            effectiveGradeWeight: store.effectiveGradeWeight
+        )
+    }
+
+    private var overallMSS: Double? {
+        let res = overallComputedResult
+        guard res.maxPoints > 0 else { return nil }
+        return res.totalPoints / (Double(res.maxPoints) / 15.0)
     }
 
     private var overallAverageValue: Double? {
-        guard !subjectsWithoutFachreferat.isEmpty else { return nil }
-        var total = 0.0
-        var totalWeight = 0.0
-        for subject in subjectsWithoutFachreferat {
-            if subject.isElective { continue }
-            let list = grades(for: subject)
-            for g in list {
-                let w = store.calculateGradeWeightForOverall(subject: subject, grade: g)
-                total += g.grade * w
-                totalWeight += w
-            }
-        }
-        guard totalWeight > 0 else { return nil }
-        return total / totalWeight
+        overallComputedResult.grade
     }
 
     private func halfYearAverage(_ halfYear: Int) -> Double? {
         guard halfYear == 1 || halfYear == 2 else { return nil }
+        
         var total = 0.0
         var totalWeight = 0.0
+        
         for subject in subjectsWithoutFachreferat {
             if subject.isElective { continue }
-            let list = grades(for: subject).filter { $0.halfYear == halfYear }
-            for g in list {
-                let w = store.calculateGradeWeightForOverall(subject: subject, grade: g)
-                total += g.grade * w
-                totalWeight += w
+            
+            if let avg = GradeCalculationService.calculateHalfYearAverage(
+                grades: store.gradesBySubject[subject.name] ?? [],
+                subjectType: subject.type,
+                halfYear: halfYear,
+                effectiveGradeWeight: store.effectiveGradeWeight
+            ) {
+                // To get a meaningful average, we weigh each subject equally in the points sum,
+                // or we sum all credits. Standard weighted average of averages for simplicity.
+                total += avg
+                totalWeight += 1.0
             }
         }
+        
         guard totalWeight > 0 else { return nil }
         return total / totalWeight
     }
@@ -124,6 +131,11 @@ struct InsightsView: View {
 
     private func formatAverage(_ value: Double?) -> String {
         guard let v = value else { return "-" }
+        return String(format: "%.1f", v)
+    }
+
+    private func formatMSS(_ value: Double?) -> String {
+        guard let v = value else { return "-" }
         return String(format: "%.2f", v)
     }
 
@@ -161,6 +173,23 @@ struct InsightsView: View {
 
     private var animationsOn: Bool { store.animationsEnabled }
 
+    private func handlePrivacyToggle() {
+        if store.isPrivacyModeActive {
+            if biometricManager.isEnabledForActiveUser {
+                Task {
+                    let success = await biometricManager.authenticate(reason: "Noten anzeigen")
+                    if success {
+                        store.updatePrivacyMode(active: false)
+                    }
+                }
+            } else {
+                store.updatePrivacyMode(active: false)
+            }
+        } else {
+            store.updatePrivacyMode(active: true)
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
@@ -172,8 +201,8 @@ struct InsightsView: View {
                 ) {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack(spacing: 10) {
-                            StatChip(title: "Gesamt-Ø", value: formatAverage(overallAverageValue), accent: .indigo)
-                            StatChip(title: "Fächer", value: "\(subjectsWithoutFachreferat.count)", accent: .cyan)
+                            StatChip(title: "MSS", value: formatMSS(overallMSS), accent: .indigo)
+                            StatChip(title: "Schnitt", value: formatAverage(overallAverageValue), accent: .indigo)
                             StatChip(title: "Noten", value: "\(totalGradesCount)", accent: .orange)
                         }
                         if hasOverdueHomeworks || hasHomeworkDueTomorrow || hasOverdueExams {
@@ -323,51 +352,47 @@ struct InsightsView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
         }
+
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                Button {
-                    showNotifications = true
-                } label: {
-                    ToolbarIcon(
-                        symbol: "bell",
-                        showDot: notificationInbox.hasUnread || (LaunchOfferNotificationManager.isOfferActive() && !launchOfferPurchased)
-                    )
-                }
-                .accessibilityLabel("Benachrichtigungen")
-            }
-            ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 0) {
+                    Button {
+                        showNotifications = true
+                    } label: {
+                        ToolbarIcon(
+                            symbol: "bell",
+                            showDot: notificationInbox.hasUnread || (LaunchOfferNotificationManager.isOfferActive() && !launchOfferPurchased)
+                        )
+                    }
+                    .accessibilityLabel("Benachrichtigungen")
+
+                    Button {
+                        handlePrivacyToggle()
+                    } label: {
+                        ToolbarIcon(
+                            symbol: store.isPrivacyModeActive ? "eye.slash.fill" : "eye.fill",
+                            showDot: false
+                        )
+                    }
+                    .accessibilityLabel(store.isPrivacyModeActive ? "Privatsphäre-Modus deaktivieren" : "Privatsphäre-Modus aktivieren")
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                HStack(spacing: 0) {
+                    NavigationLink(destination: CalendarPageView().environmentObject(store)) {
+                        ToolbarIcon(symbol: "calendar", showDot: false)
+                    }
+                    .accessibilityLabel("Kalender öffnen")
+
                     Button {
                         onOpenCreationMenu()
                     } label: {
                         ToolbarIcon(symbol: "plus", showDot: false)
                     }
                     .accessibilityLabel("Neu hinzufügen")
-
-                    Button {
-                        showExamSheet = true
-                    } label: {
-                        ToolbarIcon(symbol: "calendar.badge.clock", showDot: hasOverdueExams)
-                    }
-                    .accessibilityLabel("Klausurtermine anzeigen")
-
-                    Button {
-                        showHomeworkSheet = true
-                    } label: {
-                        ToolbarIcon(symbol: "checklist", showDot: hasOverdueHomeworks || hasHomeworkDueTomorrow)
-                    }
-                    .accessibilityLabel("Aktive Hausaufgaben anzeigen")
                 }
             }
-        }
-        .sheet(isPresented: $showHomeworkSheet) {
-            HomeworkListView()
-                .environmentObject(store)
-        }
-        .sheet(isPresented: $showExamSheet) {
-            ExamListView()
-                .environmentObject(store)
         }
         .sheet(isPresented: $showWhatIfMode) {
             WhatIfModeView()
@@ -411,6 +436,7 @@ struct InsightsView: View {
                 .background(gradeColor(avg).opacity(0.15))
                 .foregroundStyle(gradeColor(avg))
                 .clipShape(Capsule())
+                .privacyBlur()
         }
         .padding(12)
         .background(
@@ -446,6 +472,7 @@ struct InsightsView: View {
                 .background(gradeColor(avg).opacity(0.12))
                 .foregroundStyle(gradeColor(avg))
                 .clipShape(Capsule())
+                .privacyBlur()
         }
         .padding(12)
         .background(
@@ -471,6 +498,7 @@ struct InsightsView: View {
                 .background(color.opacity(0.14))
                 .foregroundStyle(color)
                 .clipShape(Capsule())
+                .privacyBlur()
         }
     }
 

@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased] - 2026-01-17
+
+### Added
+- **Privacy Mode core functionality**: 
+    - Introduced a global `@Published var isPrivacyModeActive: Bool` in `GradesStore` with `UserDefaults` persistence.
+    - Added a `privacyBlur()` view modifier using `ultraThinMaterial` and radius blur for elegant grade obscuration.
+    - Integrated a biometric authentication requirement (Face ID/Touch ID) to disable Privacy Mode when active.
+    - Added a prominent toggle icon to the toolbar across `HomeView`, `InsightsView`, and `FinalGradeView`.
+- **Privacy Mode Configuration**: New section in `AppSettingsView` to manage global privacy and biometric settings.
+- **Unified Grade Calculation**: Introduced `GradeCalculationService.swift` to centralize calculation logic (Abitur prognosis, subject averages, half-year results) following BayFOBOSO rules.
+- **Course Mapping Models**: Added `CourseMapping` and associated models for shared group course synchronization.
+- **Calendar Integration**: Added initial `CalendarPageView` for exam and homework scheduling.
+
+### Changed
+- **Insights Calculations**: Refactored `InsightsView` to use the unified `GradeCalculationService`, ensuring consistent grade reporting across the app.
+- **Biometric Management**: Streamlined `BiometricAuthManager` for more reliable authentication flows.
+
+### Fixed
+- **Settings View stability**: Resolved structural issues and compilation errors in `AppSettingsView.swift`, including method scope and brace balance fixes.
+- **Background Sync**: Improved reliability of background refresh and notification scheduling.
+
 ## [Unreleased] - 2026-01-08
 
 ### Added

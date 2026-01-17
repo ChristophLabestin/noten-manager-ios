@@ -128,7 +128,15 @@ struct ExamListView: View {
             } else {
                 LazyVStack(spacing: 10) {
                     ForEach(upcomingExams) { exam in
-                        examRow(exam)
+                        ExamRowView(exam: exam, showStatusIcon: false, onToggleReminder: {
+                            reminderExam = exam
+                        }, onMarkCompleted: {
+                            Task { await markExamCompleted(exam) }
+                        }, onUndoCompleted: nil, onTap: {
+                            detailExam = exam
+                        }) {
+                            contextMenuContent(for: exam)
+                        }
                     }
                 }
             }
@@ -146,7 +154,15 @@ struct ExamListView: View {
             ) {
                 LazyVStack(spacing: 10) {
                     ForEach(waitingForGradeExams) { exam in
-                        examRow(exam)
+                        ExamRowView(exam: exam, showStatusIcon: false, onToggleReminder: {
+                            reminderExam = exam
+                        }, onMarkCompleted: {
+                            Task { await markExamCompleted(exam) }
+                        }, onUndoCompleted: nil, onTap: {
+                            detailExam = exam
+                        }) {
+                            contextMenuContent(for: exam)
+                        }
                     }
                 }
             }
@@ -164,7 +180,14 @@ struct ExamListView: View {
             ) {
                 LazyVStack(spacing: 10) {
                     ForEach(Array(completedExams.prefix(visibleCompletedCount))) { exam in
-                        examRow(exam)
+                        ExamRowView(exam: exam, showStatusIcon: false, onToggleReminder: nil, onMarkCompleted: nil, onUndoCompleted: {
+                            Task { await markExamNotCompleted(exam) }
+                        }, onTap: {
+                            detailExam = exam
+                        }) {
+                            contextMenuContent(for: exam)
+                        }
+                        .contextMenu { contextMenuContent(for: exam) }
                     }
                     if completedExams.count > visibleCompletedCount {
                         let remaining = completedExams.count - visibleCompletedCount
@@ -176,9 +199,46 @@ struct ExamListView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(SoftTintButtonStyle(accent: .green))
+                        .padding(.top, 4)
                     }
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func contextMenuContent(for exam: Exam) -> some View {
+        if !exam.isCompleted {
+            Button {
+                if isFachreferatExam(exam) { fachreferatExam = exam } else { examForNewGrade = exam }
+            } label: {
+                Label("Note eintragen", systemImage: "pencil")
+            }
+            Button {
+                reminderExam = exam
+            } label: {
+                Label("Erinnerung", systemImage: reminderIconName(exam))
+            }
+        } else {
+             Button {
+                Task { await markExamNotCompleted(exam) }
+            } label: {
+                Label("Als offen markieren", systemImage: "arrow.uturn.backward")
+            }
+        }
+        
+        Button {
+            presentShareLink(for: exam)
+        } label: {
+            Label("Teilen", systemImage: "square.and.arrow.up")
+        }
+        
+        Divider()
+        
+        Button(role: .destructive) {
+            examToDelete = exam
+        } label: {
+            Label("Löschen", systemImage: "trash")
         }
     }
 
@@ -387,187 +447,7 @@ struct ExamListView: View {
             }
     }
 
-    @ViewBuilder
-    private func examRow(_ exam: Exam) -> some View {
 
-        let now = Date()
-        let requiresGrade = exam.requiresGrade ?? true
-        let isFachreferat = isFachreferatExam(exam)
-        let isOverdueAttention = requiresGrade && !exam.isCompleted && !exam.isActive
-        let canMarkCompleted = !exam.isCompleted && exam.date <= now
-        let linkedGrade = linkedGrade(for: exam)
-        let canUndoCompleted = exam.isCompleted && linkedGrade == nil
-        
-        let hasActiveReminder = exam.reminderAt != nil && (exam.reminderAt! > now)
-        
-        let accentColor: Color = {
-            if isOverdueAttention { return .red }
-            if exam.isCompleted { return .green }
-            return .blue
-        }()
-
-        VStack(alignment: .leading, spacing: 10) {
-            // Main Content Row
-            HStack(alignment: .top, spacing: 16) {
-                // 1. Date Block Anchor (Left)
-                VStack(spacing: 0) {
-                    Text(examDayFormatter.string(from: exam.date))
-                        .font(.title3.weight(.bold))
-                    Text(examMonthFormatter.string(from: exam.date).uppercased())
-                        .font(.caption2.weight(.bold))
-                }
-                .foregroundStyle(accentColor)
-                .frame(width: 50, height: 50)
-                .background(accentColor.opacity(0.1))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                
-                // 2. Info Content (Center)
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 4) {
-                        let subjectName = resolvedSubjectName(for: exam)
-                        Text(subjectName.isEmpty ? "ALLGEMEIN" : subjectName.uppercased())
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(.secondary)
-                        
-                        if exam.isShared {
-                            Image(systemName: "person.2.fill")
-                                .font(.caption2)
-                                .foregroundStyle(.blue)
-                        }
-                        if exam.hasTime {
-                            Text("• \(reminderTimeFormatter.string(from: exam.date))")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    
-                    Text(exam.title)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    
-                    if exam.isShared {
-                        let contextName = store.resolveContextName(groupId: exam.groupId, courseId: exam.courseId)
-                            .replacingOccurrences(of: resolvedSubjectName(for: exam), with: "")
-                            .trimmingCharacters(in: .punctuationCharacters)
-                            .trimmingCharacters(in: .whitespaces)
-                        if !contextName.isEmpty {
-                            Text(contextName)
-                                .font(.caption2)
-                                .foregroundStyle(.blue)
-                        }
-                    }
-                }
-                
-                Spacer(minLength: 0)
-                
-                // 3. Bell Icon & Menu (Top Right)
-                VStack(spacing: 8) {
-                    if !exam.isCompleted {
-                        Button {
-                            reminderExam = exam
-                        } label: {
-                            Image(systemName: hasActiveReminder ? "bell.fill" : "bell")
-                                .font(.subheadline)
-                                .foregroundStyle(hasActiveReminder ? .orange : Color.secondary)
-                                .padding(8)
-                                .background(Color.secondary.opacity(0.05))
-                                .clipShape(Circle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    
-                    Menu {
-                        if !exam.isCompleted && requiresGrade {
-                            Button {
-                                if isFachreferatExam(exam) { fachreferatExam = exam } else { examForNewGrade = exam }
-                            } label: {
-                                Label("Note eintragen", systemImage: "pencil")
-                            }
-                        }
-                        Button(role: .destructive) {
-                            examToDelete = exam
-                        } label: {
-                            Label("Löschen", systemImage: "trash")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .font(.subheadline)
-                            .foregroundStyle(Color.secondary)
-                            .padding(8)
-                            .background(Color.secondary.opacity(0.05))
-                            .clipShape(Circle())
-                    }
-                }
-            }
-            
-            // Action Buttons Row (Bottom)
-            if !exam.isCompleted && requiresGrade {
-                HStack(spacing: 10) {
-                    // Note / Fachreferat Button
-                    actionButton(
-                        icon: isFachreferatExam(exam) ? "doc.text" : "pencil.and.list.clipboard",
-                        tint: .indigo,
-                        label: isFachreferatExam(exam) ? "Fachreferat" : "Note eintragen"
-                    ) {
-                        if isFachreferatExam(exam) { fachreferatExam = exam } else { examForNewGrade = exam }
-                    }
-                    
-                    // Nachtermin Button (only for overdue exams)
-                    if isOverdueAttention {
-                        actionButton(
-                            icon: "calendar.badge.clock",
-                            tint: .blue,
-                            label: "Nachtermin"
-                        ) {
-                            rescheduleExam = exam
-                            rescheduleDate = Date()
-                            showRescheduleSheet = true
-                        }
-                    }
-                }
-            } else if canMarkCompleted {
-                // Checkmark for exams that can be marked completed
-                Button { Task { await markExamCompleted(exam) } } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "checkmark.circle")
-                            .font(.system(size: 16, weight: .semibold))
-                        Text("Erledigt")
-                            .font(.footnote.weight(.semibold))
-                    }
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 10)
-                    .background(Color.green.opacity(0.12))
-                    .foregroundStyle(.green)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                }
-                .buttonStyle(.plain)
-            } else if exam.isCompleted || !requiresGrade {
-                // Context Menu for completed exams or exams that don't require grade
-                HStack(spacing: 10) {
-                    actionButton(icon: "info.circle", tint: .secondary, label: "Info") {
-                        detailExam = exam
-                    }
-                    actionButton(icon: "slider.horizontal.3", tint: .orange, label: "Bearbeiten") {
-                        editingExam = exam
-                    }
-                    if canUndoCompleted {
-                        actionButton(icon: "arrow.uturn.backward", tint: .orange, label: "Öffnen") {
-                            Task { await markExamNotCompleted(exam) }
-                        }
-                    }
-                }
-            }
-        }
-        .padding(12)
-        .background(Color.formSectionBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .contentShape(Rectangle())
-        .onTapGesture {
-            detailExam = exam
-        }
-    }
 
     private func formattedExamDate(_ exam: Exam) -> String {
         let formatter = DateFormatter()
@@ -629,32 +509,7 @@ struct ExamListView: View {
         }
     }
 
-    private func attentionBadge(_ text: String, color: Color) -> some View {
-        Text(text)
-            .font(.caption2.weight(.semibold))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-        .background(color.opacity(0.12))
-        .foregroundStyle(color)
-        .clipShape(Capsule())
-    }
 
-    private func actionButton(icon: String, tint: Color, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 14, weight: .semibold))
-                Text(label)
-                    .font(.footnote.weight(.semibold))
-            }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 10)
-            .background(tint.opacity(0.12))
-            .foregroundStyle(tint)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
-        .buttonStyle(.plain)
-    }
 
     private func markExamCompleted(_ exam: Exam) async {
         if exam.isShared {
@@ -774,6 +629,26 @@ struct ExamDetailSheet: View {
         return store.groupNames[gid] ?? gid
     }
 
+    private var potentialDuplicate: Exam? {
+        guard !exam.isShared else { return nil } // Only local exams can be merged into shared ones
+        let resolveLocal = store.resolveLocalSubjectNameForExam(exam) ?? exam.subjectName
+        let normalizedLocal = resolveLocal.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        
+        return store.allExams.first { candidate in
+            guard candidate.id != exam.id else { return false }
+            guard candidate.isShared else { return false } // Must be shared
+            
+            // Check Date (Day precision)
+            if !Calendar.current.isDate(candidate.date, inSameDayAs: exam.date) { return false }
+            
+            // Check Subject
+            let resolveCandidate = store.resolveLocalSubjectNameForExam(candidate) ?? candidate.subjectName
+            let normalizedCandidate = resolveCandidate.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            
+            return normalizedCandidate == normalizedLocal
+        }
+    }
+
     private var formattedDate: String {
         let fmt = DateFormatter()
         fmt.dateStyle = .full
@@ -859,6 +734,39 @@ struct ExamDetailSheet: View {
                         }
                     }
 
+
+                    
+                    if let duplicate = potentialDuplicate {
+                        SettingsCard(
+                            title: "Doppelter Eintrag?",
+                            subtitle: "Ähnliche Prüfung gefunden",
+                            systemImage: "exclamationmark.triangle.fill",
+                            accent: .red
+                        ) {
+                            SettingsSectionBox {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text("Wir haben eine geteilte Prüfung am selben Tag im selben Fach gefunden.")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                    
+                                    Button {
+                                        Task {
+                                            try? await store.mergeLocalExamIntoShared(localExam: exam, sharedExam: duplicate)
+                                            dismiss()
+                                        }
+                                    } label: {
+                                        HStack {
+                                            Image(systemName: "arrow.merge")
+                                            Text("Zusammenführen")
+                                        }
+                                        .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(SoftTintButtonStyle(accent: .red))
+                                }
+                            }
+                        }
+                    }
+
                     if let notes = exam.notes, !notes.isEmpty {
                         SettingsCard(
                             title: "Notizen",
@@ -926,89 +834,72 @@ struct ExamDetailSheet: View {
                             }
                         }
                     }
+
+                    if !exam.isCompleted && exam.requiresGrade == true && Date() > exam.date {
+                        SettingsCard(
+                            title: "Nachtermin",
+                            subtitle: "Prüfung verschieben",
+                            systemImage: "calendar.badge.exclamationmark",
+                            accent: .red
+                        ) {
+                            SettingsSectionBox {
+                                Button {
+                                    rescheduleDate = Date()
+                                    showReschedulePicker = true
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        ZStack {
+                                            Circle()
+                                                .fill(Color.red.opacity(0.15))
+                                                .frame(width: 36, height: 36)
+                                            Image(systemName: "arrow.uturn.right")
+                                                .foregroundStyle(.red)
+                                                .font(.subheadline.weight(.semibold))
+                                        }
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("Nachtermin eintragen")
+                                                .font(.headline)
+                                                .foregroundStyle(Color.primary)
+                                            Text("Setzt Prüfung auf neuen Termin")
+                                                .font(.caption)
+                                                .foregroundStyle(Color.secondary)
+                                        }
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .foregroundStyle(Color.secondary)
+                                    }
+                                    .padding(10)
+                                    .background(Color.formInputBackground)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+
+                    Button(role: .destructive) {
+                        showDeleteAlert = true
+                    } label: {
+                        SettingsCard(
+                            title: "Löschen",
+                            subtitle: "Unwiderruflich entfernen",
+                            systemImage: "trash",
+                            accent: .red
+                        ) {
+                            SettingsSectionBox {
+                                Text("Klausur löschen")
+                                    .font(.headline)
+                                    .foregroundStyle(.red)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 4)
+                            }
+                        }
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
-
-                if !exam.isCompleted && exam.requiresGrade == true && Date() > exam.date {
-                    SettingsCard(
-                        title: "Nachtermin",
-                        subtitle: "Prüfung verschieben",
-                        systemImage: "calendar.badge.exclamationmark",
-                        accent: .red
-                    ) {
-                        SettingsSectionBox {
-                            Button {
-                                rescheduleDate = Date()
-                                showReschedulePicker = true
-                            } label: {
-                                HStack(spacing: 12) {
-                                    ZStack {
-                                        Circle()
-                                            .fill(Color.red.opacity(0.15))
-                                            .frame(width: 36, height: 36)
-                                        Image(systemName: "arrow.uturn.right")
-                                            .foregroundStyle(.red)
-                                            .font(.subheadline.weight(.semibold))
-                                    }
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("Nachtermin eintragen")
-                                            .font(.headline)
-                                            .foregroundStyle(Color.primary)
-                                        Text("Setzt Prüfung auf neuen Termin")
-                                            .font(.caption)
-                                            .foregroundStyle(Color.secondary)
-                                    }
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .foregroundStyle(Color.secondary)
-                                }
-                                .padding(10)
-                                .background(Color.formInputBackground)
-                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-                
-                Button(role: .destructive) {
-                    showDeleteAlert = true
-                } label: {
-                    SettingsCard(
-                        title: "Löschen",
-                        subtitle: "Unwiderruflich entfernen",
-                        systemImage: "trash",
-                        accent: .red
-                    ) {
-                        SettingsSectionBox {
-                            Text("Klausur löschen")
-                                .font(.headline)
-                                .foregroundStyle(.red)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 4)
-                        }
-                    }
-                }
             }
             .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
-            .alert("Prüfung löschen?", isPresented: $showDeleteAlert) {
-                Button("Löschen", role: .destructive) {
-                    Task {
-                        if exam.isShared {
-                            if let gid = exam.groupId {
-                                await store.deleteSharedExamFromGroup(groupId: gid, id: exam.id)
-                            }
-                        } else {
-                            await store.deleteExamFromFirestore(id: exam.id)
-                        }
-                        dismiss()
-                    }
-                }
-                Button("Abbrechen", role: .cancel) {}
-            } message: {
-                Text("Bist du sicher? Dies kann nicht widerrufen werden.")
-            }
             .sheet(isPresented: $showReschedulePicker) {
                 NavigationStack {
                     Form {

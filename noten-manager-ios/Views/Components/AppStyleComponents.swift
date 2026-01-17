@@ -36,6 +36,28 @@ extension View {
     func softFadeDown(enabled: Bool, delay: Double = 0, distance: CGFloat = 10, duration: Double = 0.45) -> some View {
         modifier(SoftFadeModifier(enabled: enabled, delay: delay, offset: -abs(distance), duration: duration))
     }
+
+    /// Blurs the content if Privacy Mode is active.
+    func privacyBlur() -> some View {
+        self.modifier(PrivacyBlurModifier())
+    }
+}
+
+struct PrivacyBlurModifier: ViewModifier {
+    @EnvironmentObject var store: GradesStore
+
+    func body(content: Content) -> some View {
+        content
+            .blur(radius: store.isPrivacyModeActive ? 12 : 0)
+            .overlay {
+                if store.isPrivacyModeActive {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(.ultraThinMaterial)
+                        .opacity(0.3)
+                }
+            }
+            .animation(.spring(response: 0.35, dampingFraction: 0.8), value: store.isPrivacyModeActive)
+    }
 }
 
 extension Color {
@@ -384,6 +406,7 @@ struct StatChip: View {
     let title: String
     let value: String
     let accent: Color
+    var isGreyedOut: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -396,12 +419,16 @@ struct StatChip: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
                 .monospacedDigit()
+                .privacyBlur()
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(chipSurface)
         .overlay(chipBorder)
+        .opacity(isGreyedOut ? 0.5 : 1.0)
+        .saturation(isGreyedOut ? 0.3 : 1.0)
     }
+
 
     private var chipTop: Color {
         if colorScheme == .dark {

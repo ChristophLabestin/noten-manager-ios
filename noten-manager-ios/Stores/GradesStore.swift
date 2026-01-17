@@ -281,6 +281,7 @@ final class GradesStore: ObservableObject {
     @Published var fachreferat: Fachreferat?
     @Published var seminarPerformance: SeminarPerformance?
     @Published var practicalPerformance: PracticalPerformance?
+    @Published var examPoints: [String: Double?] = [:] // Key = subjectName
     @Published var homeworks: [Homework] = []
     @Published var exams: [Exam] = []            // Eigene Prüfungen
     @Published var sharedExams: [Exam] = []      // Prüfungen aus gemeinsamer Gruppe
@@ -346,6 +347,7 @@ final class GradesStore: ObservableObject {
     @Published var encryptionSalt: String? = nil
     @Published var showHolidayHints: Bool = true
     @Published var userName: String? = nil
+    @Published var isPrivacyModeActive: Bool = false
 
     var preferredColorScheme: ColorScheme? {
         switch darkModeMode {
@@ -590,8 +592,6 @@ final class GradesStore: ObservableObject {
         sharedHomeworkUserSettingsListener = nil
         sharedHomeworkUserNotesListener?.remove()
         sharedHomeworkUserNotesListener = nil
-        sharedHomeworkUserNotesListener?.remove()
-        sharedHomeworkUserNotesListener = nil
         sharedHomeworkUserReminders = [:]
         sharedHomeworkUserNotes = [:]
         sharedHomeworkUserCompletedListener?.remove()
@@ -665,6 +665,7 @@ final class GradesStore: ObservableObject {
         seminarPerformance = nil
         activeSchoolYearId = nil
         schoolYears = []
+        isPrivacyModeActive = false
         schoolYearNames = [:]
         subjectCustomOrder = []
 
@@ -934,7 +935,7 @@ final class GradesStore: ObservableObject {
         return (id, schoolYearRef(uid: uid, id: id))
     }
 
-    private func requireYearRef(uid: String, allowCreation: Bool = true, gateOnOnboarding: Bool = true, allowLegacyMigration: Bool = false, allowedLegacySubjects: Set<String>? = nil, setMigratedFlag: Bool = true) async throws -> DocumentReference {
+    func requireYearRef(uid: String, allowCreation: Bool = true, gateOnOnboarding: Bool = true, allowLegacyMigration: Bool = false, allowedLegacySubjects: Set<String>? = nil, setMigratedFlag: Bool = true) async throws -> DocumentReference {
         if let id = activeSchoolYearId {
             return schoolYearRef(uid: uid, id: id)
         }
@@ -1351,6 +1352,7 @@ final class GradesStore: ObservableObject {
                                            isElective: isElective)
                         }
                         self.subjects = subjectsData
+                        self.decryptExamPoints()
 
                         // Sicherstellen, dass für alle Subjects ein Grades-Listener existiert
                         self.setupGradesListenersIfNeeded(uid: uid, schoolYearRef: yearRef, subjects: subjectsData)
@@ -1573,6 +1575,7 @@ final class GradesStore: ObservableObject {
 
         // New: Gruppen-Listener (/groups)
         updateGroupObservers(uid: uid, schoolYearId: schoolYearId)
+        startCourseMappingsListener()
         // Legacy-Gruppen-Listener sicherheitshalber ebenfalls aktivieren
         updateSharedExamsListenerIfNeeded()
         updateSharedHomeworksListenerIfNeeded()
@@ -2117,6 +2120,30 @@ final class GradesStore: ObservableObject {
         for sid in encryptedGradesCache.keys {
             decryptGradesForSubjectIfPossible(subjectId: sid)
         }
+        decryptExamPoints()
+    }
+
+    private func decryptExamPoints() {
+        guard let key = encryptionKey else {
+            self.examPoints = [:]
+            return
+        }
+        var next: [String: Double?] = [:]
+        for s in subjects {
+            var points: Double? = nil
+            if let enc = s.examPointsEncrypted {
+                do {
+                    let decrypted = try CryptoService.decryptString(enc, key: key)
+                    if let num = Double(decrypted), num.isFinite {
+                        points = num
+                    }
+                } catch {
+                    ErrorLoggingService.logErrorIfEnabled(error)
+                }
+            }
+            next[s.name] = points
+        }
+        self.examPoints = next
     }
 
     private func removeSatisfiedPendingGrades(for subjectId: String, decrypted: [(String, EncryptedGrade)]) {
@@ -2166,6 +2193,19 @@ final class GradesStore: ObservableObject {
     }
     var allHomeworks: [Homework] {
         homeworks + sharedHomeworks
+    }
+
+    var upcomingExams: [Exam] {
+        allExams.filter {
+            // Keep exams from today or future, and those not completed? 
+            // Usually upcoming includes incomplete past exams too?
+            // "Anstehend" usually implies future. "Wartet auf Note" are past but incomplete.
+            // Let's match typical "Upcoming" logic: Date >= today, OR (Date < today AND !isCompleted AND !requiresGrade).
+            // But usually "Upcoming" just means Date >= today.
+            // For now, simple filter: Date >= today (ignoring time component for today comparison so today is included)
+            Calendar.current.compare($0.date, to: Date(), toGranularity: .day) != .orderedAscending
+        }
+        .sorted { $0.date < $1.date }
     }
     
     func userNoteForExam(_ exam: Exam) -> String? {
@@ -2407,14 +2447,24 @@ final class GradesStore: ObservableObject {
     private func rebuildSharedExams() {
         let allExams = courseExamsMap.values.flatMap { $0 }
         // Unique by ID + Sort by date
-        let unique = Array(Set(allExams)).sorted(by: { $0.date < $1.date })
-        // Merge with legacy if needed (or replace)
-        // For migration period: Merge
+        // Use dictionary to dedup by ID, keeping the latest one if duplicates exist (though usually identical)
+        let uniqueMap = Dictionary(grouping: allExams, by: { $0.id })
+            .compactMapValues { $0.first }
+        
+        var unique = Array(uniqueMap.values)
+        
         let legacy = legacySharedExams
-        let combined = Array(Set(unique + legacy)).sorted(by: { $0.date < $1.date })
+        // Merge legacy: if ID exists in unique, use unique (newer), else add legacy
+        for l in legacy {
+            if uniqueMap[l.id] == nil {
+                unique.append(l)
+            }
+        }
+        
+        let finalExams = unique.sorted(by: { $0.date < $1.date })
         
         DispatchQueue.main.async { [weak self] in
-            self?.sharedExams = combined
+            self?.sharedExams = finalExams
         }
     }
 
@@ -2425,13 +2475,90 @@ final class GradesStore: ObservableObject {
     
     private func rebuildSharedHomeworks() {
         let allHw = courseHomeworksMap.values.flatMap { $0 }
-        let unique = Array(Set(allHw)).sorted(by: { ($0.dueDate ?? Date.distantFuture) < ($1.dueDate ?? Date.distantFuture) })
+        let uniqueMap = Dictionary(grouping: allHw, by: { $0.id })
+            .compactMapValues { $0.first }
+        
+        var unique = Array(uniqueMap.values)
+        
         let legacy = legacySharedHomeworks
-        let combined = Array(Set(unique + legacy)).sorted(by: { ($0.dueDate ?? Date.distantFuture) < ($1.dueDate ?? Date.distantFuture) })
+        for l in legacy {
+            if uniqueMap[l.id] == nil {
+                unique.append(l)
+            }
+        }
+        
+        let finalHw = unique.sorted(by: { ($0.dueDate ?? Date.distantFuture) < ($1.dueDate ?? Date.distantFuture) })
         
         DispatchQueue.main.async { [weak self] in
-            self?.sharedHomeworks = combined
+            self?.sharedHomeworks = finalHw
         }
+    }
+
+    // MARK: - Subject Mapping Logic
+
+    @Published var courseMappings: [String: String] = [:] // courseId -> localSubjectName (or ID)
+    private var courseMappingsListener: ListenerRegistration?
+
+    func subjectName(for course: Course) -> String {
+        // 1. Check manual mapping
+        if let mappedName = courseMappings[course.id] {
+            return mappedName
+        }
+        // 2. Default to course name
+        return course.name
+    }
+
+    func saveCourseMapping(courseId: String, subjectName: String) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        let yearRef = try await requireYearRef(uid: uid)
+        try await yearRef.collection("courseMappings").document(courseId).setData([
+            "courseId": courseId,
+            "localSubjectId": subjectName
+        ], merge: true)
+    }
+
+    func startCourseMappingsListener() {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        Task {
+            guard let yearRef = try? await requireYearRef(uid: uid) else { return }
+            
+            await MainActor.run {
+                courseMappingsListener?.remove()
+                courseMappingsListener = yearRef.collection("courseMappings").addSnapshotListener { [weak self] (snap: QuerySnapshot?, error: Error?) in
+                    guard let self, let docs = snap?.documents else { return }
+                    var newMap: [String: String] = [:]
+                    for doc in docs {
+                        if let local = doc.data()["localSubjectId"] as? String {
+                            newMap[doc.documentID] = local
+                        }
+                    }
+                    self.courseMappings = newMap
+                }
+            }
+        }
+    }
+
+
+    
+    // Check for missing subjects for a class
+    func missingSubjects(for classId: String) -> [Course] {
+         // Filter courses for this class that:
+         // 1. Are in 'courses' list (subscribed)
+         // 2. Have NO matching subject in 'subjects' (by name check)
+         // 3. AND have NO existing mapping
+         
+         let classCourses = courses.filter { $0.classId == classId }
+         let localSubjectNames = Set(subjects.map { $0.name.lowercased() })
+         
+         return classCourses.filter { course in
+             // If mapped, it's resolved
+             if courseMappings[course.id] != nil { return false }
+             
+             // Check direct name match
+             if localSubjectNames.contains(course.name.lowercased()) { return false }
+             
+             return true
+         }
     }
 
     // MARK: - User-Settings + Key
@@ -2697,6 +2824,11 @@ final class GradesStore: ObservableObject {
         }
     }
 
+    func updatePrivacyMode(active: Bool) {
+        self.isPrivacyModeActive = active
+        UserDefaults.standard.set(active, forKey: "grades_isPrivacyModeActive")
+    }
+
     private func loadLocalPreferences() {
         let defaults = UserDefaults.standard
 
@@ -2753,6 +2885,7 @@ final class GradesStore: ObservableObject {
             showHolidayHints = true
         }
 
+        isPrivacyModeActive = defaults.bool(forKey: "grades_isPrivacyModeActive")
         Task { await self.applyAppIconSelectionIfNeeded() }
     }
 
@@ -4259,7 +4392,7 @@ final class GradesStore: ObservableObject {
         // Local cleanup (just mark the group as migrated, no subscription changes)
         await MainActor.run {
             // Keep in groupIds so listeners continue
-            migratedGroupIds.insert(groupCode)
+            _ = migratedGroupIds.insert(groupCode)
         }
     }
     
@@ -7485,6 +7618,7 @@ final class GradesStore: ObservableObject {
         // Anwenderspezifische Erinnerungen/Erledigt-Status anwenden
         applySharedExamUserReminders()
         applySharedExamUserCompletion()
+        applySharedExamUserRescheduledDates()
         applySharedHomeworkUserCompletion()
         applySharedHomeworkUserReminders()
 

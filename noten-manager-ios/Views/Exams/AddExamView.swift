@@ -459,10 +459,57 @@ struct AddExamView: View {
                 }
             }
         }
+        .alert("Doppelter Termin?", isPresented: $showDuplicateAlert) {
+            Button("Trotzdem anlegen") {
+                Task { await performSave() }
+            }
+            Button("Abbrechen", role: .cancel) { }
+        } message: {
+            Text("Am \(date.formatted(date: .numeric, time: .omitted)) ist bereits eine Prüfung in \(conflictingExamSubject) eingetragen. Möchtest du diesen Termin trotzdem anlegen?")
+        }
     }
+
+    @State private var showDuplicateAlert: Bool = false
+    @State private var conflictingExamSubject: String = ""
 
     private func save() async {
         guard !isSaving else { return }
+        // Basic validation first
+        if title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            error = isGeneralEvent ? "Bitte einen Titel für den Termin eingeben." : "Bitte einen Titel für die Klausur eingeben."
+            return
+        }
+        
+        // Check for duplicates
+        if await checkForDuplicates() {
+            showDuplicateAlert = true
+            return
+        }
+        
+        await performSave()
+    }
+    
+    private func checkForDuplicates() async -> Bool {
+        let examDate = combinedExamDate()
+        
+        // No checks for general events
+        if isGeneralEvent { return false }
+        
+        let dayStart = Calendar.current.startOfDay(for: examDate)
+        
+        // Check for ANY exam on that day (ignoring general events which have requiresGrade == false)
+        if let conflict = store.allExams.first(where: { exam in
+            let isExam = (exam.requiresGrade ?? true)
+            let sameDate = Calendar.current.isDate(exam.date, inSameDayAs: dayStart)
+            return isExam && sameDate
+        }) {
+            conflictingExamSubject = conflict.subjectName
+            return true
+        }
+        return false
+    }
+
+    private func performSave() async {
         isSaving = true
         error = nil
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)

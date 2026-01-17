@@ -52,26 +52,18 @@ struct GroupsListView: View {
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 4) {
+                HStack(spacing: 0) {
+                    NavigationLink(destination: CalendarPageView().environmentObject(store)) {
+                        ToolbarIcon(symbol: "calendar", showDot: false)
+                    }
+                    .accessibilityLabel("Kalender öffnen")
+
                     Button {
                         onOpenCreationMenu()
                     } label: {
-                        Image(systemName: "plus")
-                            .font(.headline)
-                            .foregroundStyle(store.darkMode ? .white : .black)
+                        ToolbarIcon(symbol: "plus", showDot: false)
                     }
-                    
-                    Button {
-                        showExamSheet = true
-                    } label: {
-                        ToolbarIcon(symbol: "calendar.badge.clock", showDot: hasOverdueExams)
-                    }
-                    
-                    Button {
-                         showHomeworkSheet = true
-                    } label: {
-                        ToolbarIcon(symbol: "checklist", showDot: hasOverdueHomeworks || hasHomeworkDueTomorrow)
-                    }
+                    .accessibilityLabel("Neu hinzufügen")
                 }
             }
         }
@@ -82,12 +74,6 @@ struct GroupsListView: View {
                onOpenImportant: { NotificationCenter.default.post(name: .openLaunchOffer, object: nil) }
            )
            .environmentObject(store)
-        }
-        .sheet(isPresented: $showExamSheet) {
-            ExamListView().environmentObject(store)
-        }
-        .sheet(isPresented: $showHomeworkSheet) {
-            HomeworkListView().environmentObject(store)
         }
     }
 }

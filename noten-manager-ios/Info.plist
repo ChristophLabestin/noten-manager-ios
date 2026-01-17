@@ -65,5 +65,7 @@
 	<string>Face ID wird zum Entsperren des Noten Managers verwendet.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Die Kamera wird benötigt, um QR-Codes von Gruppen zu scannen.</string>
+	<key>FirebaseAppDelegateProxyEnabled</key>
+	<false/>
 </dict>
 </plist>

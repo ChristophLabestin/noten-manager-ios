@@ -5,6 +5,8 @@ import FirebaseFirestore
 
 struct HomeView: View {
     @EnvironmentObject var store: GradesStore
+    @EnvironmentObject var biometricManager: BiometricAuthManager
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var notificationInbox = NotificationInboxStore.shared
     var onOpenCreationMenu: () -> Void = {}
 
@@ -34,6 +36,10 @@ struct HomeView: View {
     @State private var subjectLinkActive: Bool = false
     @State private var showPraktikumDetail: Bool = false
     @State private var upcomingHoliday: HolidayWindow?
+    @State private var detailExam: Exam?
+    @State private var detailHomework: Homework?
+    @State private var editingExam: Exam?
+    @State private var editingHomework: Homework?
 
     private var subjectsWithoutFachreferat: [Subject] {
         store.subjects.filter { $0.name != "Fachreferat" }
@@ -107,17 +113,12 @@ struct HomeView: View {
     }
 
     private func getSubjectAverage(_ subject: Subject, subjectGrades: [String: [Grade]]) -> Double? {
-        let grades = subjectGrades[subject.name] ?? []
-        guard !grades.isEmpty else { return nil }
-        var total = 0.0
-        var totalWeight = 0.0
-        for g in grades {
-            let w = store.calculateGradeWeightForOverall(subject: subject, grade: g)
-            total += g.grade * w
-            totalWeight += w
-        }
-        guard totalWeight > 0 else { return nil }
-        return total / totalWeight
+        GradeCalculationService.calculateSubjectAverage(
+            subject: subject,
+            grades: subjectGrades[subject.name] ?? [],
+            dropValue: subject.droppedHalfYear,
+            effectiveGradeWeight: store.effectiveGradeWeight
+        )
     }
 
     private func baseSubjectsList() -> [Subject] {
@@ -244,23 +245,56 @@ struct HomeView: View {
         }
     }
 
+    private func handlePrivacyToggle() {
+        if store.isPrivacyModeActive {
+            // Unblur - require Face ID if enabled
+            if biometricManager.isEnabledForActiveUser {
+                Task {
+                    let success = await biometricManager.authenticate(reason: "Noten anzeigen")
+                    if success {
+                        store.updatePrivacyMode(active: false)
+                    }
+                }
+            } else {
+                store.updatePrivacyMode(active: false)
+            }
+        } else {
+            // Blur - no auth needed to blur
+            store.updatePrivacyMode(active: true)
+        }
+    }
+
     // MARK: - Overall formatting
 
-    private func overallAverage(subjectGrades: [String: [Grade]]) -> Double? {
-        guard !store.subjects.isEmpty else { return nil }
-        var total = 0.0
-        var totalWeight = 0.0
-        for subject in store.subjects {
-            if subject.isElective { continue }
-            let grades = subjectGrades[subject.name] ?? []
-            for g in grades {
-                let w = store.calculateGradeWeightForOverall(subject: subject, grade: g)
-                total += g.grade * w
-                totalWeight += w
-            }
+    private var overallComputedResult: GradeCalculationService.CalculationResult? {
+        let subjects = store.subjects.map {
+            GradeCalculationService.SubjectData.from(subject: $0, grades: store.gradesBySubject[$0.name] ?? [])
         }
-        guard totalWeight > 0 else { return nil }
-        return total / totalWeight
+        
+        var dropSelections: [String: Int?] = [:]
+        for s in store.subjects {
+            dropSelections[s.name] = s.droppedHalfYear
+        }
+        
+        let result = GradeCalculationService.makeFobosoSummary(
+            schoolType: store.schoolType,
+            gradeYear: store.gradeYear ?? 12,
+            subjects: subjects,
+            examPoints: store.examPoints,
+            dropSelections: dropSelections,
+            fachreferat: store.fachreferat,
+            practicalPerformance: store.practicalPerformance,
+            seminarPerformance: store.seminarPerformance,
+            effectiveGradeWeight: { type, weight in store.effectiveGradeWeight(subjectType: type, rawWeight: weight) }
+        )
+        
+        return result.maxPoints > 0 ? result : nil
+    }
+
+    private func overallAverage(subjectGrades: [String: [Grade]]) -> Double? {
+        let result = overallComputedResult
+        guard let res = result, res.maxPoints > 0 else { return nil }
+        return res.totalPoints / Double(res.maxPoints / 15)
     }
 
     private func formatAverage(_ value: Double?) -> String {
@@ -358,7 +392,7 @@ struct HomeView: View {
     }
 
     private var overallComputed: Double? {
-        overallAverage(subjectGrades: subjectGradesComputed)
+        overallAverage(subjectGrades: [:]) // parameter is ignored now
     }
 
     private var totalGradesCountComputed: Int {
@@ -479,75 +513,215 @@ struct HomeView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var overviewStats: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                StatChip(title: "Gesamt-Ø", value: formatAverage(overallComputed), accent: .indigo)
-                StatChip(title: "Fächer", value: "\(subjectsWithoutFachreferat.count)", accent: .cyan)
-                StatChip(title: "Noten", value: "\(totalGradesCountComputed)", accent: .orange)
+    private var overallGradeCard: some View {
+        let result = overallComputedResult
+        let average = result.map { $0.totalPoints / Double($0.maxPoints / 15) }
+        let grade1to6 = result?.grade.map { String(format: "%.2f", $0) } ?? "-"
+        
+        return HStack(spacing: 0) {
+            // Point Format (0-15)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Punkte (MSS)")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+                
+                Text(formatAverage(average))
+                    .font(.system(size: 42, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .monospacedDigit()
+                    .privacyBlur()
             }
-            upcomingStatusChips
+            .frame(maxWidth: .infinity, alignment: .leading)
+            
+            Divider()
+                .frame(height: 44)
+                .padding(.horizontal, 20)
+            
+            // Grade Format (1-6)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Note (Ø)")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+                
+                Text(grade1to6)
+                    .font(.system(size: 42, weight: .bold, design: .rounded))
+                    .foregroundStyle(gradeColor(average))
+                    .monospacedDigit()
+                    .privacyBlur()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(20)
+        .background(gradeCardSurface(accent: .indigo))
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(gradeCardBorder(accent: .indigo))
+        .shadow(
+            color: Color.black.opacity(colorScheme == .dark ? 0.45 : 0.08),
+            radius: 8,
+            x: 0,
+            y: 4
+        )
     }
 
-    private var upcomingStatuses: [UpcomingStatus] {
-        var items: [UpcomingStatus] = []
-        if overdueHomeworksCount > 0 {
-            items.append(
-                UpcomingStatus(
-                    title: countLabel(overdueHomeworksCount, singular: "Hausaufgabe fällig", plural: "Hausaufgaben fällig"),
-                    count: overdueHomeworksCount,
-                    systemImage: "exclamationmark.triangle.fill",
-                    accent: .orange
+    // Custom Card Style Helpers for OverallGradeCard
+    private func gradeCardSurface(accent: Color) -> some View {
+        let baseTop = (colorScheme == .dark)
+            ? (store.theme == "feminine" ? Color(hex: "#1b1022") : Color(hex: "#0b1220"))
+            : (store.theme == "feminine" ? Color(hex: "#fff1f7") : Color(hex: "#eef2ff"))
+            
+        let baseBottom = (colorScheme == .dark)
+            ? (store.theme == "feminine" ? Color(hex: "#120a16") : Color(hex: "#111827"))
+            : (store.theme == "feminine" ? Color(hex: "#fff7fb") : Color(hex: "#f8fafc"))
+            
+        return RoundedRectangle(cornerRadius: 22, style: .continuous)
+            .fill(
+                LinearGradient(
+                    colors: [baseTop, baseBottom],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
                 )
             )
-        }
-        if homeworkDueTomorrowCount > 0 {
-            items.append(
-                UpcomingStatus(
-                    title: countLabel(homeworkDueTomorrowCount, singular: "Hausaufgabe morgen", plural: "Hausaufgaben morgen"),
-                    count: homeworkDueTomorrowCount,
-                    systemImage: "clock.badge.exclamationmark",
-                    accent: .yellow
-                )
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                accent.opacity(colorScheme == .dark ? 0.08 : 0.05),
+                                Color.clear
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
             )
-        }
-        if upcomingExamsNextTwoWeeksCount > 0 {
-            items.append(
-                UpcomingStatus(
-                    title: countLabel(upcomingExamsNextTwoWeeksCount, singular: "Klausur steht an", plural: "Klausuren stehen an"),
-                    count: upcomingExamsNextTwoWeeksCount,
-                    systemImage: "calendar.badge.clock",
-                    accent: .red
-                )
-            )
-        }
-        return items
     }
 
-    private var upcomingStatusChips: some View {
+    private func gradeCardBorder(accent: Color) -> some View {
+        RoundedRectangle(cornerRadius: 22, style: .continuous)
+            .stroke(accent.opacity(colorScheme == .dark ? 0.18 : 0.12), lineWidth: 1)
+    }
+    
+    // Helper to convert points (0-15) to grade (1-6)
+    // Formula approximation: 17 - Points / 3 ... roughly
+    // Or standard Oberstufe table mapping.
+    // Using standard formula: Grade = (17 - Points) / 3
+    private func pointsToGrade(_ points: Double?) -> String {
+        guard let p = points else { return "-" }
+        let grade = (17.0 - p) / 3.0
+        return String(format: "%.2f", grade)
+    }
+
+    private var nextAppointmentView: some View {
         Group {
-            if upcomingStatuses.count <= 1 {
-                if let status = upcomingStatuses.first {
-                    UpcomingStatusChip(status: status, fillsWidth: true)
-                }
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(upcomingStatuses) { status in
-                            UpcomingStatusChip(status: status, fillsWidth: false)
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
+            if let next = getNextAppointment() {
+                nextAppointmentCard(next: next)
             }
         }
+    }
+
+    private func nextAppointmentCard(next: AppointmentType) -> some View {
+        let accent: Color
+        let systemImage: String
+        let title: String
+        let subject: String
+        let appointmentTitle: String
+        let date = next.date
+        let isOverdue = date < Date()
+
+        switch next {
+        case .exam(let exam):
+            accent = isOverdue ? .red : .blue
+            systemImage = isOverdue ? "calendar.badge.exclamationmark" : "calendar.badge.clock"
+            title = isOverdue ? "Überfällige Prüfung" : "Nächste Prüfung"
+            subject = store.resolveLocalSubjectNameForExam(exam) ?? exam.subjectName
+            appointmentTitle = exam.title
+        case .homework(let hw):
+            accent = isOverdue ? .red : .green
+            systemImage = isOverdue ? "doc.badge.ellipsis" : "doc.text.fill"
+            title = isOverdue ? "Überfällige Hausaufgabe" : "Nächste Hausaufgabe"
+            subject = store.resolveLocalSubjectNameForHomework(hw) ?? hw.subjectName
+            appointmentTitle = hw.title
+        }
+
+        return SettingsCard(
+            title: title,
+            subtitle: relativeDateString(for: date),
+            systemImage: systemImage,
+            accent: accent
+        ) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(subject.uppercased())
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(accent.opacity(0.8))
+                    
+                    Text(appointmentTitle)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                }
+                
+                Spacer()
+                
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .opacity(0.5)
+            }
+            .padding(.top, 4)
+        }
+        .onTapGesture {
+            switch next {
+            case .exam(let exam): detailExam = exam
+            case .homework(let hw): detailHomework = hw
+            }
+        }
+    }
+    
+    enum AppointmentType {
+        case exam(Exam)
+        case homework(Homework)
+        
+        var date: Date {
+            switch self {
+            case .exam(let e): return e.date
+            case .homework(let h): return h.dueDate ?? Date.distantFuture
+            }
+        }
+    }
+    
+    private func getNextAppointment() -> AppointmentType? {
+        let now = Date()
+        
+        // Filter exams in future
+        let nextExam = store.allExams
+            .filter { !$0.isCompleted && $0.date > now }
+            .min { $0.date < $1.date }
+            
+        // Filter homework in future
+        let nextHomework = store.allHomeworks
+            .filter { !$0.isCompleted && ($0.dueDate ?? Date.distantFuture) > now }
+            .min { ($0.dueDate ?? Date.distantFuture) < ($1.dueDate ?? Date.distantFuture) }
+            
+        if let exam = nextExam, let hw = nextHomework {
+            return exam.date < (hw.dueDate ?? Date.distantFuture) ? .exam(exam) : .homework(hw)
+        } else if let exam = nextExam {
+            return .exam(exam)
+        } else if let hw = nextHomework {
+            return .homework(hw)
+        }
+        return nil
+    }
+    
+    private func relativeDateString(for date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter.localizedString(for: date, relativeTo: Date())
     }
 
     private var subjectsControlCard: some View {
         SettingsCard(
             title: "Fächer & Noten",
-            subtitle: "Filter und Reihenfolge",
+            subtitle: "\(subjectsWithoutFachreferat.count) Fächer • \(totalGradesCountComputed) Noten",
             systemImage: "text.book.closed",
             accent: .cyan,
             trailing: {
@@ -598,10 +772,6 @@ struct HomeView: View {
         ) {
             VStack(alignment: .leading, spacing: 6) {
                 HalfYearFilterRow(halfYear: $halfYear)
-                Text("Ein Fach antippen, um Details und Noten zu öffnen.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -744,30 +914,34 @@ struct HomeView: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
 
-            overviewStats
+            overallGradeCard
                 .softFadeIn(enabled: animationsOn, delay: 0.04, offset: 12)
                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
 
-            if let upcomingHoliday {
-                holidayNoticeCard(info: upcomingHoliday)
-                    .softFadeIn(enabled: animationsOn, delay: 0.07, offset: 10)
-                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-            }
+            nextAppointmentView
+                .softFadeIn(enabled: animationsOn, delay: 0.07, offset: 10)
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
 
             subjectsControlCard
                 .softFadeIn(enabled: animationsOn, delay: 0.10, offset: 12)
                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
-
-
+            
+            if let upcomingHoliday {
+                holidayNoticeCard(info: upcomingHoliday)
+                    .softFadeIn(enabled: animationsOn, delay: 0.12, offset: 10)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
 
             sortingModeSection
-                .softFadeIn(enabled: animationsOn, delay: 0.12, offset: 10)
+                .softFadeIn(enabled: animationsOn, delay: 0.14, offset: 10)
         }
         .listSectionSeparator(.hidden)
     }
@@ -853,38 +1027,41 @@ struct HomeView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                Button {
-                    showNotifications = true
-                } label: {
-                    ToolbarIcon(
-                        symbol: "bell",
-                        showDot: notificationInbox.hasUnread || (LaunchOfferNotificationManager.isOfferActive() && !launchOfferPurchased)
-                    )
-                }
-                .accessibilityLabel("Benachrichtigungen")
-            }
-            ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 0) {
+                    Button {
+                        showNotifications = true
+                    } label: {
+                        ToolbarIcon(
+                            symbol: "bell",
+                            showDot: notificationInbox.hasUnread || (LaunchOfferNotificationManager.isOfferActive() && !launchOfferPurchased)
+                        )
+                    }
+                    .accessibilityLabel("Benachrichtigungen")
+
+                    Button {
+                        handlePrivacyToggle()
+                    } label: {
+                        ToolbarIcon(
+                            symbol: store.isPrivacyModeActive ? "eye.slash.fill" : "eye.fill",
+                            showDot: false
+                        )
+                    }
+                    .accessibilityLabel(store.isPrivacyModeActive ? "Privatsphäre-Modus deaktivieren" : "Privatsphäre-Modus aktivieren")
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                HStack(spacing: 0) {
+                    NavigationLink(destination: CalendarPageView().environmentObject(store)) {
+                        ToolbarIcon(symbol: "calendar", showDot: false)
+                    }
+                    .accessibilityLabel("Kalender öffnen")
+
                     Button {
                         onOpenCreationMenu()
                     } label: {
                         ToolbarIcon(symbol: "plus", showDot: false)
                     }
                     .accessibilityLabel("Neu hinzufügen")
-                    
-                    Button {
-                        showExamSheet = true
-                    } label: {
-                        ToolbarIcon(symbol: "calendar.badge.clock", showDot: hasOverdueExams)
-                    }
-                    .accessibilityLabel("Klausurtermine anzeigen")
-
-                    Button {
-                        showHomeworkSheet = true
-                    } label: {
-                        ToolbarIcon(symbol: "checklist", showDot: hasOverdueHomeworks || hasHomeworkDueTomorrow)
-                    }
-                    .accessibilityLabel("Aktive Hausaufgaben anzeigen")
                 }
             }
         }
@@ -937,6 +1114,22 @@ struct HomeView: View {
             computeGreeting()
             Task { await loadUserDisplayName() }
             Task { await loadUpcomingHolidayNotice() }
+        }
+        .sheet(item: $detailExam) { exam in
+            ExamDetailSheet(exam: exam, onEdit: { editingExam = $0 })
+                .environmentObject(store)
+        }
+        .sheet(item: $detailHomework) { hw in
+            HomeworkDetailSheet(homework: hw, onEdit: { editingHomework = $0 })
+                .environmentObject(store)
+        }
+        .sheet(item: $editingExam) { exam in
+            EditExamView(exam: exam)
+                .environmentObject(store)
+        }
+        .sheet(item: $editingHomework) { hw in
+            EditHomeworkView(homework: hw)
+                .environmentObject(store)
         }
         .onChange(of: store.showHolidayHints) { _, enabled in
             if enabled {
@@ -1713,17 +1906,19 @@ struct SubscriptionOfferSheetView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            VStack(alignment: .leading, spacing: 14) {
-                heroSection
-                planSelection
-                benefitsList
-                Spacer(minLength: 6)
-                ctaSection
-                finePrint
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 14) {
+                    heroSection
+                    planSelection
+                    benefitsList
+                    Spacer(minLength: 6)
+                    ctaSection
+                    finePrint
+                }
+                .frame(maxWidth: .infinity, minHeight: proxy.size.height, alignment: .top)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 20)
             }
-            .frame(maxWidth: .infinity, minHeight: proxy.size.height, alignment: .top)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 20)
         }
         .background(
             ThemedBackground(
@@ -1741,6 +1936,7 @@ struct SubscriptionOfferSheetView: View {
             switch result {
             case .success:
                 onPurchaseSuccess()
+                dismiss()
             case .failure(let error):
                 // StoreKit handles UI for failure usually, but we can log
                 print("Offer code redemption failed: \(error)")
@@ -2128,21 +2324,12 @@ struct SubjectRowView: View {
     let fachreferatSubjectName: String?
 
     private func avg(_ subject: Subject) -> Double? {
-        guard !grades.isEmpty else { return nil }
-        func calculateGradeWeight(_ subject: Subject, _ grade: Grade) -> Double {
-            if subject.name == "Fachreferat" { return 3 }
-            if subject.name == "Praktikum" { return 1 }
-            return store.effectiveGradeWeight(subjectType: subject.type, rawWeight: grade.weight)
-        }
-        var total = 0.0
-        var totalWeight = 0.0
-        for g in grades {
-            let w = calculateGradeWeight(subject, g)
-            total += g.grade * w
-            totalWeight += w
-        }
-        guard totalWeight > 0 else { return nil }
-        return total / totalWeight
+        GradeCalculationService.calculateSubjectAverage(
+            subject: subject,
+            grades: grades,
+            dropValue: subject.droppedHalfYear,
+            effectiveGradeWeight: store.effectiveGradeWeight
+        )
     }
 
     private func formatAverage(_ value: Double?) -> String {
@@ -2278,6 +2465,7 @@ struct SubjectRowView: View {
     var body: some View {
         let average = avg(subject)
         let gradesCount = grades.count
+        let isDropped = (subject.droppedHalfYear != nil && !grades.isEmpty && average == nil)
 
         let isFachreferat = subject.name == "Fachreferat"
         let isPraktikum = subject.name == "Praktikum"
@@ -2362,11 +2550,14 @@ struct SubjectRowView: View {
                 Text(formatAverage(average))
                     .font(.system(size: 22, weight: .bold, design: .rounded))
                     .monospacedDigit()
+                    .privacyBlur()
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .background(gradePillBackground(gradeClassColor(average)))
                     .foregroundStyle(gradeClassColor(average))
                     .clipShape(Capsule())
+                    .opacity(isDropped ? 0.5 : 1.0)
+                    .saturation(isDropped ? 0.3 : 1.0)
             }
         }
         .padding(16)
@@ -2461,103 +2652,7 @@ struct Tag: View {
     }
 }
 
-private struct UpcomingStatus: Identifiable {
-    let id = UUID()
-    let title: String
-    let count: Int?
-    let systemImage: String
-    let accent: Color
-}
 
-private struct UpcomingStatusChip: View {
-    @Environment(\.colorScheme) private var colorScheme
-    @EnvironmentObject private var store: GradesStore
-
-    let status: UpcomingStatus
-    let fillsWidth: Bool
-
-    var body: some View {
-        HStack(spacing: 8) {
-            if let countText {
-                Text(countText)
-                    .font(.caption.weight(.bold))
-                    .monospacedDigit()
-                    .foregroundStyle(status.accent)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(status.accent.opacity(colorScheme == .dark ? 0.20 : 0.12))
-                    )
-            }
-
-            Text(status.title)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-
-            Spacer(minLength: 0)
-
-            Image(systemName: status.systemImage)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(status.accent)
-        }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 10)
-        .frame(maxWidth: fillsWidth ? .infinity : nil, alignment: .leading)
-        .fixedSize(horizontal: !fillsWidth, vertical: false)
-        .background(tileSurface)
-        .overlay(tileBorder)
-    }
-
-    private var countText: String? {
-        guard let count = status.count else { return nil }
-        return "\(count)"
-    }
-
-    private var tileSurface: some View {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(
-                LinearGradient(
-                    colors: [tileTop, tileBottom],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                status.accent.opacity(colorScheme == .dark ? 0.08 : 0.05),
-                                Color.clear
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-            )
-    }
-
-    private var tileBorder: some View {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .stroke(status.accent.opacity(colorScheme == .dark ? 0.18 : 0.12), lineWidth: 1)
-    }
-
-    private var tileTop: Color {
-        if colorScheme == .dark {
-            return store.theme == "feminine" ? Color(hex: "#1b1022") : Color(hex: "#0b1220")
-        }
-        return store.theme == "feminine" ? Color(hex: "#fff5fb") : Color(hex: "#f1f5ff")
-    }
-
-    private var tileBottom: Color {
-        if colorScheme == .dark {
-            return store.theme == "feminine" ? Color(hex: "#120a16") : Color(hex: "#111827")
-        }
-        return store.theme == "feminine" ? Color(hex: "#fffafb") : Color(hex: "#f8fafc")
-    }
-}
 
 // MARK: - Extracted small views for HomeView body
 
@@ -2609,21 +2704,12 @@ struct SubjectGridItemView: View {
     let fachreferatSubjectName: String?
 
     private func avg(_ subject: Subject) -> Double? {
-        guard !grades.isEmpty else { return nil }
-        func calculateGradeWeight(_ subject: Subject, _ grade: Grade) -> Double {
-            if subject.name == "Fachreferat" { return 3 }
-            if subject.name == "Praktikum" { return 1 }
-            return store.effectiveGradeWeight(subjectType: subject.type, rawWeight: grade.weight)
-        }
-        var total = 0.0
-        var totalWeight = 0.0
-        for g in grades {
-            let w = calculateGradeWeight(subject, g)
-            total += g.grade * w
-            totalWeight += w
-        }
-        guard totalWeight > 0 else { return nil }
-        return total / totalWeight
+        GradeCalculationService.calculateSubjectAverage(
+            subject: subject,
+            grades: grades,
+            dropValue: subject.droppedHalfYear,
+            effectiveGradeWeight: store.effectiveGradeWeight
+        )
     }
 
     private func formatAverage(_ value: Double?) -> String {
@@ -2699,6 +2785,7 @@ struct SubjectGridItemView: View {
 
     var body: some View {
         let average = avg(subject)
+        let isDropped = (subject.droppedHalfYear != nil && !grades.isEmpty && average == nil)
         let accent = accent(for: subject)
         let base = cardBaseColors()
         let isFachreferat = subject.name == "Fachreferat"
@@ -2741,10 +2828,13 @@ struct SubjectGridItemView: View {
                 Text(formatAverage(average))
                     .font(.system(size: 16, weight: .bold, design: .rounded))
                     .monospacedDigit()
+                    .privacyBlur()
                     .foregroundStyle(gradeClassColor(average))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(gradePillBackground(gradeClassColor(average)))
+                    .opacity(isDropped ? 0.5 : 1.0)
+                    .saturation(isDropped ? 0.3 : 1.0)
             }
 
             if let avg = average {

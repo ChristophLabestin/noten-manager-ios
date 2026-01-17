@@ -81,7 +81,13 @@ struct EncryptedGrade: Codable {
     let updatedAt: Date?
 }
 
-struct Grade: Codable {
+protocol GradeProtocol {
+    var grade: Double { get }
+    var weight: Double { get }
+    var halfYear: Int? { get }
+}
+
+struct Grade: Codable, GradeProtocol {
     let grade: Double
     let weight: Double
     let date: Date
@@ -90,7 +96,7 @@ struct Grade: Codable {
     let linkedExamId: String?
 }
 
-struct GradeWithId: Codable, Identifiable {
+struct GradeWithId: Codable, Identifiable, GradeProtocol {
     let id: String
     let grade: Double
     let weight: Double

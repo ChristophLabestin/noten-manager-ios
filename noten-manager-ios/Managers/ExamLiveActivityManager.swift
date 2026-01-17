@@ -28,6 +28,8 @@ struct ExamCountdownAttributes: ActivityAttributes, Hashable {
 enum ExamLiveActivityManager {
     static let leadTime: TimeInterval = 90 * 60
     private static let themeKey = "grades_theme"
+    private static var autoEndTasks: [String: Task<Void, Never>] = [:]
+    private static var pushTokenTasks: [String: Task<Void, Never>] = [:]
 
     @MainActor
     static func syncLiveActivities(for exams: [Exam]) async {
@@ -40,11 +42,15 @@ enum ExamLiveActivityManager {
 
         for activity in activities {
             guard let exam = relevant.first(where: { $0.id == activity.attributes.examId }) else {
+                cancelAutoEnd(for: activity.id)
+                cancelPushTokenTask(for: activity.id)
                 await end(activity)
                 activityMap[activity.attributes.examId] = nil
                 continue
             }
             if exam.date <= now || exam.date.timeIntervalSince(now) > leadTime {
+                cancelAutoEnd(for: activity.id)
+                cancelPushTokenTask(for: activity.id)
                 await end(activity)
                 activityMap[activity.attributes.examId] = nil
                 continue
@@ -94,6 +100,8 @@ enum ExamLiveActivityManager {
     @available(iOS 16.2, *)
     @MainActor
     private static func end(_ activity: Activity<ExamCountdownAttributes>) async {
+        cancelAutoEnd(for: activity.id)
+        cancelPushTokenTask(for: activity.id)
         await activity.end(activity.content, dismissalPolicy: .immediate)
         await removePushRegistration(for: activity.id)
     }
@@ -148,15 +156,17 @@ enum ExamLiveActivityManager {
     @available(iOS 16.2, *)
     @MainActor
     private static func scheduleAutoEnd(for activity: Activity<ExamCountdownAttributes>, at date: Date) {
+        cancelAutoEnd(for: activity.id)
         let activityId = activity.id
         let delay = date.timeIntervalSinceNow
-        Task { @MainActor in
+        let task = Task { @MainActor in
             if delay > 0 {
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             }
             guard let latest = Activity<ExamCountdownAttributes>.activities.first(where: { $0.id == activityId }) else { return }
             await end(latest)
         }
+        autoEndTasks[activityId] = task
     }
 
     private static func triggerHaptic() async {
@@ -170,7 +180,8 @@ enum ExamLiveActivityManager {
     @available(iOS 16.2, *)
     private static func registerPushToken(for activity: Activity<ExamCountdownAttributes>, exam: Exam) async {
         guard let uid = Auth.auth().currentUser?.uid else { return }
-        Task {
+        cancelPushTokenTask(for: activity.id)
+        let task = Task {
             for await tokenData in activity.pushTokenUpdates {
                 let token = tokenData.map { String(format: "%02x", $0) }.joined()
                 await savePushRegistration(token: token, uid: uid, activity: activity, exam: exam)
@@ -178,6 +189,7 @@ enum ExamLiveActivityManager {
                 break
             }
         }
+        pushTokenTasks[activity.id] = task
     }
 
     @available(iOS 16.2, *)
@@ -206,6 +218,16 @@ enum ExamLiveActivityManager {
         let db = Firestore.firestore()
         let doc = db.collection("users").document(uid).collection("liveActivities").document(activityId)
         try? await doc.delete()
+    }
+
+    private static func cancelAutoEnd(for id: String) {
+        autoEndTasks[id]?.cancel()
+        autoEndTasks[id] = nil
+    }
+
+    private static func cancelPushTokenTask(for id: String) {
+        pushTokenTasks[id]?.cancel()
+        pushTokenTasks[id] = nil
     }
 
     @available(iOS 16.2, *)

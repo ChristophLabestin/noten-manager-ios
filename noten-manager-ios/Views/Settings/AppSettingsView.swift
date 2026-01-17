@@ -333,24 +333,19 @@ struct AppSettingsView: View {
                     }
                     .accessibilityLabel("Benachrichtigungen")
                 }
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 0) {
+                        NavigationLink(destination: CalendarPageView().environmentObject(store)) {
+                            ToolbarIcon(symbol: "calendar", showDot: false)
+                        }
+                        .accessibilityLabel("Kalender öffnen")
+
                         Button {
                             onOpenCreationMenu()
                         } label: {
                             ToolbarIcon(symbol: "plus", showDot: false)
                         }
                         .accessibilityLabel("Neu hinzufügen")
-
-                        Button { showExamSheet = true } label: {
-                            ToolbarIcon(symbol: "calendar.badge.clock", showDot: hasOverdueExams)
-                        }
-                        .accessibilityLabel("Klausurtermine anzeigen")
-
-                        Button { showHomeworkSheet = true } label: {
-                            ToolbarIcon(symbol: "checklist", showDot: hasOverdueHomeworks || hasHomeworkDueTomorrow)
-                        }
-                        .accessibilityLabel("Aktive Hausaufgaben anzeigen")
                     }
                 }
             }
@@ -361,10 +356,6 @@ struct AppSettingsView: View {
                 syncBiometricToggle()
                 Task { await refreshEmailVerification() }
                 loadCurrentDisplayName()
-            }
-            .sheet(isPresented: $showHomeworkSheet) {
-                HomeworkListView()
-                    .environmentObject(store)
             }
             .sheet(isPresented: $showNotifications) {
                 NotificationsInboxView(
@@ -391,10 +382,7 @@ struct AppSettingsView: View {
                 SchoolYearEditView()
                     .environmentObject(store)
             }
-            .sheet(isPresented: $showExamSheet) {
-                ExamListView()
-                    .environmentObject(store)
-            }
+
             .sheet(
                 isPresented: Binding(
                     get: { manageGroupId != nil },
@@ -918,6 +906,9 @@ struct AppSettingsView: View {
                 onPurchaseSuccess: {
                     Task {
                         await storeKit.refreshSubscriptionStatus()
+                        await MainActor.run {
+                            showSubscriptionOffer = false
+                        }
                     }
                 }
             )
@@ -929,7 +920,12 @@ struct AppSettingsView: View {
         .offerCodeRedemption(isPresented: $showOfferCodeSheet) { result in
             switch result {
             case .success:
-                Task { await storeKit.refreshSubscriptionStatus() }
+                Task {
+                    await storeKit.refreshSubscriptionStatus()
+                    await MainActor.run {
+                        showOfferCodeSheet = false
+                    }
+                }
             case .failure(let error):
                 print("Offer code redemption failed: \(error)")
             }
@@ -1444,6 +1440,24 @@ struct AppSettingsView: View {
             }
 
             SettingsSectionBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle(isOn: Binding(
+                        get: { store.isPrivacyModeActive },
+                        set: { _ in handleAppSettingsPrivacyToggle() }
+                    )) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Privatsphäre-Modus")
+                                .font(sectionHeaderFont)
+                            Text("Blende deine Noten aus. Benötigt \(biometricManager.biometryName()) zum Einblenden.")
+                                .font(helperFont)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .toggleStyle(SwitchToggleStyle(tint: .blue))
+                }
+            }
+
+            SettingsSectionBox {
                 Button(role: .destructive) {
                     Task {
                         store.stopListening()
@@ -1671,6 +1685,7 @@ struct AppSettingsView: View {
         }
     }
 
+
     private func saveName() async {
         guard !isSavingName else { return }
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1887,6 +1902,23 @@ struct AppSettingsView: View {
                 isUpdatingPassword = false
                 changePasswordError = mapAuthErrorMessage(error)
             }
+        }
+    }
+
+    private func handleAppSettingsPrivacyToggle() {
+        if store.isPrivacyModeActive {
+            if biometricManager.isEnabledForActiveUser {
+                Task {
+                    let success = await biometricManager.authenticate(reason: "Noten anzeigen")
+                    if success {
+                        store.updatePrivacyMode(active: false)
+                    }
+                }
+            } else {
+                store.updatePrivacyMode(active: false)
+            }
+        } else {
+            store.updatePrivacyMode(active: true)
         }
     }
 }
