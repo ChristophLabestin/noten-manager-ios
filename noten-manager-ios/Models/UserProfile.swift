@@ -10,4 +10,7 @@ struct UserProfile: Codable {
     // Course-Based Architecture
     let activeClassId: String?
     let subscribedCourseIds: [String]?
+    
+    // Migration Status
+    var hasSeenMigrationInfo: Bool?
 }

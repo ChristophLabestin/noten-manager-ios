@@ -128,29 +128,7 @@ struct ExamRowView<Actions: View>: View {
                 }
                 .buttonStyle(.plain)
 
-                if showStatusIcon {
-                    // Status Icon: Button
-                    Button {
-                        onTap?()
-                    } label: {
-                        Group {
-                            if exam.isCompleted {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .font(.title3)
-                                    .foregroundStyle(.green)
-                            } else if isOverdueAttention {
-                                Image(systemName: "exclamationmark.circle.fill")
-                                    .font(.title3)
-                                    .foregroundStyle(.red)
-                            } else {
-                                // Invisible placeholder to maintain layout if needed? 
-                               Color.clear.frame(width: 1, height: 1)
-                            }
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .opacity((exam.isCompleted || isOverdueAttention) ? 1 : 0) // Hide if no status
-                }
+
             }
         }
         .padding(12)

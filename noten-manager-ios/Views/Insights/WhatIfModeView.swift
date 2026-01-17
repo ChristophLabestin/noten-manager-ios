@@ -38,8 +38,9 @@ struct WhatIfModeView: View {
         store.sortedSubjectsForDisplay(store.subjects.filter { $0.name != "Fachreferat" })
     }
 
-    private var subjectType: Int {
-        subjects.first(where: { $0.name == subjectName })?.type ?? 0
+    private var gradingMode: GradingMode {
+        let subj = subjects.first(where: { $0.name == subjectName })
+        return subj?.gradingMode ?? ((subj?.type == 1) ? .withSchulaufgaben : .withoutSchulaufgaben)
     }
 
     private var currentAverage: Double? {
@@ -194,12 +195,12 @@ struct WhatIfModeView: View {
                                         .focused($focusedField, equals: .grade)
 
                                     Menu {
-                                        ForEach(weightOptions(for: subjectType), id: \.value) { option in
-                                            let isSelected: Bool = {
-                                                if case .preset(let value) = weightChoice {
-                                                    return value == option.value
-                                                }
-                                                return false
+                                                ForEach(weightOptions(for: gradingMode), id: \.title) { option in
+                                                    let isSelected: Bool = {
+                                                        if case .preset(let value) = weightChoice {
+                                                            return value == option.value
+                                                        }
+                                                        return false
                                             }()
                                             Button {
                                                 weightChoice = .preset(option.value)
@@ -233,8 +234,8 @@ struct WhatIfModeView: View {
                                         }
                                     } label: {
                                         HStack {
-                                            Text(selectedWeightLabel(for: subjectType))
-                                                .font(.subheadline.weight(.semibold))
+                                                Text(selectedWeightLabel(for: gradingMode))
+                                                    .font(.subheadline.weight(.semibold))
                                             Spacer()
                                             Image(systemName: "chevron.down")
                                                 .font(.caption.weight(.semibold))
@@ -264,7 +265,7 @@ struct WhatIfModeView: View {
                                         }
                                     } else {
                                         let weightInfo: String = {
-                                            if subjectType == 1 {
+                                            if gradingMode == .withSchulaufgaben {
                                                 return "Schulaufgaben zählen doppelt, Kurzarbeiten und Mündlich / EX einfach."
                                             }
                                             return "Kurzarbeiten zählen doppelt, Mündlich / EX einfach."
@@ -315,6 +316,7 @@ struct WhatIfModeView: View {
                             SettingsSectionBox {
                                 VStack(spacing: 1) {
                                     let sortedReal = realGradesForSubject.sorted(by: { $0.date > $1.date })
+                                    let gm = gradingMode
                                     ForEach(sortedReal) { gw in
                                         let isExcluded = excludedRealGradeIds.contains(gw.id)
                                         Button {
@@ -323,18 +325,18 @@ struct WhatIfModeView: View {
                                             } else {
                                                 excludedRealGradeIds.insert(gw.id)
                                             }
-                                        } label: {
-                                            HStack {
-                                                VStack(alignment: .leading, spacing: 2) {
-                                                    Text("Note \(formatGrade(gw.grade))")
-                                                        .font(.subheadline.weight(.semibold))
-                                                        .strikethrough(isExcluded)
-                                                    Text(weightLabel(for: gw.weight, isCustom: false, subjectType: subjectType))
-                                                        .font(.caption2)
-                                                        .foregroundStyle(.secondary)
-                                                }
-                                                Spacer()
-                                                Image(systemName: isExcluded ? "eye.slash" : "eye")
+                                            } label: {
+                                                HStack {
+                                                    VStack(alignment: .leading, spacing: 2) {
+                                                        Text("Note \(formatGrade(gw.grade))")
+                                                            .font(.subheadline.weight(.semibold))
+                                                            .strikethrough(isExcluded)
+                                                        Text(weightLabel(for: gw.weight, isCustom: false, gradingMode: gm))
+                                                            .font(.caption2)
+                                                            .foregroundStyle(.secondary)
+                                                    }
+                                                    Spacer()
+                                                    Image(systemName: isExcluded ? "eye.slash" : "eye")
                                                     .font(.caption)
                                                     .foregroundStyle(isExcluded ? .red : .blue)
                                             }
@@ -381,7 +383,7 @@ struct WhatIfModeView: View {
                                                         .foregroundStyle(.red)
                                                         .clipShape(Capsule())
                                                 }
-                                                Text("Note \(formatGrade(item.grade.grade)) · \(weightLabel(for: item.grade.weight, isCustom: false, subjectType: subjectTypeForName(item.subjectName)))\(halfYearLabel(for: item.grade.halfYear))")
+                                                Text("Note \(formatGrade(item.grade.grade)) · \(weightLabel(for: item.grade.weight, isCustom: false, gradingMode: gradingModeForName(item.subjectName)))\(halfYearLabel(for: item.grade.halfYear))")
                                                     .font(.caption)
                                                     .foregroundStyle(.secondary)
                                                     .strikethrough()
@@ -421,7 +423,7 @@ struct WhatIfModeView: View {
                                                         .foregroundStyle(.green)
                                                         .clipShape(Capsule())
                                                 }
-                                                Text("Note \(formatGrade(entry.grade)) · \(weightLabel(for: entry.weight, isCustom: entry.isCustomWeight, subjectType: subjectTypeForName(entry.subjectName)))\(halfYearLabel(for: entry.halfYear))")
+                                                Text("Note \(formatGrade(entry.grade)) · \(weightLabel(for: entry.weight, isCustom: entry.isCustomWeight, gradingMode: gradingModeForName(entry.subjectName)))\(halfYearLabel(for: entry.halfYear))")
                                                     .font(.caption)
                                                     .foregroundStyle(.secondary)
                                             }
@@ -638,24 +640,26 @@ struct WhatIfModeView: View {
         return value
     }
 
-    private func weightOptions(for subjectType: Int) -> [(title: String, value: Double)] {
-        if subjectType == 0 {
+    private func weightOptions(for gradingMode: GradingMode) -> [(title: String, value: Double)] {
+        switch gradingMode {
+        case .withSchulaufgaben:
+            return [
+                ("Schulaufgabe", 2),
+                ("Kurzarbeit", 1),
+                ("Mündlich / EX", 1)
+            ]
+        case .withoutSchulaufgaben:
             return [
                 ("Kurzarbeit", 1),
-                ("Mündlich / EX", 0)
+                ("Mündlich / EX", 1)
             ]
         }
-        return [
-            ("Schulaufgabe", 2),
-            ("Kurzarbeit", 1),
-            ("Mündlich / EX", 0)
-        ]
     }
 
-    private func selectedWeightLabel(for subjectType: Int) -> String {
+    private func selectedWeightLabel(for gradingMode: GradingMode) -> String {
         switch weightChoice {
         case .preset(let value):
-            let options = weightOptions(for: subjectType)
+            let options = weightOptions(for: gradingMode)
             if let match = options.first(where: { $0.value == value }) {
                 return match.title
             }
@@ -691,18 +695,19 @@ struct WhatIfModeView: View {
         return "\(prefix)\(String(format: "%.2f", value))"
     }
 
-    private func weightLabel(for weight: Double, isCustom: Bool, subjectType: Int) -> String {
+    private func weightLabel(for weight: Double, isCustom: Bool, gradingMode: GradingMode) -> String {
         if isCustom {
             return "Sonstige Leistung (\(formatWeight(abs(weight)))x)"
         }
-        if let match = weightOptions(for: subjectType).first(where: { $0.value == weight }) {
+        if let match = weightOptions(for: gradingMode).first(where: { $0.value == weight }) {
             return match.title
         }
         return "Gewicht \(formatWeight(weight))x"
     }
 
-    private func subjectTypeForName(_ name: String) -> Int {
-        subjects.first(where: { $0.name == name })?.type ?? 0
+    private func gradingModeForName(_ name: String) -> GradingMode {
+        let subj = subjects.first(where: { $0.name == name })
+        return subj?.gradingMode ?? ((subj?.type == 1) ? .withSchulaufgaben : .withoutSchulaufgaben)
     }
 
     private func halfYearLabel(for halfYear: Int?) -> String {

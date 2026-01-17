@@ -18,6 +18,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - **Insights Calculations**: Refactored `InsightsView` to use the unified `GradeCalculationService`, ensuring consistent grade reporting across the app.
 - **Biometric Management**: Streamlined `BiometricAuthManager` for more reliable authentication flows.
+- **Privacy Mode Coloring**: Updated the global grade coloring logic to hide the "traffic light" colors (red/orange/green) when Privacy Mode is active. Grades now appear in a neutral primary color to prevent visual guessing of grade quality.
 
 ### Fixed
 - **Settings View stability**: Resolved structural issues and compilation errors in `AppSettingsView.swift`, including method scope and brace balance fixes.

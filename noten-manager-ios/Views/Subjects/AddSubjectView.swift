@@ -5,8 +5,7 @@ struct AddSubjectView: View {
     @EnvironmentObject var store: GradesStore
 
     @State private var name: String = ""
-    @State private var type: Int = 1 // 1 = Hauptfach, 0 = Nebenfach
-    // Datum hat keine Funktion in der App, daher weggelassen
+    @State private var gradingMode: GradingMode = .withSchulaufgaben
     @State private var isElective: Bool = false
     @State private var isSaving: Bool = false
     @State private var error: String?
@@ -45,30 +44,19 @@ struct AddSubjectView: View {
 
                             SettingsSectionBox {
                                 VStack(alignment: .leading, spacing: 8) {
-                                    Text("Typ")
+                                    Text("Schulaufgaben in diesem Fach?")
                                         .font(.headline)
-                                    Picker("", selection: $type) {
-                                        Text("Hauptfach").tag(1)
-                                        Text("Nebenfach").tag(0)
+                                    Picker("", selection: $gradingMode) {
+                                        Text("Ja").tag(GradingMode.withSchulaufgaben)
+                                        Text("Nein").tag(GradingMode.withoutSchulaufgaben)
                                     }
                                     .pickerStyle(.segmented)
-                                    .disabled(isElective)
-
-                                    Text("Hauptfach: Schulaufgaben zählen doppelt, Kurzarbeiten und Mündlich / EX einfach.")
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
-                                    Text("Nebenfach: Kurzarbeiten zählen doppelt, Mündlich / EX einfach.")
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
                                 }
                             }
 
                             SettingsSectionBox {
                                 VStack(alignment: .leading, spacing: 8) {
                                     Toggle("Wahlfach / nicht einbringbar", isOn: $isElective)
-                                        .onChange(of: isElective) { _, newVal in
-                                            if newVal { type = 0 }
-                                        }
                                     Text("Wahlfächer fließen nicht in die Abschlussnote ein. Für Sport/Musik bitte als Wahlfach markieren.")
                                         .font(.footnote)
                                         .foregroundStyle(.secondary)
@@ -144,9 +132,11 @@ struct AddSubjectView: View {
             }
             try await store.addSubjectToFirestore(
                 name: trimmed,
-                type: type,
+                type: gradingMode == .withSchulaufgaben ? 1 : 0,
                 date: Date(),
-                isElective: isElective
+                isElective: isElective,
+                gradingMode: gradingMode,
+                expectedSchulaufgabenPerTerm: nil
             )
             dismiss()
         } catch {

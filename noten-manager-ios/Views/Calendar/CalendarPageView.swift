@@ -21,6 +21,7 @@ struct CalendarPageView: View {
     @State private var showLegend = false
     @State private var examToDelete: Exam?
     @State private var holidays: [HolidayPeriod] = []
+    @AppStorage("showNextExamCard") private var showNextExamCard: Bool = true
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -156,6 +157,21 @@ struct CalendarPageView: View {
                                  contextMenuContent(for: exam)
                             }
                         }
+                    }
+                    .padding(.horizontal, 16)
+                    
+                    // MARK: - Settings Toggle
+                    Divider().padding(.vertical, 8)
+                    
+                    SettingsCard(
+                        title: "Nächster Termin",
+                        subtitle: "Auf der Startseite anzeigen",
+                        systemImage: "calendar.badge.clock",
+                        accent: .blue
+                    ) {
+                        Toggle("", isOn: $showNextExamCard)
+                            .labelsHidden()
+                            .tint(.blue)
                     }
                     .padding(.horizontal, 16)
                 }

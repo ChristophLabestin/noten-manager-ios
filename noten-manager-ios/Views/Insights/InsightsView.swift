@@ -16,72 +16,49 @@ struct InsightsView: View {
         store.sortedSubjectsForDisplay(store.subjects.filter { $0.name != "Fachreferat" })
     }
 
-    private func subjectAverage(_ subject: Subject) -> Double? {
-        GradeCalculationService.calculateSubjectAverage(
-            subject: subject,
-            grades: store.gradesBySubject[subject.name] ?? [],
-            dropValue: subject.droppedHalfYear,
-            effectiveGradeWeight: store.effectiveGradeWeight
-        )
-    }
-
-    private var overallComputedResult: GradeCalculationService.CalculationResult {
-        let subjects = store.subjects.map {
-            GradeCalculationService.SubjectData.from(subject: $0, grades: store.gradesBySubject[$0.name] ?? [])
-        }
-        
-        var dropSelections: [String: Int?] = [:]
-        for s in store.subjects {
-            dropSelections[s.name] = s.droppedHalfYear
-        }
-        
-        return GradeCalculationService.makeFobosoSummary(
-            schoolType: store.schoolType,
-            gradeYear: store.gradeYear ?? 12,
-            subjects: subjects,
-            examPoints: store.examPoints,
-            dropSelections: dropSelections,
-            fachreferat: store.fachreferat,
-            practicalPerformance: store.practicalPerformance,
-            seminarPerformance: store.seminarPerformance,
-            effectiveGradeWeight: store.effectiveGradeWeight
-        )
-    }
-
-    private var overallMSS: Double? {
-        let res = overallComputedResult
-        guard res.maxPoints > 0 else { return nil }
-        return res.totalPoints / (Double(res.maxPoints) / 15.0)
-    }
+    private var overallMSS: Double? { overallAverageValue }
 
     private var overallAverageValue: Double? {
-        overallComputedResult.grade
+        GradeCalculationService.calculateOverallAverage(
+            subjects: store.subjects,
+            halfYearValueProvider: { subject, halfYear in
+                store.bestAvailableHalfYearValue(subject: subject, halfYear: halfYear)
+            },
+            droppedHalfYearProvider: { subject in
+                subject.droppedHalfYear
+            },
+            halfYearFilter: nil
+        )
     }
 
     private func halfYearAverage(_ halfYear: Int) -> Double? {
         guard halfYear == 1 || halfYear == 2 else { return nil }
-        
-        var total = 0.0
-        var totalWeight = 0.0
-        
-        for subject in subjectsWithoutFachreferat {
-            if subject.isElective { continue }
-            
-            if let avg = GradeCalculationService.calculateHalfYearAverage(
-                grades: store.gradesBySubject[subject.name] ?? [],
-                subjectType: subject.type,
-                halfYear: halfYear,
-                effectiveGradeWeight: store.effectiveGradeWeight
-            ) {
-                // To get a meaningful average, we weigh each subject equally in the points sum,
-                // or we sum all credits. Standard weighted average of averages for simplicity.
-                total += avg
-                totalWeight += 1.0
-            }
+        return GradeCalculationService.calculateOverallAverage(
+            subjects: store.subjects,
+            halfYearValueProvider: { subject, hy in
+                store.bestAvailableHalfYearValue(subject: subject, halfYear: hy)
+            },
+            droppedHalfYearProvider: { subject in
+                subject.droppedHalfYear
+            },
+            halfYearFilter: halfYear
+        )
+    }
+
+    private func subjectAverage(_ subject: Subject) -> Double? {
+        let droppedHalf = subject.droppedHalfYear
+        let v1 = droppedHalf == 1 ? nil : store.bestAvailableHalfYearValue(subject: subject, halfYear: 1)
+        let v2 = droppedHalf == 2 ? nil : store.bestAvailableHalfYearValue(subject: subject, halfYear: 2)
+        switch (v1, v2) {
+        case let (a?, b?):
+            return (a + b) / 2.0
+        case let (a?, nil):
+            return a
+        case let (nil, b?):
+            return b
+        default:
+            return nil
         }
-        
-        guard totalWeight > 0 else { return nil }
-        return total / totalWeight
     }
 
     private var totalGradesCount: Int {

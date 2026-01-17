@@ -15,13 +15,13 @@ struct GradeDetailSheet: View {
         if subjectType == 0 {
             return [
                 ("Kurzarbeit", 1),
-                ("Mündlich / EX", 0)
+                ("Mündlich / EX", 1)
             ]
         }
         return [
             ("Schulaufgabe", 2),
             ("Kurzarbeit", 1),
-            ("Mündlich / EX", 0)
+            ("Mündlich / EX", 1)
         ]
     }
 

@@ -29,7 +29,8 @@ struct SubjectDetailView: View {
     @State private var currentRoom: String?
     @State private var currentEmail: String?
     @State private var currentAlias: String?
-    @State private var currentSubjectType: Int
+@State private var currentSubjectType: Int
+@State private var currentGradingMode: GradingMode
     @State private var currentIsElective: Bool
     
     @State private var halfYear: HalfYearFilter = .all
@@ -87,6 +88,14 @@ struct SubjectDetailView: View {
         let current = currentSubjectName.trimmingCharacters(in: .whitespacesAndNewlines)
         return current.isEmpty ? "Fach bearbeiten" : current
     }
+
+    private var resolvedGradingMode: GradingMode {
+        currentGradingMode
+    }
+
+    private var accentPrimary: Color {
+        store.theme == "feminine" ? Color(hex: "#ec4899") : .indigo
+    }
     
     init(subject: Subject) {
         self.subject = subject
@@ -97,6 +106,8 @@ struct SubjectDetailView: View {
         _currentAlias = State(initialValue: subject.alias)
         _currentSubjectType = State(initialValue: subject.type)
         _currentIsElective = State(initialValue: subject.isElective)
+        let gm = subject.gradingMode ?? (subject.type == 1 ? .withSchulaufgaben : .withoutSchulaufgaben)
+        _currentGradingMode = State(initialValue: gm)
     }
     
 
@@ -119,18 +130,20 @@ struct SubjectDetailView: View {
         filteredGrades.sorted { $0.date > $1.date }
     }
     
-    private func weightOptions() -> [(title: String, value: Double)] {
-        if currentSubjectType == 0 {
+    private func weightOptions() -> [(title: String, value: Double, type: AssessmentType)] {
+        switch currentGradingMode {
+        case .withSchulaufgaben:
             return [
-                ("Kurzarbeit", 1),
-                ("Mündlich / EX", 0)
+                ("Schulaufgabe", 2, .schulaufgabe),
+                ("Kurzarbeit", 1, .kurzarbeit),
+                ("Mündlich / EX", 1, .muendlich)
+            ]
+        case .withoutSchulaufgaben:
+            return [
+                ("Kurzarbeit", 1, .kurzarbeit),
+                ("Mündlich / EX", 1, .muendlich)
             ]
         }
-        return [
-            ("Schulaufgabe", 2),
-            ("Kurzarbeit", 1),
-            ("Mündlich / EX", 0)
-        ]
     }
     
     private func formatWeight(_ value: Double) -> String {
@@ -141,12 +154,28 @@ struct SubjectDetailView: View {
     }
     
     private func averageForSubject() -> Double? {
-        GradeCalculationService.calculateSubjectAverage(
-            subject: subject,
-            grades: filteredGrades,
-            dropValue: halfYear == .all ? subject.droppedHalfYear : nil,
-            effectiveGradeWeight: store.effectiveGradeWeight
-        )
+        let droppedHalf = subject.droppedHalfYear
+        switch halfYear {
+        case .all:
+            let v1 = droppedHalf == 1 ? nil : store.bestAvailableHalfYearValue(subject: subject, halfYear: 1)
+            let v2 = droppedHalf == 2 ? nil : store.bestAvailableHalfYearValue(subject: subject, halfYear: 2)
+            switch (v1, v2) {
+            case let (a?, b?):
+                return (a + b) / 2.0
+            case let (a?, nil):
+                return a
+            case let (nil, b?):
+                return b
+            default:
+                return nil
+            }
+        case .one:
+            if droppedHalf == 1 { return nil }
+            return store.bestAvailableHalfYearValue(subject: subject, halfYear: 1)
+        case .two:
+            if droppedHalf == 2 { return nil }
+            return store.bestAvailableHalfYearValue(subject: subject, halfYear: 2)
+        }
     }
     
     private func formatAverage(_ v: Double?) -> String {
@@ -154,6 +183,21 @@ struct SubjectDetailView: View {
         return String(format: "%.2f", v)
     }
     
+    private func fobosoValueText(_ comp: HalfYearComputation, subject: Subject, halfYear: Int) -> String {
+        // Always show a calculated grade value, never a range
+        if let raw = comp.rawFinal {
+            return String(format: "%.2f", raw)
+        }
+        if let final = comp.finalRounded {
+            return "\(final)"
+        }
+        // Fall back to bestAvailableHalfYearValue for consistent display
+        if let value = store.bestAvailableHalfYearValue(subject: subject, halfYear: halfYear) {
+            return String(format: "%.2f", value)
+        }
+        return "-"
+    }
+
     private func gradeColor(_ value: Double) -> Color {
         if value >= 7 { return .green }
         if value >= 4 { return .orange }
@@ -244,6 +288,11 @@ struct SubjectDetailView: View {
         if let a = currentAlias, !a.isEmpty { items.append(("Kürzel", a, false)) }
         if let e = currentEmail, !e.isEmpty { items.append(("E-Mail", e, true)) }
         if let r = currentRoom, !r.isEmpty { items.append(("Raum", r, false)) }
+        
+        // Add Grading Mode
+        let modeLabel = (currentGradingMode == .withSchulaufgaben) ? "Schulaufgaben" : "Ohne Schulaufgaben"
+        items.append(("Art", modeLabel, false))
+
         return items
     }
     
@@ -259,11 +308,31 @@ struct SubjectDetailView: View {
         ) {
             VStack(alignment: .leading, spacing: 12) {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                    let avg = averageForSubject()
-                    let isDropped = (halfYear == .all && subject.droppedHalfYear != nil && !filteredGrades.isEmpty && avg == nil)
-                    StatChip(title: "Gesamt", value: formatAverage(avg), accent: .indigo, isGreyedOut: isDropped)
+                    if halfYear == .all {
+                        let halfYears = Set(allGrades.compactMap { $0.halfYear })
+                        if halfYears.count == 1, let onlyHalf = halfYears.first {
+                            let comp = store.computeHalfYearFoboso(subject: subject, halfYear: onlyHalf)
+                            let value = fobosoValueText(comp, subject: subject, halfYear: onlyHalf)
+                            StatChip(title: "\(onlyHalf). Hj", value: value, accent: .teal)
+                        } else {
+                            let avg = averageForSubject()
+                            StatChip(title: "Gesamt", value: formatAverage(avg), accent: .indigo)
+                        }
+                    } else {
+                        let half = (halfYear == .one) ? 1 : 2
+                        let comp = store.computeHalfYearFoboso(subject: subject, halfYear: half)
+                        StatChip(title: "\(half). Hj", value: fobosoValueText(comp, subject: subject, halfYear: half), accent: .teal)
+                    }
                     StatChip(title: "Noten", value: "\(allGrades.count)", accent: .orange)
                     StatChip(title: "Klausuren", value: "\(upcomingExamsCount)", accent: .mint)
+                }
+
+                if halfYear != .all {
+                    let half = (halfYear == .one) ? 1 : 2
+                    // Always show the calculated grade value
+                    if let value = store.bestAvailableHalfYearValue(subject: subject, halfYear: half) {
+                        StatChip(title: "\(half). Hj", value: String(format: "%.2f Punkte", value), accent: .teal)
+                    }
                 }
                 
                 VStack(alignment: .leading, spacing: 8) {
@@ -282,7 +351,7 @@ struct SubjectDetailView: View {
             }
         }
     }
-    
+
     @ViewBuilder
     private var detailsCard: some View {
         SettingsCard(
@@ -303,7 +372,7 @@ struct SubjectDetailView: View {
             }
         }
     }
-    
+
     @ViewBuilder
     private var examsCard: some View {
         SettingsCard(
@@ -569,10 +638,10 @@ struct SubjectDetailView: View {
             VStack(spacing: 16) {
                 overviewCard
                     .softFadeIn(enabled: animationsOn, delay: 0.03, offset: 12)
-                
+
                 if hasDetails {
                     detailsCard
-                        .softFadeIn(enabled: animationsOn, delay: 0.08, offset: 12)
+                        .softFadeIn(enabled: animationsOn, delay: 0.06, offset: 12)
                 }
                 
                 examsCard
@@ -581,6 +650,16 @@ struct SubjectDetailView: View {
                     .softFadeIn(enabled: animationsOn, delay: 0.16, offset: 12)
                 gradesSection
                     .softFadeIn(enabled: animationsOn, delay: 0.20, offset: 12)
+
+                HelpCenterLink(
+                    title: "FOBOSO Halbjahre & Gewichtungen",
+                    subtitle: "Wann final, Zwischenstand oder Spannweite",
+                    section: .calc,
+                    accent: .teal,
+                    scrollId: "help_calc_foboso"
+                )
+                .environmentObject(store)
+                .padding(.top, 4)
             }
             .padding(.horizontal, 16)
             .padding(.top, 6)
@@ -611,27 +690,22 @@ struct SubjectDetailView: View {
                                 }
                                 
                                 SettingsSectionBox {
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        Text("Typ")
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        Text("Schulaufgaben in diesem Fach?")
                                             .font(.headline)
-                                        Picker("", selection: $editType) {
-                                            Text("Hauptfach").tag(1)
-                                            Text("Nebenfach").tag(0)
+                                        Picker("", selection: $currentGradingMode) {
+                                            Text("Ja").tag(GradingMode.withSchulaufgaben)
+                                            Text("Nein").tag(GradingMode.withoutSchulaufgaben)
                                         }
                                         .pickerStyle(.segmented)
-                                        .disabled(editIsElective)
-                                        
-                                        Text("Hauptfach: Schulaufgaben zählen doppelt, Kurzarbeiten und Mündlich / EX einfach.")
-                                            .font(.footnote)
-                                            .foregroundStyle(.secondary)
-                                        Text("Nebenfach: Kurzarbeiten zählen doppelt, Mündlich / EX einfach.")
-                                            .font(.footnote)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                
-                                SettingsSectionBox {
-                                    VStack(alignment: .leading, spacing: 8) {
+                                        .onChange(of: currentGradingMode) { _, newVal in
+                                            if newVal == .withoutSchulaufgaben {
+                                                editType = 0
+                                            } else {
+                                                editType = 1
+                                            }
+                                        }
+
                                         Toggle("Wahlfach / nicht einbringbar", isOn: $editIsElective)
                                             .onChange(of: editIsElective) { _, newVal in
                                                 if newVal { editType = 0 }
@@ -666,8 +740,7 @@ struct SubjectDetailView: View {
                                         Text("Fach löschen")
                                             .frame(maxWidth: .infinity)
                                     }
-                                    .buttonStyle(.borderedProminent)
-                                    .tint(.red)
+                                    .buttonStyle(SoftTintButtonStyle(accent: .red))
                                 }
                             }
                         }
@@ -678,12 +751,13 @@ struct SubjectDetailView: View {
             }
             .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
             .sheetNavigationTitle(editSheetTitle)
+
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button {
                         cancelEditSubject()
                     } label: {
-                        Image(systemName: "xmark")
+                        Image(systemName: "chevron.down")
                             .imageScale(.medium)
                     }
                     .accessibilityLabel("Abbrechen")
@@ -745,7 +819,8 @@ struct SubjectDetailView: View {
             EditGradeView(
                 grade: grade,
                 subjectName: currentSubjectName,
-                subjectType: currentSubjectType
+                subjectType: currentSubjectType,
+                gradingMode: currentGradingMode
             )
             .environmentObject(store)
         }
@@ -1453,17 +1528,18 @@ struct SubjectDetailView: View {
         
         // MARK: - Fach bearbeiten
         
-        private func startEditSubject() {
-            editName = currentSubjectName
-            editTeacher = currentTeacher ?? ""
-            editRoom = currentRoom ?? ""
-            editEmail = currentEmail ?? ""
-            editAlias = currentAlias ?? ""
-            editType = currentSubjectType
-            editIsElective = currentIsElective
-            editError = nil
-            showEditSubjectSheet = true
-        }
+    private func startEditSubject() {
+        editName = currentSubjectName
+        editTeacher = currentTeacher ?? ""
+        editRoom = currentRoom ?? ""
+        editEmail = currentEmail ?? ""
+        editAlias = currentAlias ?? ""
+        editType = currentSubjectType
+        editIsElective = currentIsElective
+        currentGradingMode = subject.gradingMode ?? (subject.type == 1 ? .withSchulaufgaben : .withoutSchulaufgaben)
+        editError = nil
+        showEditSubjectSheet = true
+    }
         
         private func cancelEditSubject() {
             showEditSubjectSheet = false
@@ -1473,10 +1549,10 @@ struct SubjectDetailView: View {
             editRoom = ""
             editEmail = ""
             editAlias = ""
-            editType = 1
-            editIsElective = false
-            editError = nil
-        }
+        editType = currentSubjectType
+        editIsElective = false
+        editError = nil
+    }
         
         private func handleSaveSubject() async {
             guard !isSavingSubject else { return }
@@ -1598,15 +1674,15 @@ struct SubjectDetailView: View {
             }
         }
         
-        private func performSubjectSave(
-            originalName: String,
-            newName: String,
-            newType: Int,
-            newIsElective: Bool
-        ) async {
-            guard let uid = Auth.auth().currentUser?.uid else { return }
-            guard let schoolYearId = store.activeSchoolYearId else { return }
-            guard !isSavingSubject else { return }
+    private func performSubjectSave(
+        originalName: String,
+        newName: String,
+        newType: Int,
+        newIsElective: Bool
+    ) async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let schoolYearId = store.activeSchoolYearId else { return }
+        guard !isSavingSubject else { return }
             
             isSavingSubject = true
             defer { isSavingSubject = false }
@@ -1624,7 +1700,9 @@ struct SubjectDetailView: View {
                         "email": editEmail.isEmpty ? NSNull() : editEmail,
                         "alias": editAlias.isEmpty ? NSNull() : editAlias,
                         "type": newType,
-                        "isElective": newIsElective
+                        "isElective": newIsElective,
+                        "gradingMode": resolvedGradingMode.rawValue,
+                        "expectedSchulaufgabenPerTerm": FieldValue.delete()
                     ])
                 } else {
                     let oldRef = yearRef.collection("subjects").document(originalName)
@@ -1644,7 +1722,9 @@ struct SubjectDetailView: View {
                         "examPointsEncrypted": original.examPointsEncrypted as Any,
                         "writtenExamPointsEncrypted": original.writtenExamPointsEncrypted as Any,
                         "oralExamPointsEncrypted": original.oralExamPointsEncrypted as Any,
-                        "isElective": newIsElective
+                        "isElective": newIsElective,
+                        "gradingMode": resolvedGradingMode.rawValue,
+                        "expectedSchulaufgabenPerTerm": FieldValue.delete()
                     ]
                     
                     try await newRef.setData(payload, merge: true)

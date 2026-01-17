@@ -99,6 +99,15 @@ struct HelpCenterView: View {
             icon: "function"
         ),
         HelpSearchEntry(
+            id: "foboso_halfyear",
+            section: .calc,
+            title: "FOBOSO-Halbjahre: Final, Zwischenstand, Spannweite",
+            summary: "Wie Halbjahresergebnisse berechnet werden, wenn Schulaufgaben fehlen oder noch Noten offen sind.",
+            keywords: ["foboso", "halbjahr", "schulaufgabe", "zwischenstand", "range", "spannweite", "gewichten", "15 punkte", "punkte"],
+            icon: "text.badge.checkmark"
+        ),
+
+        HelpSearchEntry(
             id: "exams",
             section: .exams,
             title: "Prüfungen nach BayFOBOSO",
@@ -382,6 +391,29 @@ struct HelpCenterView: View {
                     )
                 }
             }
+            SettingsSectionBox {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(highlighted("FOBOSO-Halbjahr: Final, Zwischenstand, Spannweite"))
+                        .font(.headline)
+                    infoRow(
+                        title: "Final nur bei vollständigen Bausteinen",
+                        text: "Mit Schulaufgaben: mindestens eine Schulaufgabe und eine sonstige Leistung. Ohne Schulaufgaben: mindestens eine sonstige Leistung."
+                    )
+                    infoRow(
+                        title: "Zwischenstand",
+                        text: "Wenn etwas fehlt, zeigt die App Ø sonstige Leistungen und vorhandene Schulaufgaben separat und kennzeichnet es als Zwischenstand, nicht als Halbjahresergebnis."
+                    )
+                    infoRow(
+                        title: "Spannweite (Range)",
+                        text: "Fehlen Schulaufgaben oder sonstige Leistungen, siehst du den möglichen Endbereich (min–max) auf Basis 0–15 Punkten für offene Leistungen."
+                    )
+                    infoRow(
+                        title: "Gewichtung & Rundung",
+                        text: "Sonstige Leistungen bilden einen Block (gewichteter Ø), jede Schulaufgabe einen Block. Der Halbjahreswert ist der Durchschnitt aller Blöcke; erst am Ende wird auf ganze Punkte gerundet."
+                    )
+                }
+            }
+            .id("help_calc_foboso")
             SettingsSectionBox {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(highlighted("Gesamtdurchschnitt in Übersicht & Insights"))

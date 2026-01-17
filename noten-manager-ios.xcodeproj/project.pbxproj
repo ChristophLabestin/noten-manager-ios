@@ -44,10 +44,13 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		0B81CAE7A7258A7CBD8BC078 /* noten-manager-iosTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "noten-manager-iosTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		25FA1AE72DAEDFF3F2E009B3 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		5535B84A2ECC21F600B778F4 /* noten-manager-ios.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "noten-manager-ios.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		553A0CE72EDA312F00D93B93 /* ExamCountdownWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ExamCountdownWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		553A0CE82EDA312F00D93B93 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		553A0CEA2EDA312F00D93B93 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		BBDDD1F6B0079669C75F2061 /* GradeEngineTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GradeEngineTests.swift; path = Tests/GradeEngineTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -121,6 +124,14 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		30C144142C5C8CA666544C2A /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				25FA1AE72DAEDFF3F2E009B3 /* Foundation.framework */,
+			);
+			name = iOS;
+			sourceTree = "<group>";
+		};
 		5535B8412ECC21F600B778F4 = {
 			isa = PBXGroup;
 			children = (
@@ -128,6 +139,7 @@
 				553A0CEC2EDA312F00D93B93 /* ExamCountdownWidget */,
 				5535B85B2ECC2C7A00B778F4 /* Frameworks */,
 				5535B84B2ECC21F600B778F4 /* Products */,
+				BBDDD1F6B0079669C75F2061 /* GradeEngineTests.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -136,6 +148,7 @@
 			children = (
 				5535B84A2ECC21F600B778F4 /* noten-manager-ios.app */,
 				553A0CE72EDA312F00D93B93 /* ExamCountdownWidgetExtension.appex */,
+				0B81CAE7A7258A7CBD8BC078 /* noten-manager-iosTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -145,6 +158,7 @@
 			children = (
 				553A0CE82EDA312F00D93B93 /* WidgetKit.framework */,
 				553A0CEA2EDA312F00D93B93 /* SwiftUI.framework */,
+				30C144142C5C8CA666544C2A /* iOS */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -199,8 +213,6 @@
 				553A0CEC2EDA312F00D93B93 /* ExamCountdownWidget */,
 			);
 			name = ExamCountdownWidgetExtension;
-			packageProductDependencies = (
-			);
 			productName = ExamCountdownWidgetExtension;
 			productReference = 553A0CE72EDA312F00D93B93 /* ExamCountdownWidgetExtension.appex */;
 			productType = "com.apple.product-type.app-extension";

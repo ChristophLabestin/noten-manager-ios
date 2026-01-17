@@ -24,6 +24,9 @@ struct Subject: Codable, Identifiable, Hashable {
     var id: String { name }
     let name: String
     let type: Int
+    // New grading mode (FOBOSO)
+    let gradingMode: GradingMode?
+    let expectedSchulaufgabenPerTerm: Int?
     let date: Date
     let order: Int?
     let teacher: String?
@@ -40,6 +43,8 @@ struct Subject: Codable, Identifiable, Hashable {
 
     init(name: String,
          type: Int,
+         gradingMode: GradingMode? = nil,
+         expectedSchulaufgabenPerTerm: Int? = nil,
          date: Date,
          order: Int? = nil,
          teacher: String? = nil,
@@ -55,6 +60,8 @@ struct Subject: Codable, Identifiable, Hashable {
          isElective: Bool = false) {
         self.name = name
         self.type = type
+        self.gradingMode = gradingMode
+        self.expectedSchulaufgabenPerTerm = expectedSchulaufgabenPerTerm
         self.date = date
         self.order = order
         self.teacher = teacher
@@ -79,6 +86,7 @@ struct EncryptedGrade: Codable {
     let halfYear: Int? // 1 | 2
     let linkedExamId: String?
     let updatedAt: Date?
+    let assessmentType: AssessmentType?
 }
 
 protocol GradeProtocol {
@@ -94,6 +102,25 @@ struct Grade: Codable, GradeProtocol {
     let note: String?
     let halfYear: Int?
     let linkedExamId: String?
+    let assessmentType: AssessmentType?
+
+    init(
+        grade: Double,
+        weight: Double,
+        date: Date,
+        note: String?,
+        halfYear: Int?,
+        linkedExamId: String?,
+        assessmentType: AssessmentType? = nil
+    ) {
+        self.grade = grade
+        self.weight = weight
+        self.date = date
+        self.note = note
+        self.halfYear = halfYear
+        self.linkedExamId = linkedExamId
+        self.assessmentType = assessmentType
+    }
 }
 
 struct GradeWithId: Codable, Identifiable, GradeProtocol {
@@ -104,6 +131,27 @@ struct GradeWithId: Codable, Identifiable, GradeProtocol {
     let note: String?
     let halfYear: Int?
     let linkedExamId: String?
+    let assessmentType: AssessmentType?
+
+    init(
+        id: String,
+        grade: Double,
+        weight: Double,
+        date: Date,
+        note: String?,
+        halfYear: Int?,
+        linkedExamId: String?,
+        assessmentType: AssessmentType? = nil
+    ) {
+        self.id = id
+        self.grade = grade
+        self.weight = weight
+        self.date = date
+        self.note = note
+        self.halfYear = halfYear
+        self.linkedExamId = linkedExamId
+        self.assessmentType = assessmentType
+    }
 }
 
 struct EncryptedFachreferat: Codable {

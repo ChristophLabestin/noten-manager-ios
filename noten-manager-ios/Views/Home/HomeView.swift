@@ -20,11 +20,12 @@ struct HomeView: View {
     @State private var isEditingOrder: Bool = false
     @State private var customOrderWorkingCopy: [String] = []
     @AppStorage("isSubjectGridView") private var isGridView: Bool = false
+    @AppStorage("showNextExamCard") private var showNextExamCard: Bool = true
     @AppStorage("launchOfferPurchased") private var launchOfferPurchased = false
 
-    // Navigation-States für echte Seiten (kein Sheet)
     @State private var navigateToSettings: Bool = false
     @State private var navigateToFinalGrade: Bool = false
+    @State private var showMigrationInfoSheet: Bool = false
 
 
     @State private var greeting: String = ""
@@ -112,13 +113,31 @@ struct HomeView: View {
         return result
     }
 
+
     private func getSubjectAverage(_ subject: Subject, subjectGrades: [String: [Grade]]) -> Double? {
-        GradeCalculationService.calculateSubjectAverage(
-            subject: subject,
-            grades: subjectGrades[subject.name] ?? [],
-            dropValue: subject.droppedHalfYear,
-            effectiveGradeWeight: store.effectiveGradeWeight
-        )
+        func halfValue(_ half: Int) -> Double? {
+            let comp = store.computeHalfYearFoboso(subject: subject, halfYear: half)
+            return comp.rawFinal ?? comp.otherAvg ?? comp.pointsMin.map(Double.init)
+        }
+        switch halfYear {
+        case .one:
+            return halfValue(1)
+        case .two:
+            return halfValue(2)
+        case .all:
+            let v1 = halfValue(1)
+            let v2 = halfValue(2)
+            switch (v1, v2) {
+            case let (a?, b?):
+                return (a + b) / 2.0
+            case let (a?, nil):
+                return a
+            case let (nil, b?):
+                return b
+            default:
+                return nil
+            }
+        }
     }
 
     private func baseSubjectsList() -> [Subject] {
@@ -266,35 +285,34 @@ struct HomeView: View {
 
     // MARK: - Overall formatting
 
-    private var overallComputedResult: GradeCalculationService.CalculationResult? {
-        let subjects = store.subjects.map {
-            GradeCalculationService.SubjectData.from(subject: $0, grades: store.gradesBySubject[$0.name] ?? [])
-        }
-        
-        var dropSelections: [String: Int?] = [:]
-        for s in store.subjects {
-            dropSelections[s.name] = s.droppedHalfYear
-        }
-        
-        let result = GradeCalculationService.makeFobosoSummary(
-            schoolType: store.schoolType,
-            gradeYear: store.gradeYear ?? 12,
-            subjects: subjects,
-            examPoints: store.examPoints,
-            dropSelections: dropSelections,
-            fachreferat: store.fachreferat,
-            practicalPerformance: store.practicalPerformance,
-            seminarPerformance: store.seminarPerformance,
-            effectiveGradeWeight: { type, weight in store.effectiveGradeWeight(subjectType: type, rawWeight: weight) }
-        )
-        
-        return result.maxPoints > 0 ? result : nil
+    private var overallComputedResult: GradeCalculationService.CalculationResult? { nil }
+
+    private func halfValue(_ subject: Subject, half: Int) -> Double? {
+        let comp = store.computeHalfYearFoboso(subject: subject, halfYear: half)
+        if let raw = comp.rawFinal { return raw }
+        if let other = comp.otherAvg { return other }
+        if let min = comp.pointsMin { return Double(min) }
+        return nil
     }
 
-    private func overallAverage(subjectGrades: [String: [Grade]]) -> Double? {
-        let result = overallComputedResult
-        guard let res = result, res.maxPoints > 0 else { return nil }
-        return res.totalPoints / Double(res.maxPoints / 15)
+    private func overallAverage() -> Double? {
+        let filter: Int? = {
+            switch halfYear {
+            case .one: return 1
+            case .two: return 2
+            case .all: return nil
+            }
+        }()
+        return GradeCalculationService.calculateOverallAverage(
+            subjects: store.subjects,
+            halfYearValueProvider: { subject, hy in
+                store.bestAvailableHalfYearValue(subject: subject, halfYear: hy)
+            },
+            droppedHalfYearProvider: { subject in
+                subject.droppedHalfYear
+            },
+            halfYearFilter: filter
+        )
     }
 
     private func formatAverage(_ value: Double?) -> String {
@@ -304,6 +322,7 @@ struct HomeView: View {
 
     private func gradeColor(_ value: Double?) -> Color {
         guard let v = value else { return .secondary }
+        if store.isPrivacyModeActive { return .primary }
         if v >= 7 { return .green }
         if v >= 4 { return .orange }
         return .red
@@ -328,7 +347,8 @@ struct HomeView: View {
         let row = SubjectRowView(
             subject: subject,
             grades: grades,
-            fachreferatSubjectName: fachreferatSubjectName
+            fachreferatSubjectName: fachreferatSubjectName,
+            halfYearFilter: halfYear
         )
         .contentShape(Rectangle())
 
@@ -392,7 +412,7 @@ struct HomeView: View {
     }
 
     private var overallComputed: Double? {
-        overallAverage(subjectGrades: [:]) // parameter is ignored now
+        overallAverage()
     }
 
     private var totalGradesCountComputed: Int {
@@ -514,14 +534,13 @@ struct HomeView: View {
     }
 
     private var overallGradeCard: some View {
-        let result = overallComputedResult
-        let average = result.map { $0.totalPoints / Double($0.maxPoints / 15) }
-        let grade1to6 = result?.grade.map { String(format: "%.2f", $0) } ?? "-"
+        let average = overallComputed
+        let grade1to6 = pointsToGrade(average)
         
         return HStack(spacing: 0) {
             // Point Format (0-15)
             VStack(alignment: .leading, spacing: 4) {
-                Text("Punkte (MSS)")
+                Text("Punkte (Ø)")
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(.secondary)
                 
@@ -920,11 +939,13 @@ struct HomeView: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
 
-            nextAppointmentView
-                .softFadeIn(enabled: animationsOn, delay: 0.07, offset: 10)
-                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
+            if showNextExamCard {
+                nextAppointmentView
+                    .softFadeIn(enabled: animationsOn, delay: 0.07, offset: 10)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
 
             subjectsControlCard
                 .softFadeIn(enabled: animationsOn, delay: 0.10, offset: 12)
@@ -954,7 +975,8 @@ struct HomeView: View {
                     SubjectRowView(
                         subject: subjectByNameComputed[name] ?? Subject(name: name, type: 0, date: Date()),
                         grades: subjectGradesComputed[name] ?? [],
-                        fachreferatSubjectName: store.fachreferat?.subjectName
+                        fachreferatSubjectName: store.fachreferat?.subjectName,
+                        halfYearFilter: halfYear
                     )
                     .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                     .listRowBackground(Color.clear)
@@ -1089,6 +1111,8 @@ struct HomeView: View {
             AbiturExamView().environmentObject(store)
         }
 
+
+
         .sheet(isPresented: $showHomeworkSheet) {
             HomeworkListView()
                 .environmentObject(store)
@@ -1114,6 +1138,17 @@ struct HomeView: View {
             computeGreeting()
             Task { await loadUserDisplayName() }
             Task { await loadUpcomingHolidayNotice() }
+            // Show migration info sheet on first launch if needed
+            if store.shouldShowMigrationInfo {
+                showMigrationInfoSheet = true
+            }
+        }
+        .sheet(isPresented: $showMigrationInfoSheet) {
+            MigrationInfoSheet()
+                .environmentObject(store)
+        }
+        .onChange(of: store.shouldShowMigrationInfo) { _, show in
+            if show { showMigrationInfoSheet = true }
         }
         .sheet(item: $detailExam) { exam in
             ExamDetailSheet(exam: exam, onEdit: { editingExam = $0 })
@@ -2322,14 +2357,23 @@ struct SubjectRowView: View {
     let subject: Subject
     let grades: [Grade]
     let fachreferatSubjectName: String?
+    let halfYearFilter: HomeView.HalfYearFilter
 
-    private func avg(_ subject: Subject) -> Double? {
-        GradeCalculationService.calculateSubjectAverage(
-            subject: subject,
-            grades: grades,
-            dropValue: subject.droppedHalfYear,
-            effectiveGradeWeight: store.effectiveGradeWeight
-        )
+    private func fobosoValueText(_ comp: HalfYearComputation) -> String {
+        if let raw = comp.rawFinal {
+            return String(format: "%.2f", raw)
+        }
+        if let other = comp.otherAvg {
+            return String(format: "%.2f", other)
+        }
+        if let min = comp.pointsMin, let max = comp.pointsMax {
+            return "\(min)–\(max)"
+        }
+        return "–"
+    }
+
+    private func halfValue(_ subject: Subject, half: Int) -> Double? {
+        store.bestAvailableHalfYearValue(subject: subject, halfYear: half)
     }
 
     private func formatAverage(_ value: Double?) -> String {
@@ -2339,6 +2383,7 @@ struct SubjectRowView: View {
 
     private func gradeClassColor(_ value: Double?) -> Color {
         guard let v = value else { return .secondary }
+        if store.isPrivacyModeActive { return .primary }
         if v >= 7 { return .green }
         if v >= 4 { return .orange }
         return .red
@@ -2462,8 +2507,41 @@ struct SubjectRowView: View {
             )
     }
 
+    private func currentDisplay() -> (average: Double?, displayValue: String) {
+        let droppedHalf = subject.droppedHalfYear
+        switch halfYearFilter {
+        case .one:
+            // If half-year 1 is dropped, show nil
+            if droppedHalf == 1 {
+                return (nil, "–")
+            }
+            let value = halfValue(subject, half: 1)
+            return (value, value.map { String(format: "%.2f", $0) } ?? "–")
+        case .two:
+            // If half-year 2 is dropped, show nil
+            if droppedHalf == 2 {
+                return (nil, "–")
+            }
+            let value = halfValue(subject, half: 2)
+            return (value, value.map { String(format: "%.2f", $0) } ?? "–")
+        case .all:
+            let v1 = droppedHalf == 1 ? nil : halfValue(subject, half: 1)
+            let v2 = droppedHalf == 2 ? nil : halfValue(subject, half: 2)
+            if let a = v1, let b = v2 {
+                let avg = (a + b) / 2.0
+                return (avg, String(format: "%.2f", avg))
+            }
+            if let one = v1 ?? v2 {
+                return (one, String(format: "%.2f", one))
+            }
+            return (nil, "–")
+        }
+    }
+
     var body: some View {
-        let average = avg(subject)
+        let display = currentDisplay()
+        let average = display.average
+        let displayValue = display.displayValue
         let gradesCount = grades.count
         let isDropped = (subject.droppedHalfYear != nil && !grades.isEmpty && average == nil)
 
@@ -2492,10 +2570,16 @@ struct SubjectRowView: View {
             } else if subject.isElective {
                 return Tag(text: "Wahlfach", style: .elective)
             }
-            return Tag(text: subject.type == 1 ? "Hauptfach" : "Nebenfach", style: subject.type == 1 ? .main : .minor)
+            let mode = subject.gradingMode ?? (subject.type == 1 ? .withSchulaufgaben : .withoutSchulaufgaben)
+            switch mode {
+            case .withSchulaufgaben:
+                return nil
+            case .withoutSchulaufgaben:
+                return nil
+            }
         }()
 
-        HStack(alignment: .center, spacing: 10) {
+        return HStack(alignment: .center, spacing: 10) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     Text(displayName)
@@ -2547,7 +2631,7 @@ struct SubjectRowView: View {
             Spacer(minLength: 8)
 
             VStack(alignment: .trailing, spacing: 8) {
-                Text(formatAverage(average))
+                Text(displayValue)
                     .font(.system(size: 22, weight: .bold, design: .rounded))
                     .monospacedDigit()
                     .privacyBlur()
@@ -2704,12 +2788,19 @@ struct SubjectGridItemView: View {
     let fachreferatSubjectName: String?
 
     private func avg(_ subject: Subject) -> Double? {
-        GradeCalculationService.calculateSubjectAverage(
-            subject: subject,
-            grades: grades,
-            dropValue: subject.droppedHalfYear,
-            effectiveGradeWeight: store.effectiveGradeWeight
-        )
+        let droppedHalf = subject.droppedHalfYear
+        let v1 = droppedHalf == 1 ? nil : store.bestAvailableHalfYearValue(subject: subject, halfYear: 1)
+        let v2 = droppedHalf == 2 ? nil : store.bestAvailableHalfYearValue(subject: subject, halfYear: 2)
+        switch (v1, v2) {
+        case let (a?, b?):
+            return (a + b) / 2.0
+        case let (a?, nil):
+            return a
+        case let (nil, b?):
+            return b
+        default:
+            return nil
+        }
     }
 
     private func formatAverage(_ value: Double?) -> String {
@@ -2719,6 +2810,7 @@ struct SubjectGridItemView: View {
 
     private func gradeClassColor(_ value: Double?) -> Color {
         guard let v = value else { return .secondary }
+        if store.isPrivacyModeActive { return .primary }
         if v >= 7 { return .green }
         if v >= 4 { return .orange }
         return .red
@@ -2818,7 +2910,15 @@ struct SubjectGridItemView: View {
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(accent.primary.opacity(0.8))
                     } else {
-                        Text(subject.type == 1 ? "Hauptfach" : (subject.isElective ? "Wahlfach" : "Nebenfach"))
+                        let mode = subject.gradingMode ?? (subject.type == 1 ? .withSchulaufgaben : .withoutSchulaufgaben)
+                        let label = {
+                            if subject.isElective { return "Wahlfach" }
+                            switch mode {
+                            case .withSchulaufgaben: return "Schulaufgaben"
+                            case .withoutSchulaufgaben: return "Ohne Schulaufgabe"
+                            }
+                        }()
+                        Text(label)
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(accent.primary.opacity(0.8))
                     }

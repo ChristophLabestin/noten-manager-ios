@@ -225,6 +225,7 @@ struct PendingGrade: Codable, Identifiable {
     let halfYear: Int?
     let linkedExamId: String?
     let createdAt: Date
+    let assessmentType: AssessmentType?
 }
 
 struct PendingFachreferat: Codable {
@@ -347,6 +348,7 @@ final class GradesStore: ObservableObject {
     @Published var encryptionSalt: String? = nil
     @Published var showHolidayHints: Bool = true
     @Published var userName: String? = nil
+    @Published var hasSeenMigrationInfo: Bool = false
     @Published var isPrivacyModeActive: Bool = false
 
     var preferredColorScheme: ColorScheme? {
@@ -458,6 +460,8 @@ final class GradesStore: ObservableObject {
     private var offlinePendingFachreferat: PendingFachreferat? = nil
     private var offlinePendingSeminar: PendingSeminarPerformance? = nil
     private var pfingstferienPromptedYearIds: Set<String> = []
+    private let legacyGradeMigrationKey = "legacyGradeMigration_v1"
+    private let legacySubjectMigrationKey = "legacySubjectMigration_v1"
 
     private func overlayPendingData() {
         guard !offlinePendingGrades.isEmpty || offlinePendingFachreferat != nil || offlinePendingSeminar != nil else { return }
@@ -473,7 +477,8 @@ final class GradesStore: ObservableObject {
                         date: pending.date,
                         note: pending.note,
                         halfYear: pending.halfYear,
-                        linkedExamId: pending.linkedExamId
+                        linkedExamId: pending.linkedExamId,
+                        assessmentType: pending.assessmentType
                     )
                 )
                 gradesBySubject[pending.subjectId] = list
@@ -1319,6 +1324,9 @@ final class GradesStore: ObservableObject {
                             let data = doc.data()
                             let name = doc.documentID
                             let type = data["type"] as? Int ?? 0
+                            let gradingModeRaw = data["gradingMode"] as? String
+                            let gradingMode = gradingModeRaw.flatMap { GradingMode(rawValue: $0) }
+                            let expectedSA = data["expectedSchulaufgabenPerTerm"] as? Int
                             let ts = data["date"] as? Timestamp
                             let date = ts?.dateValue() ?? Date()
                             let order = data["order"] as? Int
@@ -1337,6 +1345,8 @@ final class GradesStore: ObservableObject {
 
                             return Subject(name: name,
                                            type: type,
+                                           gradingMode: gradingMode,
+                                           expectedSchulaufgabenPerTerm: expectedSA,
                                            date: date,
                                            order: order,
                                            teacher: teacher,
@@ -2060,24 +2070,27 @@ final class GradesStore: ObservableObject {
                         let encGrades: [(String, EncryptedGrade)] = docs.compactMap { gdoc in
                             let gd = gdoc.data()
                             guard let gradeStr = gd["grade"] as? String else { return nil }
-                        let weight = (gd["weight"] as? NSNumber)?.doubleValue ?? 1.0
-                        let ts = gd["date"] as? Timestamp
-                        let date = ts?.dateValue() ?? Date()
-                        let note = gd["note"] as? String
-                        let halfYear = gd["halfYear"] as? Int
-                        let linkedExamId = gd["linkedExamId"] as? String
-                        let updatedAt = (gd["updatedAt"] as? Timestamp)?.dateValue()
-                        let eg = EncryptedGrade(
-                            grade: gradeStr,
-                            weight: weight,
-                            date: date,
-                            note: note,
-                            halfYear: halfYear,
-                            linkedExamId: linkedExamId,
-                            updatedAt: updatedAt
-                        )
-                        return (gdoc.documentID, eg)
-                    }
+                            let weight = (gd["weight"] as? NSNumber)?.doubleValue ?? 1.0
+                            let ts = gd["date"] as? Timestamp
+                            let date = ts?.dateValue() ?? Date()
+                            let note = gd["note"] as? String
+                            let halfYear = gd["halfYear"] as? Int
+                            let linkedExamId = gd["linkedExamId"] as? String
+                            let updatedAt = (gd["updatedAt"] as? Timestamp)?.dateValue()
+                            let assessmentTypeRaw = gd["assessmentType"] as? String
+                            let assessmentType = assessmentTypeRaw.flatMap { AssessmentType(rawValue: $0) }
+                            let eg = EncryptedGrade(
+                                grade: gradeStr,
+                                weight: weight,
+                                date: date,
+                                note: note,
+                                halfYear: halfYear,
+                                linkedExamId: linkedExamId,
+                                updatedAt: updatedAt,
+                                assessmentType: assessmentType
+                            )
+                            return (gdoc.documentID, eg)
+                        }
                         self.encryptedGradesCache[sid] = encGrades
                         self.decryptGradesForSubjectIfPossible(subjectId: sid)
                         self.finishInitialLoadingIfNeeded()
@@ -2106,7 +2119,8 @@ final class GradesStore: ObservableObject {
                         date: enc.date,
                         note: enc.note,
                         halfYear: enc.halfYear,
-                        linkedExamId: enc.linkedExamId
+                        linkedExamId: enc.linkedExamId,
+                        assessmentType: enc.assessmentType
                     )
                 )
             }
@@ -2121,6 +2135,10 @@ final class GradesStore: ObservableObject {
             decryptGradesForSubjectIfPossible(subjectId: sid)
         }
         decryptExamPoints()
+        Task {
+            await migrateLegacyGradesIfNeeded()
+            await migrateLegacySubjectsIfNeeded()
+        }
     }
 
     private func decryptExamPoints() {
@@ -2144,6 +2162,131 @@ final class GradesStore: ObservableObject {
             next[s.name] = points
         }
         self.examPoints = next
+    }
+
+    // MARK: - Legacy subject migration (gradingMode + expected SA)
+
+    func migrateLegacySubjectsIfNeeded(force: Bool = false) async {
+        let defaults = UserDefaults.standard
+        if !force && defaults.bool(forKey: legacySubjectMigrationKey) { return }
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let yearRef = try? await requireYearRef(uid: uid) else { return }
+
+        var updates: [(doc: DocumentReference, payload: [String: Any], name: String)] = []
+        for subject in subjects {
+            var payload: [String: Any] = [:]
+            if subject.gradingMode == nil {
+                let gm = gradingMode(for: subject)
+                payload["gradingMode"] = gm.rawValue
+            }
+            if subject.expectedSchulaufgabenPerTerm == nil && gradingMode(for: subject) == .withSchulaufgaben {
+                payload["expectedSchulaufgabenPerTerm"] = inferredExpectedSA(for: subject)
+            }
+            if !payload.isEmpty {
+                let doc = yearRef.collection("subjects").document(subject.name)
+                updates.append((doc, payload, subject.name))
+            }
+        }
+
+        guard !updates.isEmpty else {
+            defaults.set(true, forKey: legacySubjectMigrationKey)
+            return
+        }
+
+        for update in updates {
+            do {
+                try await update.doc.updateData(update.payload)
+                if let idx = subjects.firstIndex(where: { $0.name == update.name }) {
+                    var subj = subjects[idx]
+                    if let gmRaw = update.payload["gradingMode"] as? String, let gm = GradingMode(rawValue: gmRaw) {
+                        subj = Subject(
+                            name: subj.name,
+                            type: subj.type,
+                            gradingMode: gm,
+                            expectedSchulaufgabenPerTerm: (update.payload["expectedSchulaufgabenPerTerm"] as? Int) ?? subj.expectedSchulaufgabenPerTerm,
+                            date: subj.date,
+                            order: subj.order,
+                            teacher: subj.teacher,
+                            room: subj.room,
+                            email: subj.email,
+                            alias: subj.alias,
+                            droppedHalfYear: subj.droppedHalfYear,
+                            examSubject: subj.examSubject,
+                            examType: subj.examType,
+                            examPointsEncrypted: subj.examPointsEncrypted,
+                            writtenExamPointsEncrypted: subj.writtenExamPointsEncrypted,
+                            oralExamPointsEncrypted: subj.oralExamPointsEncrypted,
+                            isElective: subj.isElective
+                        )
+                    } else if let expected = update.payload["expectedSchulaufgabenPerTerm"] as? Int {
+                        subj = Subject(
+                            name: subj.name,
+                            type: subj.type,
+                            gradingMode: subj.gradingMode,
+                            expectedSchulaufgabenPerTerm: expected,
+                            date: subj.date,
+                            order: subj.order,
+                            teacher: subj.teacher,
+                            room: subj.room,
+                            email: subj.email,
+                            alias: subj.alias,
+                            droppedHalfYear: subj.droppedHalfYear,
+                            examSubject: subj.examSubject,
+                            examType: subj.examType,
+                            examPointsEncrypted: subj.examPointsEncrypted,
+                            writtenExamPointsEncrypted: subj.writtenExamPointsEncrypted,
+                            oralExamPointsEncrypted: subj.oralExamPointsEncrypted,
+                            isElective: subj.isElective
+                        )
+                    }
+                    subjects[idx] = subj
+                }
+            } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
+            }
+        }
+        defaults.set(true, forKey: legacySubjectMigrationKey)
+    }
+
+    private func inferredExpectedSA(for subject: Subject) -> Int {
+        let grades = gradesBySubject[subject.name] ?? []
+        var maxPerHalf = 0
+        for half in [1, 2] {
+            let count = grades.filter { $0.halfYear == half && ($0.assessmentType == .schulaufgabe || ($0.assessmentType == nil && $0.weight >= 2)) }.count
+            if count > maxPerHalf { maxPerHalf = count }
+        }
+        return max(1, maxPerHalf)
+    }
+
+    // MARK: - Legacy migration helpers (public)
+
+    var needsLegacyMigration: Bool {
+        let defaults = UserDefaults.standard
+        return !(defaults.bool(forKey: legacyGradeMigrationKey) && defaults.bool(forKey: legacySubjectMigrationKey))
+    }
+
+    func legacyMigrationStatus() -> (gradesMissingAssessment: Int, gradesMissingHalfYear: Int, subjectsMissingGradingMode: Int, subjectsMissingExpectedSA: Int) {
+        let grades = gradesBySubject.values.flatMap { $0 }
+        var missingAssessment = 0
+        var missingHalf = 0
+        for g in grades {
+            if g.assessmentType == nil { missingAssessment += 1 }
+            if g.halfYear == nil { missingHalf += 1 }
+        }
+        var missingGM = 0
+        var missingSA = 0
+        for s in subjects {
+            if s.gradingMode == nil { missingGM += 1 }
+            if s.expectedSchulaufgabenPerTerm == nil, gradingMode(for: s) == .withSchulaufgaben {
+                missingSA += 1
+            }
+        }
+        return (missingAssessment, missingHalf, missingGM, missingSA)
+    }
+
+    func runLegacyMigration() async {
+        await migrateLegacyGradesIfNeeded(force: true)
+        await migrateLegacySubjectsIfNeeded(force: true)
     }
 
     private func removeSatisfiedPendingGrades(for subjectId: String, decrypted: [(String, EncryptedGrade)]) {
@@ -2661,6 +2804,8 @@ final class GradesStore: ObservableObject {
         } else {
             adminAccessExpiresAt = nil
         }
+        
+        hasSeenMigrationInfo = (data["hasSeenMigrationInfo"] as? Bool) ?? false
 
         persistOfflineSnapshotIfPossible()
     }
@@ -4955,7 +5100,7 @@ final class GradesStore: ObservableObject {
 
     // MARK: - Write
 
-    func addSubjectToFirestore(name: String, type: Int, date: Date, isElective: Bool = false) async throws {
+    func addSubjectToFirestore(name: String, type: Int, date: Date, isElective: Bool = false, gradingMode: GradingMode? = nil, expectedSchulaufgabenPerTerm: Int? = nil) async throws {
         let lower = name.lowercased()
         if ["sport", "musik"].contains(lower) && !isElective {
             throw NSError(domain: "GradesStore", code: -2, userInfo: [NSLocalizedDescriptionKey: "Bitte markiere Sport oder Musik als nicht einbringbar."])
@@ -4963,14 +5108,21 @@ final class GradesStore: ObservableObject {
         guard let uid = Auth.auth().currentUser?.uid else { throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"]) }
         let yearRef = try await requireYearRef(uid: uid)
         let docRef = yearRef.collection("subjects").document(name)
-        try await docRef.setData([
+        var payload: [String: Any] = [
             "type": type,
             "date": date,
             "isElective": isElective
-        ], merge: true)
+        ]
+        if let gradingMode {
+            payload["gradingMode"] = gradingMode.rawValue
+        }
+        if let expectedSchulaufgabenPerTerm {
+            payload["expectedSchulaufgabenPerTerm"] = expectedSchulaufgabenPerTerm
+        }
+        try await docRef.setData(payload, merge: true)
 
         // Lokalen State optional optimistisch aktualisieren (Listener korrigiert ggf.)
-        let s = Subject(name: name, type: type, date: date, isElective: isElective)
+        let s = Subject(name: name, type: type, gradingMode: gradingMode, expectedSchulaufgabenPerTerm: expectedSchulaufgabenPerTerm, date: date, isElective: isElective)
         if !subjects.contains(where: { $0.name == name }) {
             subjects.append(s)
         } else {
@@ -5097,6 +5249,9 @@ final class GradesStore: ObservableObject {
                 let data = sdoc.data()
                 let name = sdoc.documentID
                 let type = data["type"] as? Int ?? 0
+                let gradingModeRaw = data["gradingMode"] as? String
+                let gradingMode = gradingModeRaw.flatMap { GradingMode(rawValue: $0) }
+                let expectedSA = data["expectedSchulaufgabenPerTerm"] as? Int
                 let ts = data["date"] as? Timestamp
                 let date = ts?.dateValue() ?? Date()
                 let order = data["order"] as? Int
@@ -5116,6 +5271,8 @@ final class GradesStore: ObservableObject {
                 let subject = Subject(
                     name: name,
                     type: type,
+                    gradingMode: gradingMode,
+                    expectedSchulaufgabenPerTerm: expectedSA,
                     date: date,
                     order: order,
                     teacher: teacher,
@@ -5147,6 +5304,8 @@ final class GradesStore: ObservableObject {
                     let note = gd["note"] as? String
                     let halfYear = gd["halfYear"] as? Int
                     let linkedExamId = gd["linkedExamId"] as? String
+                    let assessmentTypeRaw = gd["assessmentType"] as? String
+                    let assessmentType = assessmentTypeRaw.flatMap { AssessmentType(rawValue: $0) }
                     grades.append(
                         GradeWithId(
                             id: gdoc.documentID,
@@ -5155,7 +5314,8 @@ final class GradesStore: ObservableObject {
                             date: date,
                             note: note,
                             halfYear: halfYear,
-                            linkedExamId: linkedExamId
+                            linkedExamId: linkedExamId,
+                            assessmentType: assessmentType
                         )
                     )
                 }
@@ -5591,6 +5751,7 @@ final class GradesStore: ObservableObject {
         note: String?,
         halfYear: Int?,
         linkedExamId: String?,
+        assessmentType: AssessmentType? = nil,
         using key: SymmetricKey
     ) async throws -> String {
         let offline = OfflineModeManager.shared.isOfflineModeActive
@@ -5608,7 +5769,8 @@ final class GradesStore: ObservableObject {
                 note: note,
                 halfYear: halfYear,
                 linkedExamId: linkedExamId,
-                createdAt: Date()
+                createdAt: Date(),
+                assessmentType: assessmentType
             )
             offlinePendingGrades.append(pending)
             var list = gradesBySubject[subjectId] ?? []
@@ -5620,7 +5782,8 @@ final class GradesStore: ObservableObject {
                     date: date,
                     note: note,
                     halfYear: halfYear,
-                    linkedExamId: linkedExamId
+                    linkedExamId: linkedExamId,
+                    assessmentType: assessmentType
                 )
             )
             gradesBySubject[subjectId] = list
@@ -5643,22 +5806,28 @@ final class GradesStore: ObservableObject {
         if let linkedExamId {
             payload["linkedExamId"] = linkedExamId
         }
+        if let assessmentType {
+            payload["assessmentType"] = assessmentType.rawValue
+        }
         try await newRef.setData(payload)
 
-        // Optimistisch lokal (Listener setzt danach korrekt)
+        // Optimistisch lokal (Listener setzt danach korrekt, aber falls Listener schneller war, prüfen wir auf Duplikat)
         var list = gradesBySubject[subjectId] ?? []
-        list.append(
-            GradeWithId(
-                id: newRef.documentID,
-                grade: grade,
-                weight: weight,
-                date: date,
-                note: note,
-                halfYear: halfYear,
-                linkedExamId: linkedExamId
+        if !list.contains(where: { $0.id == newRef.documentID }) {
+            list.append(
+                GradeWithId(
+                    id: newRef.documentID,
+                    grade: grade,
+                    weight: weight,
+                    date: date,
+                    note: note,
+                    halfYear: halfYear,
+                    linkedExamId: linkedExamId,
+                    assessmentType: assessmentType
+                )
             )
-        )
-        gradesBySubject[subjectId] = list
+            gradesBySubject[subjectId] = list
+        }
         persistOfflineSnapshotIfPossible()
 
         return newRef.documentID
@@ -6413,6 +6582,7 @@ final class GradesStore: ObservableObject {
         note: String?,
         halfYear: Int?,
         linkedExamId: String?,
+        assessmentType: AssessmentType?,
         using key: SymmetricKey
     ) async throws {
         guard let uid = Auth.auth().currentUser?.uid else { throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"]) }
@@ -6434,6 +6604,9 @@ final class GradesStore: ObservableObject {
         } else {
             payload["linkedExamId"] = FieldValue.delete()
         }
+        if let assessmentType {
+            payload["assessmentType"] = assessmentType.rawValue
+        }
 
         try await gradeDocRef.updateData(payload)
 
@@ -6447,7 +6620,8 @@ final class GradesStore: ObservableObject {
                 date: date,
                 note: note,
                 halfYear: halfYear,
-                linkedExamId: linkedExamId
+                linkedExamId: linkedExamId,
+                assessmentType: assessmentType ?? list[idx].assessmentType
             )
             gradesBySubject[subjectId] = list
         }
@@ -6697,6 +6871,7 @@ final class GradesStore: ObservableObject {
     }
 
     func calculateGradeWeightForOverall(subject: Subject, grade: Grade) -> Double {
+        // Legacy weight usage retained for overall averaging UI; FOBOSO logic uses GradeEngine.
         effectiveGradeWeight(subjectType: subject.type, rawWeight: grade.weight)
     }
 
@@ -6720,6 +6895,205 @@ final class GradesStore: ObservableObject {
         }
 
         return rawWeight > 0 ? rawWeight : 1
+    }
+
+    // MARK: - FOBOSO Grade Engine bridge
+
+    private func gradingMode(for subject: Subject) -> GradingMode {
+        if let explicit = subject.gradingMode { return explicit }
+        return subject.type == 1 ? .withSchulaufgaben : .withoutSchulaufgaben
+    }
+
+    private func expectedSA(for subject: Subject) -> Int {
+        let defaultValue = 1
+        return max(0, subject.expectedSchulaufgabenPerTerm ?? defaultValue)
+    }
+
+    private func term(for halfYear: Int, gradeYear: Int?) -> TermV2 {
+        let label: String
+        if let gradeYear {
+            label = "\(gradeYear)/\(halfYear)"
+        } else {
+            label = "Term \(halfYear)"
+        }
+        return TermV2(id: UUID(uuidString: "\(label)-\(halfYear)") ?? UUID(), label: label)
+    }
+
+    private func mapAssessments(subject: Subject, halfYear: Int, grades explicitGrades: [GradeWithId]? = nil) -> [Assessment] {
+        let grades = explicitGrades ?? (gradesBySubject[subject.name] ?? [])
+        // Prefer explicitly assigned halfYears. If none are assigned, fall back to legacy entries without halfYear.
+        let hasExplicitHalf = grades.contains { $0.halfYear == halfYear }
+        var filtered = grades.filter { g in
+            if hasExplicitHalf {
+                return g.halfYear == halfYear
+            } else {
+                return g.halfYear == nil || g.halfYear == halfYear
+            }
+        }
+        if filtered.isEmpty {
+            // Only fall back to nil-halfYear entries if nothing matched and legacy data exists without halfYear
+            let nilOnly = grades.filter { $0.halfYear == nil }
+            if !nilOnly.isEmpty {
+                filtered = nilOnly
+            }
+        }
+        let mode = gradingMode(for: subject)
+        return filtered.map { g in
+            let type: AssessmentType = g.assessmentType ?? derivedAssessmentType(for: g, gradingMode: mode)
+            let normalizedWeight: Double = {
+                if type == .schulaufgabe { return g.weight }
+                return g.weight <= 0 ? 1 : g.weight
+            }()
+            return Assessment(
+                subjectId: UUID(uuidString: subject.id) ?? UUID(),
+                termId: term(for: halfYear, gradeYear: gradeYear).id,
+                type: mode == .withoutSchulaufgaben ? .muendlich : type,
+                points: Int(g.grade.rounded()),
+                weight: normalizedWeight,
+                date: g.date,
+                title: g.note
+            )
+        }
+    }
+
+    func computeHalfYearFoboso(subject: Subject, halfYear: Int, grades: [GradeWithId]? = nil) -> HalfYearComputation {
+        let engine = GradeEngine()
+        let term = term(for: halfYear, gradeYear: gradeYear)
+        let subjV2 = SubjectV2(
+            id: UUID(uuidString: subject.id) ?? UUID(),
+            name: subject.name,
+            gradingMode: gradingMode(for: subject),
+            expectedSchulaufgabenPerTerm: expectedSA(for: subject)
+        )
+        // keep name; gradingMode already set
+        let assessments = mapAssessments(subject: subject, halfYear: halfYear, grades: grades)
+        return engine.computeHalfYear(subject: subjV2, term: term, assessments: assessments)
+    }
+
+    /// Best available numeric value for a half-year:
+    /// - final raw when available
+    /// - otherwise combine available components with correct FOBOSO block weighting (otherAvg as 1 block, each SA as 1 block)
+    func bestAvailableHalfYearValue(subject: Subject, halfYear: Int, grades: [GradeWithId]? = nil) -> Double? {
+        let comp = computeHalfYearFoboso(subject: subject, halfYear: halfYear, grades: grades)
+        if let raw = comp.rawFinal { return raw }
+
+        let hasSA = !comp.schulaufgaben.isEmpty
+        let saSum = comp.schulaufgaben.reduce(0, +)
+        let saCount = Double(comp.schulaufgaben.count)
+        let other = comp.otherAvg
+
+        switch gradingMode(for: subject) {
+        case .withSchulaufgaben:
+            if let other, hasSA {
+                return (other + saSum) / (1.0 + saCount)
+            }
+            if let other { return other }
+            if hasSA { return saSum / saCount }
+            return nil
+        case .withoutSchulaufgaben:
+            return other
+        }
+    }
+
+    // MARK: - Legacy grade migration (assessmentType + halfYear)
+
+    func migrateLegacyGradesIfNeeded(force: Bool = false) async {
+        let defaults = UserDefaults.standard
+        if !force && defaults.bool(forKey: legacyGradeMigrationKey) { return }
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+
+        var updates: [(subjectId: String, subjectName: String, gradeId: String, payload: [String: Any])] = []
+
+        for subject in subjects {
+            let gm = gradingMode(for: subject)
+            let list = gradesBySubject[subject.name] ?? []
+            for grade in list {
+                var payload: [String: Any] = [:]
+                // Always normalize assessmentType & halfYear to the expected current values
+                let expectedType = derivedAssessmentType(for: grade, gradingMode: gm).rawValue
+                if grade.assessmentType?.rawValue != expectedType {
+                    payload["assessmentType"] = expectedType
+                }
+                let expectedHalf = defaultHalfYear(referenceDate: grade.date)
+                if grade.halfYear == nil || grade.halfYear != expectedHalf {
+                    payload["halfYear"] = expectedHalf
+                }
+                if !payload.isEmpty {
+                    updates.append((subject.id, subject.name, grade.id, payload))
+                }
+            }
+        }
+
+        guard !updates.isEmpty else {
+            defaults.set(true, forKey: legacyGradeMigrationKey)
+            return
+        }
+
+        do {
+            let yearRef = try await requireYearRef(uid: uid)
+            for update in updates {
+                let gradeDocRef = yearRef.collection("subjects").document(update.subjectId).collection("grades").document(update.gradeId)
+                try await gradeDocRef.updateData(update.payload)
+
+                await MainActor.run {
+                    if var list = gradesBySubject[update.subjectName], let idx = list.firstIndex(where: { $0.id == update.gradeId }) {
+                        var g = list[idx]
+                        if let raw = update.payload["assessmentType"] as? String, let mapped = AssessmentType(rawValue: raw) {
+                            g = GradeWithId(
+                                id: g.id,
+                                grade: g.grade,
+                                weight: g.weight,
+                                date: g.date,
+                                note: g.note,
+                                halfYear: g.halfYear,
+                                linkedExamId: g.linkedExamId,
+                                assessmentType: mapped
+                            )
+                        }
+                        if let hh = update.payload["halfYear"] as? Int {
+                            g = GradeWithId(
+                                id: g.id,
+                                grade: g.grade,
+                                weight: g.weight,
+                                date: g.date,
+                                note: g.note,
+                                halfYear: hh,
+                                linkedExamId: g.linkedExamId,
+                                assessmentType: g.assessmentType
+                            )
+                        }
+                        list[idx] = g
+                        gradesBySubject[update.subjectName] = list
+                    }
+                }
+            }
+            defaults.set(true, forKey: legacyGradeMigrationKey)
+            defaults.set(true, forKey: "legacyMigrationPerformedChanges")
+            await MainActor.run { self.objectWillChange.send() }
+        } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
+        }
+    }
+
+    private func derivedAssessmentType(for grade: GradeWithId, gradingMode: GradingMode) -> AssessmentType {
+        switch gradingMode {
+        case .withSchulaufgaben:
+            if grade.weight >= 2 { return .schulaufgabe }
+            if grade.weight >= 1 { return .kurzarbeit }
+            return .muendlich
+        case .withoutSchulaufgaben:
+            if grade.weight >= 1 { return .kurzarbeit }
+            return .muendlich
+        }
+    }
+
+    private func defaultHalfYear(referenceDate: Date) -> Int {
+        let month = Calendar.current.component(.month, from: referenceDate)
+        // Schuljahre starten nach den Sommerferien: grob Aug–Jan = 1. Hj, Feb–Jul = 2. Hj.
+        if (2...7).contains(month) {
+            return 2
+        }
+        return 1
     }
 
     func updateUserDisplayName(name: String) async {
@@ -7861,5 +8235,27 @@ final class GradesStore: ObservableObject {
                  }
             }
         }
+    }
+    
+    // MARK: - Migration Info Sheet
+    
+    func markMigrationInfoExamined() {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        // Update local
+        hasSeenMigrationInfo = true
+        UserDefaults.standard.set(true, forKey: "hasSeenMigrationInfoSheet")
+        
+        // Update remote
+        let db = Firestore.firestore()
+        db.collection("users").document(uid).updateData(["hasSeenMigrationInfo": true])
+    }
+
+    var shouldShowMigrationInfo: Bool {
+        let migrationOccurred = UserDefaults.standard.bool(forKey: "legacyMigrationPerformedChanges")
+        let alreadySeen = hasSeenMigrationInfo
+        // Fallback to local storage
+        let localSeen = UserDefaults.standard.bool(forKey: "hasSeenMigrationInfoSheet")
+        
+        return migrationOccurred && !alreadySeen && !localSeen
     }
 }

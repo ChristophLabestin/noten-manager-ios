@@ -206,4 +206,72 @@ enum GradeCalculationService {
         let rounded = raw.rounded(.toNearestOrAwayFromZero)
         return max(0, min(15, rounded))
     }
+    
+    // MARK: - Overall Average (MSS-style)
+    
+    /// Calculates the overall half-year-based average (MSS style) for display purposes.
+    /// This averages the half-year values across eligible subjects (excluding electives and Fachreferat).
+    /// - Parameters:
+    ///   - subjects: All subjects to consider
+    ///   - halfYearValueProvider: Closure that returns the half-year value for a subject and half-year (1 or 2)
+    ///   - droppedHalfYearProvider: Optional closure that returns the dropped half-year (1 or 2) for a subject, or nil if none dropped
+    ///   - halfYearFilter: Optional filter - nil for both half-years, 1 for first only, 2 for second only
+    /// - Returns: The overall average or nil if no data available
+    static func calculateOverallAverage(
+        subjects: [Subject],
+        halfYearValueProvider: (Subject, Int) -> Double?,
+        droppedHalfYearProvider: ((Subject) -> Int?)? = nil,
+        halfYearFilter: Int? = nil
+    ) -> Double? {
+        let eligibleSubjects = subjects.filter { 
+            $0.name != "Fachreferat" && !$0.isElective 
+        }
+        
+        var total = 0.0
+        var count = 0.0
+        
+        for subject in eligibleSubjects {
+            let droppedHalf = droppedHalfYearProvider?(subject)
+            let value: Double?
+            
+            switch halfYearFilter {
+            case 1:
+                // If requesting half-year 1 but it's dropped, skip
+                if droppedHalf == 1 {
+                    value = nil
+                } else {
+                    value = halfYearValueProvider(subject, 1)
+                }
+            case 2:
+                // If requesting half-year 2 but it's dropped, skip
+                if droppedHalf == 2 {
+                    value = nil
+                } else {
+                    value = halfYearValueProvider(subject, 2)
+                }
+            default: // nil or any other = both half-years (respecting drops)
+                let v1 = droppedHalf == 1 ? nil : halfYearValueProvider(subject, 1)
+                let v2 = droppedHalf == 2 ? nil : halfYearValueProvider(subject, 2)
+                switch (v1, v2) {
+                case let (a?, b?):
+                    value = (a + b) / 2.0
+                case let (a?, nil):
+                    value = a
+                case let (nil, b?):
+                    value = b
+                default:
+                    value = nil
+                }
+            }
+            
+            if let v = value {
+                total += v
+                count += 1
+            }
+        }
+        
+        guard count > 0 else { return nil }
+        return total / count
+    }
 }
+

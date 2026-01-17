@@ -21,6 +21,7 @@ struct AddGradeView: View {
     @State private var date: Date = Date()
     @State private var note: String = ""
     @State private var halfYearSelection: Int = AddGradeView.defaultHalfYear()
+    @State private var assessmentType: AssessmentType = .muendlich
     @State private var isSaving: Bool = false
     @State private var error: String?
     @FocusState private var focusedField: Field?
@@ -75,24 +76,26 @@ struct AddGradeView: View {
         case custom
     }
 
-    private func weightOptions(for subjectType: Int) -> [(title: String, value: Double)] {
-        if subjectType == 0 {
+    private func weightOptions(for gradingMode: GradingMode) -> [(title: String, value: Double, type: AssessmentType)] {
+        switch gradingMode {
+        case .withSchulaufgaben:
             return [
-                ("Kurzarbeit", 1),
-                ("Mündlich / EX", 0)
+                ("Schulaufgabe", 2, .schulaufgabe),
+                ("Kurzarbeit", 1, .kurzarbeit),
+                ("Mündlich / EX", 1, .muendlich)
+            ]
+        case .withoutSchulaufgaben:
+            return [
+                ("Kurzarbeit", 1, .kurzarbeit),
+                ("Mündlich / EX", 1, .muendlich)
             ]
         }
-        return [
-            ("Schulaufgabe", 2),
-            ("Kurzarbeit", 1),
-            ("Mündlich / EX", 0)
-        ]
     }
 
-    private func selectedWeightLabel(for subjectType: Int) -> String {
+    private func selectedWeightLabel(for gradingMode: GradingMode) -> String {
         switch weightChoice {
         case .preset(let value):
-            let options = weightOptions(for: subjectType)
+            let options = weightOptions(for: gradingMode)
             if let match = options.first(where: { $0.value == value }) {
                 return match.title
             }
@@ -169,14 +172,15 @@ struct AddGradeView: View {
                                         .background(Color.formInputBackground)
                                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-                                    let subjectType = subjects.first(where: { $0.name == subjectName })?.type ?? 0
+                                    let subject = subjects.first(where: { $0.name == subjectName })
+                                    let gradingMode = subject?.gradingMode ?? ((subject?.type == 1) ? .withSchulaufgaben : .withoutSchulaufgaben)
 
                                     VStack(alignment: .leading, spacing: 8) {
                                         Text("Art")
                                             .font(.subheadline)
 
                                         Menu {
-                                            ForEach(weightOptions(for: subjectType), id: \.value) { option in
+                                            ForEach(weightOptions(for: gradingMode), id: \.type) { option in
                                                 let isSelected: Bool = {
                                                     if case .preset(let value) = weightChoice {
                                                         return value == option.value
@@ -185,6 +189,7 @@ struct AddGradeView: View {
                                                 }()
                                                 Button {
                                                     weightChoice = .preset(option.value)
+                                                    assessmentType = option.type
                                                 } label: {
                                                     HStack {
                                                         Text(option.title)
@@ -218,7 +223,7 @@ struct AddGradeView: View {
                                             }
                                         } label: {
                                             HStack {
-                                                Text(selectedWeightLabel(for: subjectType))
+                                                Text(selectedWeightLabel(for: gradingMode))
                                                     .font(.subheadline.weight(.semibold))
                                                 Spacer()
                                                 Image(systemName: "chevron.down")
@@ -252,7 +257,7 @@ struct AddGradeView: View {
                                             }
                                         } else {
                                             let weightInfo: String = {
-                                                if subjectType == 1 {
+                                                if gradingMode == .withSchulaufgaben {
                                                     return "Schulaufgaben zählen doppelt, Kurzarbeiten und Mündlich / EX einfach. Sonstige Leistungen können eigene Gewichtung haben"
                                                 }
                                                 return "Kurzarbeiten zählen doppelt, Mündlich / EX einfach. Sonstige Leistungen können eigene Gewichtung haben"
@@ -514,6 +519,7 @@ struct AddGradeView: View {
                 note: finalNote,
                 halfYear: halfYear,
                 linkedExamId: linkedExamId,
+                assessmentType: assessmentType,
                 using: key
             )
             if linkToExam, let examId = selectedLinkedExamId {

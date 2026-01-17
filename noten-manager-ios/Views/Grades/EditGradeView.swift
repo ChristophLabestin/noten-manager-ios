@@ -8,6 +8,7 @@ struct EditGradeView: View {
     let grade: GradeWithId
     let subjectName: String
     let subjectType: Int
+    let gradingMode: GradingMode
 
     @State private var gradeText: String
     @State private var weightChoice: WeightChoice
@@ -15,6 +16,7 @@ struct EditGradeView: View {
     @State private var date: Date
     @State private var halfYear: Int
     @State private var note: String
+    @State private var assessmentType: AssessmentType
     @State private var isSaving: Bool = false
     @State private var isDeleting: Bool = false
     @State private var showDeleteConfirm: Bool = false
@@ -26,10 +28,12 @@ struct EditGradeView: View {
     private enum Field: Hashable { case grade, note }
     private enum WeightChoice: Hashable { case preset(Double), custom }
 
-    init(grade: GradeWithId, subjectName: String, subjectType: Int) {
+    init(grade: GradeWithId, subjectName: String, subjectType: Int, gradingMode: GradingMode? = nil) {
         self.grade = grade
         self.subjectName = subjectName
         self.subjectType = subjectType
+        let resolvedMode = gradingMode ?? (subjectType == 1 ? .withSchulaufgaben : .withoutSchulaufgaben)
+        self.gradingMode = resolvedMode
 
         _gradeText = State(initialValue: EditGradeView.formatGrade(grade.grade))
         if grade.weight < 0 {
@@ -44,27 +48,31 @@ struct EditGradeView: View {
         _note = State(initialValue: grade.note ?? "")
         _linkToExam = State(initialValue: grade.linkedExamId != nil)
         _selectedLinkedExamId = State(initialValue: grade.linkedExamId)
+        let initialType = EditGradeView.initialAssessmentType(for: grade, gradingMode: resolvedMode)
+        _assessmentType = State(initialValue: initialType)
     }
 
-    private var weightOptions: [(title: String, value: Double)] {
-        if subjectType == 0 {
+    private func weightOptions() -> [(title: String, value: Double, type: AssessmentType)] {
+        switch gradingMode {
+        case .withSchulaufgaben:
             return [
-                ("Kurzarbeit", 1),
-                ("Mündlich / EX", 0)
+                ("Schulaufgabe", 2, .schulaufgabe),
+                ("Kurzarbeit", 1, .kurzarbeit),
+                ("Mündlich / EX", 1, .muendlich)
+            ]
+        case .withoutSchulaufgaben:
+            return [
+                ("Kurzarbeit", 1, .kurzarbeit),
+                ("Mündlich / EX", 1, .muendlich)
             ]
         }
-        return [
-            ("Schulaufgabe", 2),
-            ("Kurzarbeit", 1),
-            ("Mündlich / EX", 0)
-        ]
     }
 
     private func selectedWeightLabel() -> String {
         switch weightChoice {
         case .preset(let value):
             if value == 3 { return "Fachreferat" }
-            if let match = weightOptions.first(where: { $0.value == value }) {
+            if let match = weightOptions().first(where: { $0.value == value }) {
                 return match.title
             }
             return "Sonstige Leistung"
@@ -91,6 +99,12 @@ struct EditGradeView: View {
         case .custom:
             guard let custom = parsedCustomWeight() else { return nil }
             return -abs(custom)
+        }
+    }
+
+    private func updateAssessmentTypeForWeight(_ value: Double) {
+        if let match = weightOptions().first(where: { $0.value == value }) {
+            assessmentType = match.type
         }
     }
 
@@ -144,7 +158,7 @@ struct EditGradeView: View {
                                         Text("Art")
                                             .font(.headline)
                                         Menu {
-                                            ForEach(weightOptions, id: \.value) { option in
+                                            ForEach(weightOptions(), id: \.value) { option in
                                                 let isSelected: Bool = {
                                                     if case .preset(let value) = weightChoice {
                                                         return value == option.value
@@ -153,6 +167,7 @@ struct EditGradeView: View {
                                                 }()
                                                 Button {
                                                     weightChoice = .preset(option.value)
+                                                    assessmentType = option.type
                                                     customWeightText = ""
                                                 } label: {
                                                     HStack {
@@ -173,6 +188,7 @@ struct EditGradeView: View {
                                             }()
                                             Button {
                                                 weightChoice = .custom
+                                                assessmentType = .muendlich
                                             } label: {
                                                 HStack {
                                                     Text("Sonstige Leistung")
@@ -218,7 +234,7 @@ struct EditGradeView: View {
                                             }
                                         } else {
                                             let info: String = {
-                                                if subjectType == 1 {
+                                                if gradingMode == .withSchulaufgaben {
                                                     return "Schulaufgaben zählen doppelt, Kurzarbeiten und Mündlich / EX einfach."
                                                 }
                                                 return "Kurzarbeiten zählen doppelt, Mündlich / EX einfach."
@@ -446,6 +462,7 @@ struct EditGradeView: View {
                 note: storedNote,
                 halfYear: halfYear,
                 linkedExamId: linkToExam ? selectedLinkedExamId : nil,
+                assessmentType: assessmentType,
                 using: key
             )
             await MainActor.run {
@@ -538,7 +555,9 @@ struct EditGradeView: View {
                 weightChoice = .custom
                 customWeightText = EditGradeView.formatWeight(custom)
             } else if let w = exam.weight {
-                weightChoice = .preset(Double(w))
+                let doubleWeight = Double(w)
+                weightChoice = .preset(doubleWeight)
+                updateAssessmentTypeForWeight(doubleWeight)
             }
             return
         }
@@ -547,9 +566,22 @@ struct EditGradeView: View {
                 weightChoice = .custom
                 customWeightText = EditGradeView.formatWeight(custom)
             } else if let w = exam.weight {
-                weightChoice = .preset(Double(w))
+                let doubleWeight = Double(w)
+                weightChoice = .preset(doubleWeight)
+                updateAssessmentTypeForWeight(doubleWeight)
             }
         }
+    }
+
+    private static func initialAssessmentType(for grade: GradeWithId, gradingMode: GradingMode) -> AssessmentType {
+        if let type = grade.assessmentType { return type }
+        if gradingMode == .withSchulaufgaben, grade.weight >= 2 {
+            return .schulaufgabe
+        }
+        if grade.weight == 1 {
+            return .kurzarbeit
+        }
+        return .muendlich
     }
 
     private static var switchDate: Date {

@@ -893,11 +893,7 @@ struct FinalGradeView: View {
                 } else {
                     VStack(spacing: 8) {
                         ForEach(droppedHalfYears, id: \.handle.id) { entry in
-                            let droppedAverage = calculateHalfYearAverageForSubject(
-                                entry.handle.grades,
-                                entry.handle.subject.type,
-                                entry.halfYear
-                            )
+                            let droppedAverage = calculateHalfYearAverageForSubject(entry.handle.subject, grades: entry.handle.grades, halfYear: entry.halfYear)
                             HStack {
                                 VStack(alignment: .leading) {
                                     Text(entry.handle.subject.name)
@@ -967,8 +963,8 @@ struct FinalGradeView: View {
         let disableHalfYear2 = ((limitReached || maxDroppedHalfYears <= 0) && !isHalfYear2Selected) || isHalfYear1Selected
 
         let subjectGrades = handle.grades
-        let firstHalfYearAverage = calculateHalfYearAverageForSubject(subjectGrades, handle.subject.type, 1)
-        let secondHalfYearAverage = calculateHalfYearAverageForSubject(subjectGrades, handle.subject.type, 2)
+        let firstHalfYearAverage = calculateHalfYearAverageForSubject(handle.subject, grades: subjectGrades, halfYear: 1)
+        let secondHalfYearAverage = calculateHalfYearAverageForSubject(handle.subject, grades: subjectGrades, halfYear: 2)
         let subjectAverage = subjectAverageFor(handle: handle)
 
         SettingsSectionBox {
@@ -976,18 +972,19 @@ struct FinalGradeView: View {
                 HStack(alignment: .top, spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(handle.subject.name).font(.headline)
-                        if let yearLabel = handle.yearLabel {
-                            Text("\(yearLabel) Jahrgang")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+                    if let yearLabel = handle.yearLabel {
+                        Text("\(yearLabel) Jahrgang")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    Spacer()
-                    Tag(
-                        text: handle.subject.type == 1 ? "Hauptfach" : "Nebenfach",
-                        style: handle.subject.type == 1 ? .main : .minor
-                    )
                 }
+                Spacer()
+                let mode = handle.subject.gradingMode ?? (handle.subject.type == 1 ? .withSchulaufgaben : .withoutSchulaufgaben)
+                Tag(
+                    text: mode == .withSchulaufgaben ? "Schulaufgaben" : "Ohne Schulaufgabe",
+                    style: mode == .withSchulaufgaben ? .main : .minor
+                )
+            }
 
                 HStack {
                     Text("Fach-Durchschnitt").font(.subheadline).foregroundStyle(.secondary)
@@ -1042,6 +1039,7 @@ struct FinalGradeView: View {
                     .accessibilityLabel("2. Halbjahr streichen")
                     .disabled(disableHalfYear2)
                 }
+
             }
         }
     }
@@ -1135,18 +1133,9 @@ struct FinalGradeView: View {
         store.effectiveGradeWeight(subjectType: subjectType, rawWeight: grade.weight)
     }
 
-    private func calculateHalfYearAverageForSubject(_ grades: [GradeWithId], _ subjectType: Int, _ halfYear: Int) -> Double? {
-        let filtered = grades.filter { $0.halfYear == halfYear }
-        guard !filtered.isEmpty else { return nil }
-        var total = 0.0
-        var totalWeight = 0.0
-        for g in filtered {
-            let w = calculateGradeWeightForSubject(subjectType, g)
-            total += g.grade * w
-            totalWeight += w
-        }
-        guard totalWeight > 0 else { return nil }
-        return total / totalWeight
+    private func calculateHalfYearAverageForSubject(_ subject: Subject, grades: [GradeWithId], halfYear: Int) -> Double? {
+        let comp = store.computeHalfYearFoboso(subject: subject, halfYear: halfYear, grades: grades)
+        return comp.rawFinal ?? comp.otherAvg ?? comp.pointsMin.map(Double.init)
     }
 
     private func subjectAverageFor(handle: SubjectHandle) -> Double? {
@@ -1245,6 +1234,19 @@ struct FinalGradeView: View {
         return .red
     }
 
+    /// Converts 0-15 points average to 1-6 grade using the same formula as HomeView
+    /// Formula: Grade = (17 - Points) / 3
+    private func pointsToGrade(_ points: Double?) -> Double? {
+        guard let p = points else { return nil }
+        let grade = (17.0 - p) / 3.0
+        return max(1.0, min(6.0, grade))
+    }
+    
+    private func pointsToGradeText(_ points: Double?, decimals: Int) -> String {
+        guard let g = pointsToGrade(points) else { return "-" }
+        return String(format: "%.\(decimals)f", g)
+    }
+
     private func finalGradeDescriptor(_ value: Double?) -> String {
         guard let v = value else { return "Noch keine Note berechnet" }
         if v == 1 { return "Exzellenter Schnitt" }
@@ -1256,18 +1258,27 @@ struct FinalGradeView: View {
     }
 
     private func finalGradeValue(using points: [String: Double?]) -> Double? {
+        // Use the same formula as HomeView: (17 - averagePoints) / 3
+        // Get the average points from half-year averages across subjects
         let summary = makeFobosoSummary(examPoints: points)
+        if summary.halfYearCount > 0 {
+            let averagePoints = summary.halfYearPoints / Double(summary.halfYearCount)
+            return pointsToGrade(averagePoints)
+        }
+        // Fallback to grade from summary or abitur calculation
         return summary.grade ?? abiturFinalAverage(points: points) ?? gradesOnlyFinalAverage
     }
 
     private func finalGradeText(for points: [String: Double?]) -> String {
-        let summary = makeFobosoSummary(examPoints: points)
         let decimals = max(1, min(3, finalGradeToFixed))
+        // Use the same formula as HomeView: (17 - averagePoints) / 3
+        let summary = makeFobosoSummary(examPoints: points)
+        if summary.halfYearCount > 0 {
+            let averagePoints = summary.halfYearPoints / Double(summary.halfYearCount)
+            return pointsToGradeText(averagePoints, decimals: decimals)
+        }
+        // Fallback
         if summary.maxPoints > 0 {
-            if let raw = summary.gradeRaw {
-                let rawDisplay = max(1, raw)
-                return String(format: "%.\(decimals)f", rawDisplay)
-            }
             if let g = summary.grade {
                 return String(format: "%.\(decimals)f", g)
             }
@@ -1459,8 +1470,8 @@ struct FinalGradeView: View {
             let isHalfYear1Dropped = (dropOption == .one)
             let isHalfYear2Dropped = (dropOption == .two)
 
-            let first = isHalfYear1Dropped ? nil : calculateHalfYearAverageForSubject(handle.grades, handle.subject.type, 1)
-            let second = isHalfYear2Dropped ? nil : calculateHalfYearAverageForSubject(handle.grades, handle.subject.type, 2)
+            let first = isHalfYear1Dropped ? nil : calculateHalfYearAverageForSubject(handle.subject, grades: handle.grades, halfYear: 1)
+            let second = isHalfYear2Dropped ? nil : calculateHalfYearAverageForSubject(handle.subject, grades: handle.grades, halfYear: 2)
 
             var components: [(value: Double, weight: Double)] = []
             if let f = first { components.append((f, 1)) }
@@ -1576,8 +1587,8 @@ struct FinalGradeView: View {
             let dropOption = dropSelections[handle.id] ?? .none
             let isHalfYear1Dropped = (dropOption == .one)
             let isHalfYear2Dropped = (dropOption == .two)
-            let first = isHalfYear1Dropped ? nil : calculateHalfYearAverageForSubject(handle.grades, handle.subject.type, 1)
-            let second = isHalfYear2Dropped ? nil : calculateHalfYearAverageForSubject(handle.grades, handle.subject.type, 2)
+            let first = isHalfYear1Dropped ? nil : calculateHalfYearAverageForSubject(handle.subject, grades: handle.grades, halfYear: 1)
+            let second = isHalfYear2Dropped ? nil : calculateHalfYearAverageForSubject(handle.subject, grades: handle.grades, halfYear: 2)
             if let f = first { totalPoints += f; count += 1 }
             if let s = second { totalPoints += s; count += 1 }
         }

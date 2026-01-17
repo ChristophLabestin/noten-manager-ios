@@ -93,28 +93,35 @@ struct EditExamView: View {
         !isGeneralEvent && !isFachreferatExam && !subjectName.isEmpty
     }
 
-    private func weightOptions(for subjectType: Int) -> [(title: String, value: Int)] {
-        if subjectType == 0 {
-            return [
-                ("Kurzarbeit", 1),
-                ("Mündlich / EX", 0)
-            ]
-        }
-        return [
-            ("Schulaufgabe", 2),
-            ("Kurzarbeit", 1),
-            ("Mündlich / EX", 0)
-        ]
+    private func gradingMode(for name: String) -> GradingMode {
+        let subject = subjects.first(where: { $0.name == name })
+        return subject?.gradingMode ?? ((subject?.type == 1) ? .withSchulaufgaben : .withoutSchulaufgaben)
     }
 
-    private func selectedWeightLabel(for subjectType: Int) -> String {
+    private func weightOptions(for gradingMode: GradingMode) -> [(title: String, value: Int)] {
+        switch gradingMode {
+        case .withSchulaufgaben:
+            return [
+                ("Schulaufgabe", 2),
+                ("Kurzarbeit", 1),
+                ("Mündlich / EX", 1)
+            ]
+        case .withoutSchulaufgaben:
+            return [
+                ("Kurzarbeit", 1),
+                ("Mündlich / EX", 1)
+            ]
+        }
+    }
+
+    private func selectedWeightLabel(for gradingMode: GradingMode) -> String {
         if useCustomWeight {
             if let custom = parsedCustomWeight() {
                 return "Sonstige Leistung (\(EditExamView.formatWeight(custom))x)"
             }
             return "Sonstige Leistung"
         }
-        let options = weightOptions(for: subjectType)
+        let options = weightOptions(for: gradingMode)
         if let match = options.first(where: { $0.value == examWeight }) {
             return match.title
         }
@@ -267,12 +274,12 @@ struct EditExamView: View {
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     } else {
-                                        let subjectType = subjects.first(where: { $0.name == subjectName })?.type ?? 0
+                                        let gm = gradingMode(for: subjectName)
                                         VStack(alignment: .leading, spacing: 8) {
                                             Text("Art")
                                                 .font(.headline)
                                             Menu {
-                                                ForEach(weightOptions(for: subjectType), id: \.value) { option in
+                                                ForEach(weightOptions(for: gm), id: \.title) { option in
                                                     let isSelected = !useCustomWeight && examWeight == option.value
                                                     Button {
                                                         useCustomWeight = false
@@ -307,7 +314,7 @@ struct EditExamView: View {
                                                 }
                                             } label: {
                                                 HStack {
-                                                    Text(selectedWeightLabel(for: subjectType))
+                                                    Text(selectedWeightLabel(for: gm))
                                                         .font(.subheadline.weight(.semibold))
                                                     Spacer()
                                                     Image(systemName: "chevron.down")
@@ -338,7 +345,7 @@ struct EditExamView: View {
                                             }
                                         } else {
                                             let weightInfo: String = {
-                                                if subjectType == 1 {
+                                                if gm == .withSchulaufgaben {
                                                     return "Schulaufgaben zählen doppelt, Kurzarbeiten und Mündlich / EX einfach. Sonstige Leistungen können eigene Gewichtung haben"
                                                 }
                                                 return "Kurzarbeiten zählen doppelt, Mündlich / EX einfach. Sonstige Leistungen können eigene Gewichtung haben"

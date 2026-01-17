@@ -2831,8 +2831,8 @@ private struct ExamSubjectRow: View {
                     Tag(text: "Wahlfach", style: .elective)
                 } else {
                     Tag(
-                        text: subject.type == 1 ? "Hauptfach" : "Nebenfach",
-                        style: subject.type == 1 ? .main : .minor
+                        text: (subject.gradingMode ?? (subject.type == 1 ? .withSchulaufgaben : .withoutSchulaufgaben)) == .withSchulaufgaben ? "Schulaufgaben" : "Ohne Schulaufgabe",
+                        style: (subject.gradingMode ?? (subject.type == 1 ? .withSchulaufgaben : .withoutSchulaufgaben)) == .withSchulaufgaben ? .main : .minor
                     )
                 }
             }
