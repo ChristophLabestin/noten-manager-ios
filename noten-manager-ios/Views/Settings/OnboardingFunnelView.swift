@@ -2,7 +2,7 @@ import SwiftUI
 
 struct OnboardingFunnelView: View {
     enum Step: Int {
-        case legacy, schoolYear, groups, subjects
+        case legacy, schoolYear, classes, subjects
     }
 
     private struct PendingSubject: Identifiable, Hashable {
@@ -10,6 +10,60 @@ struct OnboardingFunnelView: View {
         let name: String
         let type: Int
         let isElective: Bool
+    }
+    
+    // Branch Selection helper
+    private struct BranchSelectionRow: View {
+        let branch: ClassConfiguration.Branch
+        let courses: [Course]
+        let isSelected: Bool
+        let onSelect: () -> Void
+        
+        private var branchCourses: [Course] {
+            courses.filter {
+                if case .branch(let name) = $0.type, name == branch.name { return true }
+                return false
+            }
+        }
+        
+        var body: some View {
+            Button(action: onSelect) {
+                HStack {
+                    VStack(alignment: .leading) {
+                        Text(branch.name)
+                            .font(.headline)
+                            .foregroundStyle(isSelected ? .white : .primary)
+                        
+                        if !branchCourses.isEmpty {
+                            Text(branchCourses.map(\.name).joined(separator: ", "))
+                                .font(.caption)
+                                .foregroundStyle(isSelected ? .white.opacity(0.8) : .secondary)
+                                .lineLimit(2)
+                        }
+                    }
+                    Spacer()
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(.white)
+                    } else {
+                        Image(systemName: "circle")
+                            .font(.title2)
+                            .foregroundStyle(.secondary.opacity(0.5))
+                    }
+                }
+                .padding()
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(isSelected ? .indigo : Color.formInputBackground)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(isSelected ? Color.clear : Color.secondary.opacity(0.2), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     private struct GroupSubjectSource: Hashable {
@@ -47,12 +101,23 @@ struct OnboardingFunnelView: View {
     @State private var schoolYearError: String?
     @State private var isSavingSchoolYear: Bool = false
 
-    @State private var joinCode: String = ""
-    @State private var joinInfo: String?
-    @State private var joinError: String?
-    @State private var isJoining: Bool = false
-    @State private var leavingGroupIds: Set<String> = []
-    @State private var didPrefetchGroupNames: Bool = false
+    @State private var classCode: String = ""
+    @State private var isJoiningClass: Bool = false
+    @State private var classJoinError: String?
+    @State private var classJoinSuccess: String?
+    @State private var showScanner: Bool = false
+    
+    // Class Join Context
+    @State private var joinedClassIds: Set<String> = []
+    @State private var pendingClassJoinId: String?
+    @State private var pendingClassJoinName: String?
+    @State private var pendingClassConfig: ClassConfiguration?
+    @State private var showBranchSelection: Bool = false
+    
+    // Branch Selection State
+    @State private var branchCandidates: [Course] = []
+    @State private var selectedBranchNames: Set<String> = []
+    @State private var mandatoryCourses: [Course] = []
 
     @State private var importInfo: String?
     @State private var importError: String?
@@ -63,8 +128,9 @@ struct OnboardingFunnelView: View {
     @State private var prevYearSubjects: [Subject] = []
     @State private var selectedPrevSubjects: Set<String> = []
     @State private var isLoadingPrevSubjects: Bool = false
-    @State private var baselineGroupIds: Set<String> = []
-    @State private var pendingGroupCodes: Set<String> = []
+    @State private var baselineGroupIds: Set<String> = [] // Keep track of initial state if needed
+    // @State private var pendingGroupCodes: Set<String> = [] // Removed for classes
+
     @State private var pendingSchoolYearId: String?
     @State private var pendingSchoolType: SchoolType = .bos
     @State private var pendingGradeYear: Int = 0
@@ -74,7 +140,7 @@ struct OnboardingFunnelView: View {
     @State private var manualType: Int = 1
     @State private var manualIsElective: Bool = false
     @State private var manualError: String?
-    @State private var groupSubjectCandidates: [PendingGroupSubject] = []
+    // @State private var groupSubjectCandidates: [PendingGroupSubject] = [] // Removed
 
     @State private var finishError: String?
     @State private var isFinishing: Bool = false
@@ -121,47 +187,26 @@ struct OnboardingFunnelView: View {
         if store.legacyImportSelected == true && !store.legacySelectedSubjects.isEmpty {
             return true
         }
-        return !store.subjects.isEmpty || stagedGroupSubjectCount > 0 || !pendingManualSubjects.isEmpty
+        return !store.subjects.isEmpty || !pendingManualSubjects.isEmpty
     }
 
-    private var hasJoinedGroups: Bool {
-        !visibleGroupIds.isEmpty
+    private var hasJoinedClasses: Bool {
+        !store.classIds.isEmpty
     }
-
-    private var visibleGroupIds: [String] {
-        if isSchoolYearChange {
-            let newGroups = Set(store.groupIds).subtracting(baselineGroupIds)
-            return Array(newGroups.union(pendingGroupCodes)).sorted()
+    
+    // Helper to extract code from URL
+    private func extractCode(from raw: String) -> String {
+        if raw.contains("://") || raw.contains("http"), let url = URL(string: raw) {
+            return url.lastPathComponent
         }
-        return store.groupIds
+        return raw.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var uniqueGroupSubjectCount: Int {
-        var names: Set<String> = []
-        let existing = Set(store.subjects.map { $0.name.lowercased() }).union(legacySubjectLowercased)
-        for gid in store.groupIds {
-            for subj in store.groupSubjectsByGroup[gid] ?? [] {
-                let trimmed = subj.name.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty else { continue }
-                let lower = trimmed.lowercased()
-                guard !existing.contains(lower) else { continue }
-                names.insert(lower)
-            }
-        }
-        return names.count
-    }
-
-    private var stagedSubjects: [String] {
-        Array(pendingPrevSubjectNames).sorted()
-    }
-
-    private var stagedGroupSubjectCount: Int {
-        selectedGroupSubjectNames.count
-    }
-
-    private var selectedGroupSubjectNames: [String] {
-        groupSubjectCandidates.filter { $0.selected }.map { $0.name }
-    }
+    /* Legacy Group Properties Removed
+    private var uniqueGroupSubjectCount: Int { ... }
+    private var stagedGroupSubjectCount: Int { ... }
+    private var selectedGroupSubjectNames: [String] { ... }
+    */
 
     private var legacyAvailableSubjectNames: [String] {
         let summaryNames = store.legacyMigrationSummary?.subjectNames ?? []
@@ -199,7 +244,7 @@ struct OnboardingFunnelView: View {
         switch currentStep {
         case .legacy: return 1
         case .schoolYear: return legacyStepRequired ? 2 : 1
-        case .groups: return legacyStepRequired ? 3 : 2
+        case .classes: return legacyStepRequired ? 3 : 2
         case .subjects: return legacyStepRequired ? 4 : 3
         }
     }
@@ -299,6 +344,11 @@ struct OnboardingFunnelView: View {
                         }
                         .accessibilityLabel("Schließen")
                     }
+                }
+            }
+            .sheet(isPresented: $showScanner) {
+                QRScannerView { scannedCode in
+                    classCode = extractCode(from: scannedCode)
                 }
             }
             .onAppear {
@@ -612,8 +662,8 @@ struct OnboardingFunnelView: View {
             EmptyView()
         case .schoolYear:
             schoolYearStep
-        case .groups:
-            groupsStep
+        case .classes:
+            classesStep
         case .subjects:
             subjectsStep
         }
@@ -715,7 +765,7 @@ struct OnboardingFunnelView: View {
                     if isSavingSchoolYear {
                         ProgressView()
                     } else {
-                        Text("Weiter zu Gruppen")
+                        Text("Weiter")
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -733,116 +783,166 @@ struct OnboardingFunnelView: View {
         .background(RoundedRectangle(cornerRadius: 18).fill(Color.formCardBackground))
     }
 
-    private var groupsStep: some View {
+    private var classesStep: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Gruppen beitreten")
+            Text("Klasse beitreten")
                 .font(.headline)
-            Text("Tritt bestehenden Gruppen mit einem Code bei oder überspringe diesen Schritt.")
+            Text("Tritt deiner Klasse mit einem Code bei.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
-            TextField("Gruppencode", text: $joinCode)
-                .textInputAutocapitalization(.characters)
-                .autocorrectionDisabled(true)
-                .submitLabel(.done)
-                .onSubmit { hideKeyboard() }
-                .padding(12)
-                .background(Color.formInputBackground)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-
-            Button {
-                handleJoinGroup()
-            } label: {
-                HStack {
-                    if isJoining {
-                        ProgressView()
-                    } else {
-                        Text("Beitreten")
-                    }
+            // Input Field
+            HStack(spacing: 8) {
+                TextField("Klassencode", text: $classCode)
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled(true)
+                    .submitLabel(.done)
+                    .onSubmit { hideKeyboard() }
+                    .padding(12)
+                    .background(Color.formInputBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                
+                Button {
+                    showScanner = true
+                } label: {
+                    Image(systemName: "qrcode.viewfinder")
+                        .font(.title2)
+                        .padding(10)
+                        .background(Color.formInputBackground)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
-                .frame(maxWidth: .infinity)
+                .buttonStyle(.plain)
             }
-            .buttonStyle(SoftTintButtonStyle(accent: accentPrimary))
-            .disabled(normalizeGroupCode(joinCode).isEmpty || isJoining)
-            .frame(maxWidth: .infinity)
 
-            if let msg = joinInfo {
+            // Check / Join Button
+            if pendingClassConfig == nil {
+                Button {
+                    checkAndJoinClass()
+                } label: {
+                    HStack {
+                        if isJoiningClass {
+                            ProgressView()
+                        } else {
+                            Text("Weiter")
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(SoftTintButtonStyle(accent: accentPrimary))
+                .disabled(classCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isJoiningClass)
+            }
+            
+            // Messages
+            if let msg = classJoinSuccess {
                 Text(msg)
                     .font(.footnote)
                     .foregroundStyle(.green)
             }
-            if let err = joinError {
+            if let err = classJoinError {
                 Text(err)
                     .font(.footnote)
                     .foregroundStyle(.red)
             }
-
-            if hasJoinedGroups {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Beigetretene Gruppen")
-                        .font(.subheadline.weight(.semibold))
-                    ForEach(visibleGroupIds, id: \.self) { gid in
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack(alignment: .top) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(store.groupNames[gid] ?? "Lädt …")
-                                        .font(.body.weight(.semibold))
-                                    Text(gid)
-                                        .font(.system(.caption2, design: .monospaced))
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Button(role: .destructive) {
-                                    leaveGroup(gid)
-                                } label: {
-                                    if leavingGroupIds.contains(gid) {
-                                        ProgressView()
+            
+            // Pending Join (Course Selection)
+            if let config = pendingClassConfig, let className = pendingClassJoinName {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Beitreten: \(className)")
+                        .font(.headline)
+                    
+                    if !config.branches.isEmpty {
+                        Text("Wähle deine Zweige/Wahlpflichtfächer:")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        
+                        ForEach(config.branches, id: \.name) { branch in
+                            BranchSelectionRow(
+                                branch: branch,
+                                courses: branchCandidates,
+                                isSelected: selectedBranchNames.contains(branch.name),
+                                onSelect: {
+                                    if selectedBranchNames.contains(branch.name) {
+                                        selectedBranchNames.remove(branch.name)
                                     } else {
-                                        Image(systemName: "rectangle.portrait.and.arrow.right")
+                                        selectedBranchNames.insert(branch.name)
                                     }
                                 }
-                                .buttonStyle(.borderless)
-                                .disabled(leavingGroupIds.contains(gid))
-                                .accessibilityLabel("Gruppe verlassen")
+                            )
+                        }
+                    }
+                    
+                    Button {
+                        confirmClassJoin()
+                    } label: {
+                        if isJoiningClass {
+                            ProgressView()
+                        } else {
+                            Text("Klasse beitreten")
+                        }
+                    }
+                    .buttonStyle(SoftTintButtonStyle(accent: .indigo))
+                    .frame(maxWidth: .infinity)
+                    .disabled(isJoiningClass)
+                    
+                    Button("Abbrechen") {
+                        pendingClassConfig = nil
+                        pendingClassJoinId = nil
+                        classCode = ""
+                        branchCandidates = []
+                        selectedBranchNames = []
+                    }
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity)
+                }
+                .padding(16)
+                .background(Color.formInputBackground.opacity(0.5))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+
+            // Joined Classes List
+            if hasJoinedClasses {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Deine Klassen")
+                        .font(.subheadline.weight(.semibold))
+                    
+                    // Show from store (assuming store updates immediately)
+                    ForEach(store.classIds, id: \.self) { cid in
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text(store.classNames[cid] ?? "Klasse")
+                                    .font(.body.weight(.semibold))
+                                Text(cid)
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button(role: .destructive) {
+                                leaveClass(cid)
+                            } label: {
+                                Image(systemName: "rectangle.portrait.and.arrow.right")
+                                    .foregroundStyle(.red)
                             }
                         }
                         .padding(12)
                         .background(Color(.secondarySystemBackground))
                         .clipShape(RoundedRectangle(cornerRadius: 10))
-                        .onAppear {
-                            if store.groupNames[gid] == nil {
-                                Task { await store.loadGroupName(gid: gid) }
-                            }
-                        }
                     }
                 }
             }
 
-            HStack(spacing: 12) {
-                Button("Überspringen") {
-                    continueFromGroups()
-                }
-                .buttonStyle(SoftTintButtonStyle(accent: Color(.secondaryLabel)))
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .disabled(isJoining)
-
-                Button("Weiter") {
-                    continueFromGroups()
-                }
-                .buttonStyle(SoftTintButtonStyle(accent: accentPrimary))
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .disabled(isJoining)
+            // Navigation Buttons
+            // Navigation Buttons
+            Button("Weiter") {
+                continueFromClasses()
             }
-            .frame(maxWidth: .infinity)
+            .buttonStyle(SoftTintButtonStyle(accent: accentPrimary))
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .disabled(isJoiningClass)
+            .padding(.top, 8)
         }
         .padding(18)
         .background(RoundedRectangle(cornerRadius: 18).fill(Color.formCardBackground))
-        .onAppear {
-            if !didPrefetchGroupNames {
-                didPrefetchGroupNames = true
-                Task { await preloadGroupNames() }
-            }
-        }
     }
 
     private var subjectsStep: some View {
@@ -873,64 +973,8 @@ struct OnboardingFunnelView: View {
                 }
             }
 
-            if hasJoinedGroups && !isSchoolYearChange {
-                sectionCard(
-                    title: "Gruppenfächer",
-                    subtitle: "Übernimm Fächer aus deinen beigetretenen Gruppen.",
-                    icon: "person.3.fill",
-                    accent: .blue,
-                    badge: stagedGroupSubjectCount > 0 ? "\(stagedGroupSubjectCount) markiert" : nil
-                ) {
-                    if groupSubjectCandidates.isEmpty {
-                        Text(uniqueGroupSubjectCount > 0 ? "Lade Fächer aus den Gruppen ..." : "Keine Gruppenfächer gefunden.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        VStack(spacing: 10) {
-                            ForEach(groupSubjectCandidates) { candidate in
-                                selectionRow(
-                                    title: candidate.name,
-                                    detail: candidate.sources.count > 1 ? "\(candidate.sources.count) Gruppen" : nil,
-                                    isSelected: candidate.selected,
-                                    accent: .blue
-                                ) {
-                                    toggleGroupSubjectSelection(id: candidate.id, isOn: !candidate.selected)
-                                }
-                            }
-                        }
-                        if !stagingMode {
-                            Button {
-                                importGroupSubjects()
-                            } label: {
-                                HStack {
-                                    if isImporting {
-                                        ProgressView()
-                                    } else {
-                                        Text("Auswahl übernehmen")
-                                    }
-                                }
-                                .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(SoftTintButtonStyle(accent: .blue))
-                            .disabled(isImporting || stagedGroupSubjectCount == 0)
-                        } else {
-                            Text("Auswahl wird beim Abschluss übernommen.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    if let info = importInfo {
-                        Text(info)
-                            .font(.footnote)
-                            .foregroundStyle(.green)
-                    }
-                    if let err = importError {
-                        Text(err)
-                            .font(.footnote)
-                            .foregroundStyle(.red)
-                    }
-                }
-            }
+            // Removed Groups Section 
+
 
             if let prevYear = previousSchoolYearId {
                 sectionCard(
@@ -1075,8 +1119,9 @@ struct OnboardingFunnelView: View {
                     let stagedPrev = Array(pendingPrevSubjectNames).sorted()
                     let stagedManual = pendingManualSubjects
                     let stagedLegacy = store.legacyImportSelected == true ? Array(store.legacySelectedSubjects).sorted() : []
-                    let stagedGroups = selectedGroupSubjectNames.sorted()
-                    if stagedPrev.isEmpty && stagedManual.isEmpty && stagedLegacy.isEmpty && stagedGroups.isEmpty {
+                    // let stagedGroups = [] // Group logic removed
+                    
+                    if stagedPrev.isEmpty && stagedManual.isEmpty && stagedLegacy.isEmpty {
                         Text("Noch keine Fächer ausgewählt.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
@@ -1087,11 +1132,7 @@ struct OnboardingFunnelView: View {
                                     toggleLegacySubject(name: name, isOn: false)
                                 }
                             }
-                            ForEach(stagedGroups, id: \.self) { name in
-                                stagedSubjectRow(title: name, icon: "person.3.fill", tint: .blue) {
-                                    setGroupSubjectSelection(name: name, isOn: false)
-                                }
-                            }
+                            // Group loop removed
                             ForEach(stagedPrev, id: \.self) { name in
                                 stagedSubjectRow(title: name, icon: "clock.arrow.circlepath", tint: .orange) {
                                     pendingPrevSubjectNames.remove(name)
@@ -1155,8 +1196,8 @@ struct OnboardingFunnelView: View {
             return "Daten aus der Web-App gefunden. Entscheide, ob du sie übernehmen möchtest."
         case .schoolYear:
             return isSchoolYearChange ? "Neues Schuljahr anlegen, Schulart und Jahrgang wählen." : "Schuljahr wählen und Jahrgang setzen."
-        case .groups:
-            return isSchoolYearChange ? "Optional Gruppen für das neue Schuljahr verbinden." : "Optional Gruppen mit Code beitreten."
+        case .classes:
+            return isSchoolYearChange ? "Optional einer Klasse für das neue Schuljahr beitreten." : "Optional einer Klasse mit Code beitreten."
         case .subjects:
             return isSchoolYearChange ? "Fächer aus Gruppen oder Vorjahr übernehmen – oder neu anlegen." : "Fächer übernehmen oder selbst anlegen."
         }
@@ -1234,87 +1275,113 @@ struct OnboardingFunnelView: View {
                 pendingSchoolType = selectedSchoolType
                 pendingGradeYear = gradeSelection
                 isSavingSchoolYear = false
-                currentStep = .groups
+                currentStep = .classes
             }
         }
     }
 
-    private func handleJoinGroup() {
-        guard !isJoining else { return }
-        let code = normalizeGroupCode(joinCode)
-        guard !code.isEmpty else { return }
-        if visibleGroupIds.contains(code) {
-            joinInfo = "Gruppe bereits hinzugefügt."
-            joinError = nil
-            return
-        }
-
-        joinInfo = nil
-        joinError = nil
-        isJoining = true
-
+    private func checkAndJoinClass() {
+        let code = classCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !code.isEmpty, !isJoiningClass else { return }
+        
+        isJoiningClass = true
+        classJoinError = nil
+        classJoinSuccess = nil
+        
         Task {
             do {
-                if isSchoolYearChange {
-                    let metadata = await store.groupMetadata(for: code)
-                    if !metadata.exists {
-                        await MainActor.run {
-                            joinError = "Diese Gruppe existiert nicht."
-                            joinInfo = nil
-                            isJoining = false
-                        }
-                        return
-                    }
-                    if let targetYear = pendingSchoolYearId,
-                       let groupYear = metadata.schoolYearId,
-                       !groupYear.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                       groupYear != targetYear {
-                        await MainActor.run {
-                            joinError = "Diese Gruppe gehört zum Schuljahr \(groupYear)."
-                            joinInfo = nil
-                            isJoining = false
-                        }
-                        return
-                    }
-                    await MainActor.run {
-                        pendingGroupCodes.insert(code)
-                        joinCode = ""
-                        joinInfo = "Gruppe wird im neuen Schuljahr verbunden."
-                        joinError = nil
-                    }
-                    await store.loadGroupName(gid: code)
-                    await MainActor.run { isJoining = false }
-                    return
-                }
-
-                let staging = stagingMode
-                try await store.joinExistingSharedGroup(with: code, allowYearCreation: !staging)
+                let info = try await store.fetchClassInfo(with: code)
+                
                 await MainActor.run {
-                    joinInfo = staging ? "Gruppe vorgemerkt. Fächer werden beim Abschluss übernommen." : "Gruppe verbunden."
-                    joinCode = ""
-                    if staging { pendingGroupCodes.insert(code) }
-                    prepareGroupSubjectCandidates()
+                    self.pendingClassJoinId = info.id
+                    self.pendingClassJoinName = info.name
+                    self.pendingClassConfig = info.config
+                    
+                    // Pre-fetch courses for branch selection if needed
+                    Task {
+                         do {
+                             let courses = try await store.fetchCoursesForClass(classId: info.id)
+                             await MainActor.run {
+                                 self.branchCandidates = courses
+                                 // Auto-select if no branches? Or let user confirm.
+                                 // If no branches, we can maybe just auto-join?
+                                 // Let's require confirmation for consistency unless truly 0 options.
+                                 if (info.config?.branches.isEmpty ?? true) {
+                                     // No branches, just confirm join immediately?
+                                     // Actually clearer if UI updates to show "Found class X", then user clicks "Join".
+                                     // But user clicked "Weiter" (Check).
+                                     // Let's execute join if no config/branches.
+                                     confirmClassJoin()
+                                 } else {
+                                     // Wait for branch selection
+                                     isJoiningClass = false
+                                 }
+                             }
+                         } catch {
+                             classJoinError = "Konnte Kurse nicht laden: \(error.localizedDescription)"
+                             isJoiningClass = false
+                         }
+                    }
                 }
             } catch {
-                ErrorLoggingService.logErrorIfEnabled(error)
                 await MainActor.run {
-                    joinError = error.localizedDescription
+                    classJoinError = error.localizedDescription
+                    isJoiningClass = false
                 }
             }
-            await MainActor.run {
-                isJoining = false
+        }
+    }
+    
+    private func confirmClassJoin() {
+        guard let id = pendingClassJoinId else { return }
+        isJoiningClass = true
+        
+        Task {
+            do {
+                if let config = pendingClassConfig, !config.branches.isEmpty {
+                     var selected: [Course] = []
+                     // Add Mandatory
+                     selected.append(contentsOf: branchCandidates.filter { if case .mandatory = $0.type { return true }; return false })
+                     // Add Branches
+                     for bid in selectedBranchNames {
+                         selected.append(contentsOf: branchCandidates.filter { if case .branch(let name) = $0.type, name == bid { return true }; return false })
+                     }
+                     try await store.joinClassWithBranch(classId: id, selectedCourses: selected)
+                } else {
+                     try await store.joinClass(with: id) // Fallback or direct join
+                }
+                
+                await MainActor.run {
+                    classJoinSuccess = "Erfolgreich beigetreten!"
+                    classJoinError = nil
+                    pendingClassConfig = nil
+                    pendingClassJoinId = nil
+                    classCode = ""
+                    branchCandidates = []
+                    selectedBranchNames = []
+                    isJoiningClass = false
+                }
+            } catch {
+                await MainActor.run {
+                    classJoinError = error.localizedDescription
+                    isJoiningClass = false
+                }
             }
         }
     }
 
-    private func continueFromGroups() {
+    private func continueFromClasses() {
         currentStep = .subjects
+        // Reset import error states
         importInfo = nil
         importError = nil
         prevImportInfo = nil
         prevImportError = nil
         finishError = nil
-        prepareGroupSubjectCandidates()
+        // Prepare? Classes already add subjects to store.subjects, so just refresh views or similar if needed.
+        // We might want to remove duplicates if manual/legacy step adds them?
+        // store updates are reactive.
+        
         if previousSchoolYearId != nil && prevYearSubjects.isEmpty {
             Task { await loadPrevSubjects() }
         }
@@ -1350,90 +1417,20 @@ struct OnboardingFunnelView: View {
         }
     }
 
-    private func leaveGroup(_ gid: String) {
-        guard !leavingGroupIds.contains(gid) else { return }
-        if isSchoolYearChange {
-            leavingGroupIds.insert(gid)
-            Task { @MainActor in
-                pendingGroupCodes.remove(gid)
-                leavingGroupIds.remove(gid)
-            }
-            return
-        }
-        if stagingMode {
-            leavingGroupIds.insert(gid)
-            Task { @MainActor in
-                store.groupIds.removeAll { $0 == gid }
-                store.groupSubjectsByGroup.removeValue(forKey: gid)
-                store.groupNames.removeValue(forKey: gid)
-                pendingGroupCodes.remove(gid)
-                prepareGroupSubjectCandidates()
-                leavingGroupIds.remove(gid)
-            }
-            return
-        }
-        leavingGroupIds.insert(gid)
+    private func leaveClass(_ cid: String) {
+        // Simple leave logic
         Task {
-            await store.leaveSharedGroup(code: gid)
-            _ = await MainActor.run {
-                leavingGroupIds.remove(gid)
-            }
+            await store.leaveClass(code: cid)
         }
     }
 
-    private func preloadGroupNames() async {
-        for gid in visibleGroupIds where store.groupNames[gid] == nil {
-            await store.loadGroupName(gid: gid)
-        }
-    }
+    // removed preloadGroupNames
 
     private func prepareGroupSubjectCandidates() {
-        guard hasJoinedGroups, !isSchoolYearChange else {
-            groupSubjectCandidates = []
-            return
-        }
-        let existingSubjects = Set(store.subjects.map { $0.name.lowercased() })
-        let existing = existingSubjects.union(legacySubjectLowercased)
-        let previousSelection = groupSubjectCandidates.reduce(into: [String: Bool]()) { dict, item in
-            dict[item.name.lowercased()] = item.selected
-        }
-        var draft: [String: PendingGroupSubject] = [:]
-
-        for gid in store.groupIds {
-            let subjects = store.groupSubjectsByGroup[gid] ?? []
-            for subj in subjects {
-                let trimmed = subj.name.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty else { continue }
-                let lower = trimmed.lowercased()
-                guard !existing.contains(lower) else { continue }
-
-                var entry = draft[lower] ?? PendingGroupSubject(
-                    name: trimmed,
-                    sources: [],
-                    selected: previousSelection[lower] ?? true
-                )
-                let source = GroupSubjectSource(groupId: gid, subjectId: subj.id, type: subj.type, alias: subj.alias)
-                if !entry.sources.contains(source) {
-                    entry.sources.append(source)
-                }
-                draft[lower] = entry
-            }
-        }
-
-        groupSubjectCandidates = draft.values.sorted { lhs, rhs in
-            lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-        }
+        // No-op for Classes
     }
 
-    private func toggleGroupSubjectSelection(id: UUID, isOn: Bool) {
-        guard let idx = groupSubjectCandidates.firstIndex(where: { $0.id == id }) else { return }
-        groupSubjectCandidates[idx].selected = isOn
-    }
-
-    private func setGroupSubjectSelection(name: String, isOn: Bool) {
-        guard let idx = groupSubjectCandidates.firstIndex(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) else { return }
-        groupSubjectCandidates[idx].selected = isOn
-    }
+    // Removed toggleGroupSubjectSelection & setGroupSubjectSelection
 
     private func toggleLegacySubject(name: String, isOn: Bool) {
         if isOn {
@@ -1456,39 +1453,6 @@ struct OnboardingFunnelView: View {
         await MainActor.run {
             prevYearSubjects = subjects
             isLoadingPrevSubjects = false
-        }
-    }
-
-    private func importGroupSubjects() {
-        guard !isImporting else { return }
-        var allowed = Set(selectedGroupSubjectNames.map { $0.lowercased() })
-        if !legacySubjectLowercased.isEmpty {
-            allowed.subtract(legacySubjectLowercased)
-        }
-        guard !allowed.isEmpty else {
-            importInfo = legacySubjectLowercased.isEmpty ? "Keine Gruppenfächer ausgewählt." : "Ausgewählte Gruppenfächer sind bereits über Web-Daten abgedeckt."
-            return
-        }
-        if stagingMode {
-            importInfo = "Auswahl wird beim Abschluss übernommen."
-            importError = nil
-            return
-        }
-        importInfo = nil
-        importError = nil
-        isImporting = true
-
-        Task {
-            let count = await store.importSubjectsFromGroups(groupIds: nil, allowedNames: allowed)
-            await MainActor.run {
-                isImporting = false
-                if count > 0 {
-                    importInfo = "\(count) Fächer übernommen."
-                } else {
-                    importInfo = "Keine neuen Fächer gefunden."
-                }
-                prepareGroupSubjectCandidates()
-            }
         }
     }
 
@@ -1550,20 +1514,8 @@ struct OnboardingFunnelView: View {
             await store.updateSchoolType(pendingSchoolType)
             await store.updateGradeYear(pendingGradeYear)
 
-            if !pendingGroupCodes.isEmpty {
-                for code in pendingGroupCodes {
-                    try? await store.joinExistingSharedGroup(with: code, allowYearCreation: true)
-                }
-                pendingGroupCodes.removeAll()
-            }
+            // Groups logic removed - classes are joined immediately during step
 
-            if !isSchoolYearChange && !selectedGroupSubjectNames.isEmpty {
-                var allowed = Set(selectedGroupSubjectNames.map { $0.lowercased() })
-                if !legacySubjectLowercased.isEmpty {
-                    allowed.subtract(legacySubjectLowercased)
-                }
-                _ = await store.importSubjectsFromGroups(groupIds: nil, allowedNames: allowed)
-            }
 
             if let prev = previousSchoolYearId, !pendingPrevSubjectNames.isEmpty {
                 _ = await store.importSubjectsFromSchoolYear(prev, subjectNames: Array(pendingPrevSubjectNames))

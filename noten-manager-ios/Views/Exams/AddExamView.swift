@@ -16,6 +16,7 @@ struct AddExamView: View {
     @State private var includeTime: Bool = false
     @State private var time: Date = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: Date()) ?? Date()
     @State private var examWeight: Int = 0
+    @State private var examAssessmentType: AssessmentType = .muendlich
     @State private var useCustomWeight: Bool = false
     @State private var customWeightText: String = ""
     @State private var hasReminder: Bool = false
@@ -49,18 +50,18 @@ struct AddExamView: View {
         return subject?.gradingMode ?? ((subject?.type == 1) ? .withSchulaufgaben : .withoutSchulaufgaben)
     }
 
-    private func weightOptions(for gradingMode: GradingMode) -> [(title: String, value: Int)] {
+    private func weightOptions(for gradingMode: GradingMode) -> [(title: String, value: Int, type: AssessmentType)] {
         switch gradingMode {
         case .withSchulaufgaben:
             return [
-                ("Schulaufgabe", 2),
-                ("Kurzarbeit", 1),
-                ("Mündlich / EX", 1)
+                ("Schulaufgabe", 2, .schulaufgabe),
+                ("Kurzarbeit", 1, .kurzarbeit),
+                ("Mündlich / EX", 1, .muendlich)
             ]
         case .withoutSchulaufgaben:
             return [
-                ("Kurzarbeit", 1),
-                ("Mündlich / EX", 1)
+                ("Kurzarbeit", 1, .kurzarbeit),
+                ("Mündlich / EX", 1, .muendlich)
             ]
         }
     }
@@ -226,10 +227,11 @@ struct AddExamView: View {
                                                 .font(.headline)
                                             Menu {
                                                 ForEach(weightOptions(for: gm), id: \.title) { option in
-                                                    let isSelected = !useCustomWeight && examWeight == option.value
+                                                    let isSelected = !useCustomWeight && examWeight == option.value && examAssessmentType == option.type
                                                     Button {
                                                         useCustomWeight = false
                                                         examWeight = option.value
+                                                        examAssessmentType = option.type
                                                     } label: {
                                                         HStack {
                                                             Text(option.title)
@@ -562,6 +564,7 @@ struct AddExamView: View {
                         hasTime: hasTime,
                         weight: weightToStore,
                         customWeight: customWeight,
+                        assessmentType: allowWeights && !useCustomWeight ? examAssessmentType : nil,
                         reminderAt: reminder,
                         requiresGrade: requiresGrade
                     )
@@ -580,6 +583,7 @@ struct AddExamView: View {
                         hasTime: hasTime,
                         weight: weightToStore,
                         customWeight: customWeight,
+                        assessmentType: allowWeights && !useCustomWeight ? examAssessmentType : nil,
                         reminderAt: reminder,
                         requiresGrade: requiresGrade,
                         targetGroupIds: targetGroups
@@ -606,6 +610,7 @@ struct AddExamView: View {
                         hasTime: hasTime,
                         weight: weightToStore,
                         customWeight: customWeight,
+                        assessmentType: allowWeights && !useCustomWeight ? examAssessmentType : nil,
                         reminderAt: reminder,
                         requiresGrade: requiresGrade
                     )
@@ -620,6 +625,7 @@ struct AddExamView: View {
                     hasTime: hasTime,
                     weight: weightToStore,
                     customWeight: customWeight,
+                    assessmentType: allowWeights && !useCustomWeight ? examAssessmentType : nil,
                     reminderAt: reminder,
                     requiresGrade: requiresGrade
                 )

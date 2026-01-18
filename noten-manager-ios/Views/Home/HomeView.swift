@@ -26,6 +26,7 @@ struct HomeView: View {
     @State private var navigateToSettings: Bool = false
     @State private var navigateToFinalGrade: Bool = false
     @State private var showMigrationInfoSheet: Bool = false
+    @State private var showDebugSheet: Bool = false
 
 
     @State private var greeting: String = ""
@@ -116,8 +117,11 @@ struct HomeView: View {
 
     private func getSubjectAverage(_ subject: Subject, subjectGrades: [String: [Grade]]) -> Double? {
         func halfValue(_ half: Int) -> Double? {
-            let comp = store.computeHalfYearFoboso(subject: subject, halfYear: half)
-            return comp.rawFinal ?? comp.otherAvg ?? comp.pointsMin.map(Double.init)
+            // Check if this half-year is dropped
+            if let dropped = subject.droppedHalfYear, dropped == half {
+                return nil
+            }
+            return store.bestAvailableHalfYearValue(subject: subject, halfYear: half)
         }
         switch halfYear {
         case .one:
@@ -285,14 +289,8 @@ struct HomeView: View {
 
     // MARK: - Overall formatting
 
-    private var overallComputedResult: GradeCalculationService.CalculationResult? { nil }
-
     private func halfValue(_ subject: Subject, half: Int) -> Double? {
-        let comp = store.computeHalfYearFoboso(subject: subject, halfYear: half)
-        if let raw = comp.rawFinal { return raw }
-        if let other = comp.otherAvg { return other }
-        if let min = comp.pointsMin { return Double(min) }
-        return nil
+        store.bestAvailableHalfYearValue(subject: subject, halfYear: half)
     }
 
     private func overallAverage() -> Double? {
@@ -311,7 +309,13 @@ struct HomeView: View {
             droppedHalfYearProvider: { subject in
                 subject.droppedHalfYear
             },
-            halfYearFilter: filter
+            halfYearFilter: filter,
+            fachreferat: filter == nil ? store.fachreferat : nil,
+            seminar: filter == nil ? store.seminarPerformance : nil,
+            practical: filter == nil ? store.practicalPerformance : nil,
+            examPoints: filter == nil ? store.examPoints : [:],
+            schoolType: store.schoolType,
+            gradeYear: store.gradeYear ?? 12
         )
     }
 
@@ -570,54 +574,20 @@ struct HomeView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(20)
-        .background(gradeCardSurface(accent: .indigo))
+        .padding(.vertical, 14)
+        .padding(.horizontal, 20)
+        .background(GradeCardStyle.surface(colorScheme: colorScheme, theme: store.theme, accent: .indigo))
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(gradeCardBorder(accent: .indigo))
+        .overlay(GradeCardStyle.border(colorScheme: colorScheme, accent: .indigo))
         .shadow(
             color: Color.black.opacity(colorScheme == .dark ? 0.45 : 0.08),
             radius: 8,
             x: 0,
             y: 4
         )
-    }
-
-    // Custom Card Style Helpers for OverallGradeCard
-    private func gradeCardSurface(accent: Color) -> some View {
-        let baseTop = (colorScheme == .dark)
-            ? (store.theme == "feminine" ? Color(hex: "#1b1022") : Color(hex: "#0b1220"))
-            : (store.theme == "feminine" ? Color(hex: "#fff1f7") : Color(hex: "#eef2ff"))
-            
-        let baseBottom = (colorScheme == .dark)
-            ? (store.theme == "feminine" ? Color(hex: "#120a16") : Color(hex: "#111827"))
-            : (store.theme == "feminine" ? Color(hex: "#fff7fb") : Color(hex: "#f8fafc"))
-            
-        return RoundedRectangle(cornerRadius: 22, style: .continuous)
-            .fill(
-                LinearGradient(
-                    colors: [baseTop, baseBottom],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                accent.opacity(colorScheme == .dark ? 0.08 : 0.05),
-                                Color.clear
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-            )
-    }
-
-    private func gradeCardBorder(accent: Color) -> some View {
-        RoundedRectangle(cornerRadius: 22, style: .continuous)
-            .stroke(accent.opacity(colorScheme == .dark ? 0.18 : 0.12), lineWidth: 1)
+        .onTapGesture {
+            showDebugSheet = true
+        }
     }
     
     // Helper to convert points (0-15) to grade (1-6)
@@ -804,10 +774,7 @@ struct HomeView: View {
             systemImage: "sun.max.fill",
             accent: .orange
         ) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(holidayMessage(info: info))
-                    .font(.body)
-            }
+            EmptyView()
         }
     }
 
@@ -817,21 +784,7 @@ struct HomeView: View {
         return "\(name) ab \(startText)"
     }
 
-    private func holidayMessage(info: HolidayWindow) -> String {
-        let lower = info.name.lowercased()
-        let range = holidayRangeText(info: info)
-        if lower.contains("sommer") {
-            return "Nächste Woche starten die Sommerferien in Bayern (\(range))."
-        } else if lower.contains("pfingst") {
-            return "Die Pfingstferien stehen vor der Tür (\(range))."
-        } else if lower.contains("oster") {
-            return "Osterferien nächste Woche (\(range))."
-        } else if lower.contains("herbst") || lower.contains("winter") || lower.contains("weihnacht") {
-            return "Nächste Woche starten die \(friendlyHolidayName(info.name)) (\(range))."
-        } else {
-            return "Nächste Woche sind Ferien in Bayern (\(range))."
-        }
-    }
+
 
     private func friendlyHolidayName(_ raw: String) -> String {
         let trimmed = raw.replacingOccurrences(of: "bayern", with: "", options: .caseInsensitive)
@@ -1110,6 +1063,12 @@ struct HomeView: View {
         .navigationDestination(isPresented: $navigateToFinalGrade) {
             AbiturExamView().environmentObject(store)
         }
+        .sheet(isPresented: $showDebugSheet) {
+            NavigationStack {
+                MSSDetailedCalculationView(halfYearFilter: halfYear)
+                    .environmentObject(store)
+            }
+        }
 
 
 
@@ -1276,7 +1235,7 @@ struct HomeView: View {
 
     private func loadUpcomingHolidayNotice() async {
         guard store.showHolidayHints else { return }
-        let info = await HolidaysService.shared.upcomingHolidayWithin(days: 7, from: Date())
+        let info = await HolidaysService.shared.upcomingHolidayWithin(days: 14, from: Date())
         await MainActor.run {
             self.upcomingHoliday = info
         }
@@ -2909,16 +2868,8 @@ struct SubjectGridItemView: View {
                         Text("11. Klasse")
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(accent.primary.opacity(0.8))
-                    } else {
-                        let mode = subject.gradingMode ?? (subject.type == 1 ? .withSchulaufgaben : .withoutSchulaufgaben)
-                        let label = {
-                            if subject.isElective { return "Wahlfach" }
-                            switch mode {
-                            case .withSchulaufgaben: return "Schulaufgaben"
-                            case .withoutSchulaufgaben: return "Ohne Schulaufgabe"
-                            }
-                        }()
-                        Text(label)
+                    } else if subject.isElective {
+                        Text("Wahlfach")
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(accent.primary.opacity(0.8))
                     }

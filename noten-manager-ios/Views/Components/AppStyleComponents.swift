@@ -48,7 +48,7 @@ struct PrivacyBlurModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .blur(radius: store.isPrivacyModeActive ? 12 : 0)
+            .blur(radius: store.isPrivacyModeActive ? 16 : 0)
             .overlay {
                 if store.isPrivacyModeActive {
                     RoundedRectangle(cornerRadius: 4)
@@ -634,5 +634,46 @@ struct ThemedBackground: View {
             tintLayer.opacity(clampedIntensity)
         }
         .ignoresSafeArea()
+    }
+}
+
+// MARK: - Shared Grade Card Styles
+
+struct GradeCardStyle {
+    static func surface(colorScheme: ColorScheme, theme: String, accent: Color) -> some View {
+        let baseTop = (colorScheme == .dark)
+            ? (theme == "feminine" ? Color(hex: "#1b1022") : Color(hex: "#0b1220"))
+            : (theme == "feminine" ? Color(hex: "#fff1f7") : Color(hex: "#eef2ff"))
+            
+        let baseBottom = (colorScheme == .dark)
+            ? (theme == "feminine" ? Color(hex: "#120a16") : Color(hex: "#111827"))
+            : (theme == "feminine" ? Color(hex: "#fff7fb") : Color(hex: "#f8fafc"))
+            
+        return RoundedRectangle(cornerRadius: 22, style: .continuous)
+            .fill(
+                LinearGradient(
+                    colors: [baseTop, baseBottom],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                accent.opacity(colorScheme == .dark ? 0.08 : 0.05),
+                                Color.clear
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            )
+    }
+
+    static func border(colorScheme: ColorScheme, accent: Color) -> some View {
+        RoundedRectangle(cornerRadius: 22, style: .continuous)
+            .stroke(accent.opacity(colorScheme == .dark ? 0.18 : 0.12), lineWidth: 1)
     }
 }

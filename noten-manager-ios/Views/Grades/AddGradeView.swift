@@ -574,21 +574,33 @@ struct AddGradeView: View {
 
     private func applyExamWeightIfAvailable(examId: String?) {
         guard let examId else { return }
-        if let exam = store.allExams.first(where: { $0.id == examId }) {
-            if let custom = exam.customWeight {
-                weightChoice = .custom
-                customWeightText = formatWeight(custom)
-            } else if let w = exam.weight {
-                weightChoice = .preset(Double(w))
-            }
-            return
-        }
-        if let exam = store.sharedExams.first(where: { $0.id == examId }) {
-            if let custom = exam.customWeight {
-                weightChoice = .custom
-                customWeightText = formatWeight(custom)
-            } else if let w = exam.weight {
-                weightChoice = .preset(Double(w))
+        let exam = store.allExams.first(where: { $0.id == examId }) ?? store.sharedExams.first(where: { $0.id == examId })
+        guard let exam else { return }
+
+        if let custom = exam.customWeight {
+            weightChoice = .custom
+            customWeightText = formatWeight(custom)
+        } else if let w = exam.weight {
+            let doubleWeight = Double(w)
+            weightChoice = .preset(doubleWeight)
+            
+            if let type = exam.assessmentType {
+                assessmentType = type
+            } else {
+                // Fallback for legacy exams
+                if w == 2 {
+                    assessmentType = .schulaufgabe
+                } else if w == 1 {
+                    // Default to muendlich, or kurzarbeit if it's a kurzarbeit-heavy subject
+                    // (This is a heuristic, but better than nothing)
+                    if gradingMode(for: subjectName) == .withoutSchulaufgaben {
+                         // In legacy, weight 1 was used for everything. 
+                         // kurzarbeit is usually preferred if no schulaufgaben exist.
+                         assessmentType = .muendlich 
+                    } else {
+                         assessmentType = .muendlich
+                    }
+                }
             }
         }
     }

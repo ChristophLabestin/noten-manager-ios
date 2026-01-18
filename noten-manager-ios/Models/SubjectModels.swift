@@ -93,6 +93,7 @@ protocol GradeProtocol {
     var grade: Double { get }
     var weight: Double { get }
     var halfYear: Int? { get }
+    var assessmentType: AssessmentType? { get }
 }
 
 struct Grade: Codable, GradeProtocol {

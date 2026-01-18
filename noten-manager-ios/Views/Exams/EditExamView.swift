@@ -14,6 +14,7 @@ struct EditExamView: View {
     @State private var includeTime: Bool
     @State private var time: Date
     @State private var examWeight: Int
+    @State private var examAssessmentType: AssessmentType
     @State private var useCustomWeight: Bool
     @State private var customWeightText: String
     @State private var hasReminder: Bool
@@ -50,6 +51,7 @@ struct EditExamView: View {
         let hasCustomWeight = exam.customWeight != nil
         let initialCustomWeightText = exam.customWeight.map { EditExamView.formatWeight($0) } ?? ""
         _examWeight = State(initialValue: exam.weight ?? 0)
+        _examAssessmentType = State(initialValue: exam.assessmentType ?? .muendlich)
         _useCustomWeight = State(initialValue: hasCustomWeight)
         _customWeightText = State(initialValue: initialCustomWeightText)
         let initialReminder = exam.reminderAt ?? Date().addingTimeInterval(60 * 60)
@@ -98,18 +100,18 @@ struct EditExamView: View {
         return subject?.gradingMode ?? ((subject?.type == 1) ? .withSchulaufgaben : .withoutSchulaufgaben)
     }
 
-    private func weightOptions(for gradingMode: GradingMode) -> [(title: String, value: Int)] {
+    private func weightOptions(for gradingMode: GradingMode) -> [(title: String, value: Int, type: AssessmentType)] {
         switch gradingMode {
         case .withSchulaufgaben:
             return [
-                ("Schulaufgabe", 2),
-                ("Kurzarbeit", 1),
-                ("Mündlich / EX", 1)
+                ("Schulaufgabe", 2, .schulaufgabe),
+                ("Kurzarbeit", 1, .kurzarbeit),
+                ("Mündlich / EX", 1, .muendlich)
             ]
         case .withoutSchulaufgaben:
             return [
-                ("Kurzarbeit", 1),
-                ("Mündlich / EX", 1)
+                ("Kurzarbeit", 1, .kurzarbeit),
+                ("Mündlich / EX", 1, .muendlich)
             ]
         }
     }
@@ -280,10 +282,11 @@ struct EditExamView: View {
                                                 .font(.headline)
                                             Menu {
                                                 ForEach(weightOptions(for: gm), id: \.title) { option in
-                                                    let isSelected = !useCustomWeight && examWeight == option.value
+                                                    let isSelected = !useCustomWeight && examWeight == option.value && examAssessmentType == option.type
                                                     Button {
                                                         useCustomWeight = false
                                                         examWeight = option.value
+                                                        examAssessmentType = option.type
                                                     } label: {
                                                         HStack {
                                                             Text(option.title)
@@ -725,6 +728,7 @@ struct EditExamView: View {
                     hasTime: hasTime,
                     weight: weightToStore,
                     customWeight: customWeight,
+                    assessmentType: allowWeights && !useCustomWeight ? examAssessmentType : nil,
                     reminderAt: reminder
                 )
                 try await store.setUserReminderForSharedExam(examId: exam.id, reminderAt: reminder, groupId: gid)
@@ -740,6 +744,7 @@ struct EditExamView: View {
                     hasTime: hasTime,
                     weight: weightToStore,
                     customWeight: customWeight,
+                    assessmentType: allowWeights && !useCustomWeight ? examAssessmentType : nil,
                     reminderAt: reminder,
                     isCompleted: isCompleted,
                     requiresGrade: requiresGradeValue

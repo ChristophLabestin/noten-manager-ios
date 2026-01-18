@@ -78,6 +78,11 @@ struct MainView: View {
     @State private var showSeminar: Bool = false
     @State private var showGroupCreation: Bool = false
     
+    @AppStorage("showSpeedometerOnLaunch") private var showSpeedometerOnLaunch: Bool = false
+    
+    // Fancy Speedometer Cover State
+    @State private var showSpeedometerCover: Bool = false
+    
     @Namespace private var namespace
 
     // Compute props for sheets
@@ -125,6 +130,11 @@ struct MainView: View {
                 if LaunchOfferNotificationManager.consumePendingOpen() {
                     handleOpenLaunchOfferNotification()
                 }
+                
+                if showSpeedometerOnLaunch {
+                    showSpeedometerCover = true
+                }
+                
                 enforceSubscriptionGateIfNeeded()
                 attemptRequestReview()
                 
@@ -262,6 +272,15 @@ struct MainView: View {
                     offlineBanner
                 }
                 .animation(.easeInOut(duration: 0.2), value: emailBannerVisible)
+            }
+            // Fancy Speedometer Cover Layer
+            .overlay {
+                if showSpeedometerCover && currentTab == .home && !showOnboardingFunnel {
+                    FancyCoverView(isPresented: $showSpeedometerCover)
+                        .transition(.move(edge: .bottom))
+                        .zIndex(100)
+                        .environmentObject(gradesStore)
+                }
             }
 
         overlays
@@ -929,7 +948,7 @@ struct MainView: View {
                 .tag(BottomNavView.Tab.settings)
             }
             .tint(activeColor)
-            .safeTabBarMinimizeBehavior() // Native minimize on scroll (iOS 26+)
+
         }
         // Attach Sheet Modifiers to the Group
         .sheet(isPresented: $showCreationMenu) {
@@ -1428,13 +1447,3 @@ struct LegacyMigrationPromptView: View {
     }
 }
 
-extension View {
-    @ViewBuilder
-    func safeTabBarMinimizeBehavior() -> some View {
-        if #available(iOS 26, *) {
-            self.tabBarMinimizeBehavior(.onScrollDown)
-        } else {
-            self
-        }
-    }
-}

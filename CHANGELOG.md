@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased] - 2026-01-18
+
+### Added
+- **MSS Detailed Calculation**: Introduced a new transparent view for MSS calculation breakdown.
+- **MSS History Charting**: Added interactive progress tracking with historical MSS data points.
+- **FOBOSO Components**: Integrated "Fachreferat", "Fachpraktische Ausbildung" (fpA), and "Seminararbeit" into grade calculations and report cards.
+- **Exam Type Intelligence**: The `Exam` model now stores the `assessmentType`, enabling intelligent pre-selection when adding new grades.
+- **UI Enhancements**: Added `FancyCoverView` and a refined `SpeedometerView` for a more premium visual experience.
+
+### Changed
+- **Final Grade Redesign**: Upgraded the subject assessment in `FinalGradeView` with a modern 3-option selector and high-density information chips.
+- **Onboarding 2.0**: Migrated the onboarding funnel to the new "Classes" system, replacing legacy "Groups" with a streamlined joining flow.
+- **Settings UX Refinement**: Redesigned theme and notification settings with rich interactive cards and detailed descriptions.
+- **Smart Grade Coloring**: Subject grades are now only highlighted in red if the MSS value falls below 4 (insufficient).
+- **Standardized Actions**: All primary view buttons now utilize `SoftTintButtonStyle` and are strategically placed in `safeAreaInset` for better reachability.
+
+### Fixed
+- **Calculation Precision**: Corrected "What If" mode to align with FOBOSO block weighting requirements.
+- **Holiday Awareness**: Fixed holiday hints to proactively show upcoming breaks beyond the 7-day window.
+- **Sorting Logic**: Resolved issues where dropped half-years incorrectly influenced subject sorting in `HomeView`.
+- **Report Card Polish**: Removed redundant metrics and refined decimal formatting for a cleaner export.
+
 ## [Unreleased] - 2026-01-17
 
 ### Added

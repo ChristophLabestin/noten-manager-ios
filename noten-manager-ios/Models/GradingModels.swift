@@ -12,6 +12,17 @@ enum AssessmentType: String, Codable {
     case muendlich
     case praktisch
     case projekt
+    
+    var prettyName: String {
+        switch self {
+        case .schulaufgabe: return "Schulaufgabe"
+        case .kurzarbeit: return "Kurzarbeit"
+        case .stegreifaufgabe: return "Stegreifaufgabe"
+        case .muendlich: return "Mündlich"
+        case .praktisch: return "Praktisch"
+        case .projekt: return "Projekt"
+        }
+    }
 }
 
 enum HalfYearStatus: String, Codable {

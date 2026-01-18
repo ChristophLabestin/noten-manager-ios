@@ -4166,6 +4166,11 @@ final class GradesStore: ObservableObject {
                     // Copy exam to course
                     var newExamData = data
                     newExamData["migratedFromGroup"] = groupId
+                    if let weight = data["weight"] as? Int, data["assessmentType"] == nil {
+                        if let derived = deriveAssessmentType(from: weight) {
+                            newExamData["assessmentType"] = derived.rawValue
+                        }
+                    }
                     try? await db.collection("courses").document(targetCourseId).collection("exams").document(examDoc.documentID).setData(newExamData)
                 }
             }
@@ -4199,6 +4204,11 @@ final class GradesStore: ObservableObject {
                 if let targetCourseId = subjectToCourseId[subjectName] {
                     var newExamData = data
                     newExamData["migratedFromGroup"] = groupId
+                    if let weight = data["weight"] as? Int, data["assessmentType"] == nil {
+                        if let derived = deriveAssessmentType(from: weight) {
+                            newExamData["assessmentType"] = derived.rawValue
+                        }
+                    }
                     try? await db.collection("courses").document(targetCourseId).collection("exams").document(examDoc.documentID).setData(newExamData, merge: true)
                 }
             }
@@ -4333,6 +4343,11 @@ final class GradesStore: ObservableObject {
                     if let targetCourseId = subjectToCourseId[subjectName] {
                         var newData = data
                         newData["migratedFromGroup"] = group.groupId
+                        if let weight = data["weight"] as? Int, data["assessmentType"] == nil {
+                            if let derived = deriveAssessmentType(from: weight) {
+                                newData["assessmentType"] = derived.rawValue
+                            }
+                        }
                         try? await db.collection("courses").document(targetCourseId).collection("exams").document(examDoc.documentID).setData(newData)
                     }
                 }
@@ -4360,6 +4375,11 @@ final class GradesStore: ObservableObject {
                     if let targetCourseId = subjectToCourseId[subjectName] {
                         var newData = data
                         newData["migratedFromGroup"] = group.groupId
+                        if let weight = data["weight"] as? Int, data["assessmentType"] == nil {
+                            if let derived = deriveAssessmentType(from: weight) {
+                                newData["assessmentType"] = derived.rawValue
+                            }
+                        }
                         try? await db.collection("courses").document(targetCourseId).collection("exams").document(examDoc.documentID).setData(newData, merge: true)
                     }
                 }
@@ -4462,6 +4482,11 @@ final class GradesStore: ObservableObject {
                 if let targetCourseId = subjectToCourseId[subjectName] {
                     var newData = data
                     newData["migratedFromGroup"] = groupCode
+                    if let weight = data["weight"] as? Int, data["assessmentType"] == nil {
+                        if let derived = deriveAssessmentType(from: weight) {
+                            newData["assessmentType"] = derived.rawValue
+                        }
+                    }
                     try? await db.collection("courses").document(targetCourseId).collection("exams").document(examDoc.documentID).setData(newData)
                 }
             }
@@ -4475,6 +4500,11 @@ final class GradesStore: ObservableObject {
                 if let targetCourseId = subjectToCourseId[subjectName] {
                     var newData = data
                     newData["migratedFromGroup"] = groupCode
+                    if let weight = data["weight"] as? Int, data["assessmentType"] == nil {
+                        if let derived = deriveAssessmentType(from: weight) {
+                            newData["assessmentType"] = derived.rawValue
+                        }
+                    }
                     try? await db.collection("courses").document(targetCourseId).collection("exams").document(examDoc.documentID).setData(newData, merge: true)
                 }
             }
@@ -5461,7 +5491,7 @@ final class GradesStore: ObservableObject {
         return imported
     }
 
-    func addExamToFirestore(subjectName: String, subjectKey: String? = nil, title: String, notes: String?, date: Date, hasTime: Bool, weight: Int?, customWeight: Double?, reminderAt: Date?, requiresGrade: Bool? = true) async throws {
+    func addExamToFirestore(subjectName: String, subjectKey: String? = nil, title: String, notes: String?, date: Date, hasTime: Bool, weight: Int?, customWeight: Double?, assessmentType: AssessmentType?, reminderAt: Date?, requiresGrade: Bool? = true) async throws {
         guard let uid = Auth.auth().currentUser?.uid else {
             throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
         }
@@ -5491,6 +5521,9 @@ final class GradesStore: ObservableObject {
         if let reminderAt {
             payload["reminderAt"] = reminderAt
         }
+        if let assessmentType {
+            payload["assessmentType"] = assessmentType.rawValue
+        }
         if let requiresGrade {
             payload["requiresGrade"] = requiresGrade
         }
@@ -5500,7 +5533,7 @@ final class GradesStore: ObservableObject {
 
     // MARK: - Course-Based Add Methods
     
-    func addExamToCourse(courseId: String, title: String, notes: String?, date: Date, hasTime: Bool, weight: Int?, customWeight: Double?, reminderAt: Date?, requiresGrade: Bool? = true) async throws -> String {
+    func addExamToCourse(courseId: String, title: String, notes: String?, date: Date, hasTime: Bool, weight: Int?, customWeight: Double?, assessmentType: AssessmentType?, reminderAt: Date?, requiresGrade: Bool? = true) async throws -> String {
          guard let uid = Auth.auth().currentUser?.uid else {
              throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
          }
@@ -5531,14 +5564,15 @@ final class GradesStore: ObservableObject {
          if let notes { payload["notes"] = notes }
          if let weight { payload["weight"] = weight }
          if let customWeight { payload["customWeight"] = customWeight }
-         if let requiresGrade { payload["requiresGrade"] = requiresGrade }
+        if let assessmentType { payload["assessmentType"] = assessmentType.rawValue }
+        if let requiresGrade { payload["requiresGrade"] = requiresGrade }
          
          try await ref.setData(payload)
          return ref.documentID
     }
 
     // Neue Variante: verteilt automatisch in alle passenden Gruppen (nach Subject-Mapping) oder in die explizit angegebenen Gruppen
-    func addExamToGroups(subjectName: String, subjectKey: String? = nil, title: String, notes: String?, date: Date, hasTime: Bool, weight: Int?, customWeight: Double?, reminderAt: Date?, requiresGrade: Bool? = true, targetGroupIds explicitGids: [String]? = nil) async throws -> [(groupId: String, docId: String)] {
+    func addExamToGroups(subjectName: String, subjectKey: String? = nil, title: String, notes: String?, date: Date, hasTime: Bool, weight: Int?, customWeight: Double?, assessmentType: AssessmentType?, reminderAt: Date?, requiresGrade: Bool? = true, targetGroupIds explicitGids: [String]? = nil) async throws -> [(groupId: String, docId: String)] {
         guard let uid = Auth.auth().currentUser?.uid else {
             throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
         }
@@ -5562,6 +5596,7 @@ final class GradesStore: ObservableObject {
             if let notes { payload["notes"] = notes }
             if let weight { payload["weight"] = weight }
             if let customWeight { payload["customWeight"] = customWeight }
+            if let assessmentType { payload["assessmentType"] = assessmentType.rawValue }
             if let requiresGrade { payload["requiresGrade"] = requiresGrade }
             try await ref.setData(payload)
             created.append((gid, ref.documentID))
@@ -5581,6 +5616,7 @@ final class GradesStore: ObservableObject {
                 hasTime: exam.hasTime,
                 weight: exam.weight,
                 customWeight: exam.customWeight,
+                assessmentType: exam.assessmentType,
                 reminderAt: exam.reminderAt,
                 requiresGrade: exam.requiresGrade,
                 targetGroupIds: targetGroupIds
@@ -5875,7 +5911,7 @@ final class GradesStore: ObservableObject {
         try await ref.updateData(payload)
     }
 
-    func updateExamInFirestore(id: String, subjectName: String, subjectKey: String? = nil, title: String, notes: String?, date: Date, hasTime: Bool, weight: Int?, customWeight: Double?, reminderAt: Date?, isCompleted: Bool, requiresGrade: Bool? = nil) async throws {
+    func updateExamInFirestore(id: String, subjectName: String, subjectKey: String? = nil, title: String, notes: String?, date: Date, hasTime: Bool, weight: Int?, customWeight: Double?, assessmentType: AssessmentType?, reminderAt: Date?, isCompleted: Bool, requiresGrade: Bool? = nil) async throws {
         guard let uid = Auth.auth().currentUser?.uid else {
             throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
         }
@@ -5916,6 +5952,11 @@ final class GradesStore: ObservableObject {
         } else {
             payload["reminderAt"] = NSNull()
         }
+        if let assessmentType {
+            payload["assessmentType"] = assessmentType.rawValue
+        } else {
+            payload["assessmentType"] = NSNull()
+        }
         if let requiresGrade {
             payload["requiresGrade"] = requiresGrade
         }
@@ -5923,7 +5964,7 @@ final class GradesStore: ObservableObject {
         try await ref.updateData(payload)
     }
 
-    func updateSharedExamInGroup(groupId: String, id: String, subjectName: String, subjectKey: String? = nil, title: String, notes: String?, date: Date, hasTime: Bool, weight: Int?, customWeight: Double?, reminderAt: Date?, requiresGrade: Bool? = nil) async throws {
+    func updateSharedExamInGroup(groupId: String, id: String, subjectName: String, subjectKey: String? = nil, title: String, notes: String?, date: Date, hasTime: Bool, weight: Int?, customWeight: Double?, assessmentType: AssessmentType?, reminderAt: Date?, requiresGrade: Bool? = nil) async throws {
         let ref = db.collection("groups").document(groupId).collection("exams").document(id)
 
         var payload: [String: Any] = [
@@ -5951,6 +5992,11 @@ final class GradesStore: ObservableObject {
             payload["customWeight"] = customWeight
         } else {
             payload["customWeight"] = NSNull()
+        }
+        if let assessmentType {
+            payload["assessmentType"] = assessmentType.rawValue
+        } else {
+            payload["assessmentType"] = NSNull()
         }
         if let requiresGrade {
             payload["requiresGrade"] = requiresGrade
@@ -6899,8 +6945,20 @@ final class GradesStore: ObservableObject {
 
     // MARK: - FOBOSO Grade Engine bridge
 
-    private func gradingMode(for subject: Subject) -> GradingMode {
+    func gradingMode(for subject: Subject) -> GradingMode {
         if let explicit = subject.gradingMode { return explicit }
+        
+        // Fallback: If we have ANY Schulaufgabe in grades, it must be withSchulaufgaben
+        let grades = gradesBySubject[subject.name] ?? []
+        if grades.contains(where: { $0.assessmentType == .schulaufgabe }) {
+            return .withSchulaufgaben
+        }
+        
+        // Also check upcoming exams - if any has weight 2, it's a Schulaufgabe
+        if allExams.contains(where: { $0.subjectName == subject.name && $0.weight == 2 }) {
+            return .withSchulaufgaben
+        }
+        
         return subject.type == 1 ? .withSchulaufgaben : .withoutSchulaufgaben
     }
 
@@ -7662,6 +7720,15 @@ final class GradesStore: ObservableObject {
         }
     }
 
+    private func deriveAssessmentType(from weight: Int?) -> AssessmentType? {
+        guard let weight else { return nil }
+        switch weight {
+        case 2: return .schulaufgabe
+        case 1: return .muendlich // Default for weight=1 in legacy
+        default: return nil
+        }
+    }
+
     private func slugifySubjectName(_ name: String) -> String {
         let lower = name.lowercased()
         let map: [String: String] = ["ä":"ae","ö":"oe","ü":"ue","ß":"ss"]
@@ -7991,8 +8058,8 @@ final class GradesStore: ObservableObject {
 
         // Anwenderspezifische Erinnerungen/Erledigt-Status anwenden
         applySharedExamUserReminders()
-        applySharedExamUserCompletion()
         applySharedExamUserRescheduledDates()
+        applySharedExamUserCompletion()
         applySharedHomeworkUserCompletion()
         applySharedHomeworkUserReminders()
 

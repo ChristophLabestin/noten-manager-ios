@@ -13,6 +13,7 @@ struct AppSettingsView: View {
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var storeKit: StoreKitManager
     @AppStorage("launchOfferPurchased") private var launchOfferPurchased = false
+    @AppStorage("showSpeedometerOnLaunch") private var showSpeedometerOnLaunch: Bool = false
 
     @State private var newName: String = ""
     @State private var isSavingName: Bool = false
@@ -227,13 +228,16 @@ struct AppSettingsView: View {
 
     private var isExternalAuthAccount: Bool { externalAuthProvider != nil }
 
-    private var headerCard: some View {
-        SettingsCard(
-            title: "Einstellungen",
-            subtitle: "Status, Thema und Erinnerungen",
-            systemImage: "slider.horizontal.3",
-            accent: .indigo,
-            trailing: {
+    @ViewBuilder
+    private var heroHeader: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Einstellungen")
+                .font(.title2.weight(.bold))
+            HStack(spacing: 6) {
+                Text("Profil, Design & Benachrichtigungen")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                
                 PillBadge(
                     text: store.schoolType == .fos ? "FOS" : "BOS",
                     systemImage: "seal.fill",
@@ -241,37 +245,36 @@ struct AppSettingsView: View {
                     background: Color.indigo.opacity(0.14)
                 )
             }
-        ) {
-            let metricColumns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 
-            VStack(alignment: .leading, spacing: 12) {
-                LazyVGrid(columns: metricColumns, spacing: 12) {
-                    CompactMetric(
-                        title: "Schuljahr",
-                        value: activeSchoolYearLabel,
-                        icon: "calendar",
-                        accent: .cyan
-                    )
-                    CompactMetric(
-                        title: "Jahrgang",
-                        value: store.gradeYear.map { "\($0)." } ?? "—",
-                        icon: "graduationcap.fill",
-                        accent: .mint
-                    )
-                    CompactMetric(
-                        title: "Erinnerung",
-                        value: reminderTimeText,
-                        icon: "bell.fill",
-                        accent: .orange
-                    )
-                    CompactMetric(
-                        title: "Prüfungsfächer",
-                        value: "\(currentExamSubjectsCount)/\(maxExamSubjects)",
-                        icon: "checkmark.seal.fill",
-                        accent: .indigo
-                    )
-                }
-            }
+    @ViewBuilder
+    private var heroChips: some View {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+            StatChip(
+                title: "Schuljahr",
+                value: activeSchoolYearLabel,
+                accent: .cyan
+            )
+            
+            StatChip(
+                title: "Profil",
+                value: "\(store.gradeYear.map { "\($0)." } ?? "")\(store.schoolType == .fos ? "FOS" : "BOS")",
+                accent: .indigo
+            )
+            
+            StatChip(
+                title: "Abitur",
+                value: "\(currentExamSubjectsCount)/\(maxExamSubjects)",
+                accent: .orange
+            )
+            
+            StatChip(
+                title: "Erinnerung",
+                value: reminderTimeText,
+                accent: .mint
+            )
         }
     }
 
@@ -280,8 +283,10 @@ struct AppSettingsView: View {
             ScrollViewReader { proxy in
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 18) {
-                        headerCard
-                            .softFadeIn(enabled: animationsOn, delay: 0.03, offset: 12)
+                        heroHeader
+                            .softFadeIn(enabled: animationsOn, delay: 0.03, offset: 10)
+                        heroChips
+                            .softFadeIn(enabled: animationsOn, delay: 0.08, offset: 12)
                         generalCard
                             .softFadeIn(enabled: animationsOn, delay: 0.08, offset: 12)
                         schoolYearCard
@@ -480,109 +485,181 @@ struct AppSettingsView: View {
         ) {
             VStack(alignment: .leading, spacing: 12) {
                 SettingsSectionBox {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Anzeigename")
-                            .font(sectionHeaderFont)
-                        Text("Wird in Dashboard und Übersichten angezeigt.")
-                            .font(helperFont)
-                            .foregroundStyle(.secondary)
-                        VStack(spacing: 10) {
-                            TextField(
-                                "Dein Name",
-                                text: $newName,
-                                prompt: Text(currentDisplayName.isEmpty ? "Dein Name" : currentDisplayName)
-                            )
+                    HStack(spacing: 16) {
+                        // Avatar Placeholder
+                        ZStack {
+                            Circle()
+                                .fill(
+                                    LinearGradient(
+                                        colors: store.theme == "feminine" ? [.pink, .purple] : [.blue, .indigo],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .frame(width: 64, height: 64)
+                                .shadow(color: (store.theme == "feminine" ? Color.pink : Color.indigo).opacity(0.3), radius: 8, x: 0, y: 4)
+                            
+                            Text(currentDisplayName.prefix(1).uppercased())
+                                .font(.system(size: 28, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white)
+                        }
+                        
+                        // Inputs
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Anzeigename")
+                                .font(sectionHeaderFont)
+                            
+                            HStack {
+                                TextField(
+                                    "Dein Name",
+                                    text: $newName,
+                                    prompt: Text(currentDisplayName.isEmpty ? "Dein Name" : currentDisplayName)
+                                )
                                 .textContentType(.name)
                                 .submitLabel(.done)
                                 .onSubmit { hideKeyboard() }
-                                .padding(12)
-                                .background(Color.formInputBackground)
-                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            Button {
-                                Task { await saveName() }
-                            } label: {
-                                HStack(spacing: 10) {
-                                    if isSavingName {
-                                        ProgressView().tint(.cyan)
-                                    } else {
-                                        Image(systemName: "sparkles")
-                                            .font(.headline.weight(.semibold))
-                                        Text("Name speichern")
+                                
+                                if !newName.isEmpty && newName != currentDisplayName {
+                                    Button {
+                                        Task { await saveName() }
+                                    } label: {
+                                        if isSavingName {
+                                            ProgressView().scaleEffect(0.8)
+                                        } else {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .foregroundStyle(.green)
+                                                .font(.title3)
+                                        }
                                     }
+                                    .transition(.scale.combined(with: .opacity))
                                 }
-                                .frame(maxWidth: .infinity)
                             }
-                            .buttonStyle(SoftTintButtonStyle(accent: .cyan))
-                            .disabled(isSavingName || newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .padding(10)
+                            .background(Color.formInputBackground)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
-                        if nameSavedSuccess {
-                            Text("✅ Name erfolgreich gespeichert!")
-                                .font(.footnote)
-                                .foregroundStyle(.green)
-                        }
+                    }
+                    
+                    if nameSavedSuccess {
+                        Text("✅ Name gespeichert!")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                            .padding(.top, 4)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .transition(.move(edge: .top).combined(with: .opacity))
                     }
                 }
 
                 SettingsSectionBox {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Farbschema")
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Erscheinungsbild")
                             .font(sectionHeaderFont)
-                        Picker(
-                            "",
-                            selection: Binding(
-                                get: { store.theme },
-                                set: { val in Task { await store.updatePreferences(theme: val) } }
-                            )
-                        ) {
-                            Text("Klassisch").tag("default")
-                            Text("Soft / Pink").tag("feminine")
-                        }
-                        .pickerStyle(.segmented)
-
-                        HStack {
-                            Text("Hintergrund-Intensität")
-                                .font(.subheadline.weight(.semibold))
-                            Spacer()
-                            Text("\(Int((store.themeBackgroundIntensity * 100).rounded()))%")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.top, 10)
-
-                        Slider(
-                            value: Binding(
-                                get: { store.themeBackgroundIntensity },
-                                set: { newVal in
-                                    // 1%-Schritte für feineres Tuning
-                                    let snapped = (newVal * 100).rounded() / 100
-                                    store.themeBackgroundIntensity = snapped
-                                }
-                            ),
-                            in: 0...1,
-                            step: 0.01,
-                            onEditingChanged: { editing in
-                                if !editing {
-                                    let value = store.themeBackgroundIntensity
-                                    Task { await store.updatePreferences(themeIntensity: value) }
+                        
+                        // Theme Selector Cards
+                        HStack(spacing: 12) {
+                            // Card 1: Klassisch
+                            Button {
+                                Task { await store.updatePreferences(theme: "default") }
+                            } label: {
+                                VStack(spacing: 8) {
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(
+                                            LinearGradient(colors: [.blue, .indigo], startPoint: .topLeading, endPoint: .bottomTrailing)
+                                        )
+                                        .frame(height: 60)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .stroke(Color.accentColor, lineWidth: store.theme == "default" ? 3 : 0)
+                                        )
+                                        .shadow(color: .indigo.opacity(0.2), radius: 4, y: 2)
+                                    
+                                    HStack {
+                                        Text("Klassisch")
+                                            .font(.subheadline.weight(.medium))
+                                        if store.theme == "default" {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .foregroundStyle(.blue)
+                                        }
+                                    }
+                                    .foregroundStyle(.primary)
                                 }
                             }
-                        )
-
-                        Text("Wähle, ob die Oberfläche eher klassisch oder mit einem weicheren Farbschema angezeigt wird.")
-                            .font(helperFont)
-                            .foregroundStyle(.secondary)
-                        Text("0% entspricht einem neutralen weißen bzw. dunklen Hintergrund, 100% dem vollen Farbverlauf.")
-                            .font(helperFont)
-                            .foregroundStyle(.secondary)
+                            .buttonStyle(.plain)
+                            
+                            // Card 2: Soft / Pink
+                            Button {
+                                Task { await store.updatePreferences(theme: "feminine") }
+                            } label: {
+                                VStack(spacing: 8) {
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(
+                                            LinearGradient(colors: [.pink, .purple], startPoint: .topLeading, endPoint: .bottomTrailing)
+                                        )
+                                        .frame(height: 60)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .stroke(Color.pink, lineWidth: store.theme == "feminine" ? 3 : 0)
+                                        )
+                                        .shadow(color: .pink.opacity(0.2), radius: 4, y: 2)
+                                    
+                                    HStack {
+                                        Text("Soft")
+                                            .font(.subheadline.weight(.medium))
+                                        if store.theme == "feminine" {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .foregroundStyle(.pink)
+                                        }
+                                    }
+                                    .foregroundStyle(.primary)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        
+                        Divider()
+                        
+                        // Intensity Slider
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Farbintensität")
+                                    .font(.subheadline)
+                                Spacer()
+                                Text("\(Int((store.themeBackgroundIntensity * 100).rounded()))%")
+                                    .foregroundStyle(.secondary)
+                                    .font(.caption.weight(.bold))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Capsule().fill(Color.secondary.opacity(0.1)))
+                            }
+                            
+                            Slider(
+                                value: Binding(
+                                    get: { store.themeBackgroundIntensity },
+                                    set: { newVal in
+                                        let snapped = (newVal * 100).rounded() / 100
+                                        store.themeBackgroundIntensity = snapped
+                                    }
+                                ),
+                                in: 0...1,
+                                step: 0.05,
+                                onEditingChanged: { editing in
+                                    if !editing {
+                                        Task { await store.updatePreferences(themeIntensity: store.themeBackgroundIntensity) }
+                                    }
+                                }
+                            )
+                            .tint(store.theme == "feminine" ? .pink : .blue)
+                        }
                     }
                 }
 
                 SettingsSectionBox {
                     let canChangeIcon = UIApplication.shared.supportsAlternateIcons
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("App-Symbol")
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("App-Icon")
                             .font(sectionHeaderFont)
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 12) {
+                        
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 16), count: 3), spacing: 16) {
                             ForEach(appIconOptions, id: \.id) { option in
                                 let isSelected = store.appIcon == option.id
                                 Button {
@@ -593,42 +670,24 @@ struct AppSettingsView: View {
                                         Image(option.imageName)
                                             .resizable()
                                             .scaledToFit()
-                                            .frame(width: 72, height: 72)
                                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                                             .overlay(
                                                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                                    .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
+                                                    .stroke(isSelected ? Color.primary : Color.clear, lineWidth: 2)
                                             )
-                                            .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 3)
-
-                                        HStack(spacing: 6) {
-                                            Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
-                                                .foregroundStyle(isSelected ? Color.accentColor : .secondary)
-                                            Text(option.title)
-                                                .font(.subheadline.weight(.semibold))
-                                                .foregroundStyle(.primary)
-                                        }
-                                        .padding(.vertical, 2)
+                                            .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
+                                            .scaleEffect(isSelected ? 1.05 : 1.0)
+                                            .animation(.spring(response: 0.3), value: isSelected)
+                                        
+                                        Text(option.title)
+                                            .font(.caption.weight(isSelected ? .semibold : .regular))
+                                            .foregroundStyle(isSelected ? .primary : .secondary)
                                     }
-                                    .padding(10)
-                                    .frame(maxWidth: .infinity)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                            .fill(Color(.secondarySystemBackground))
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                            .stroke(isSelected ? Color.accentColor.opacity(0.6) : Color.clear, lineWidth: 1.5)
-                                    )
                                 }
                                 .buttonStyle(.plain)
-                                .accessibilityLabel("App Icon \(option.title)")
                             }
                         }
-
-                        Text("Wähle, welches Icon auf deinem Homescreen angezeigt wird.")
-                            .font(helperFont)
-                            .foregroundStyle(.secondary)
+                        
                         if !canChangeIcon {
                             Text("Symbolwechsel wird auf diesem Gerät nicht unterstützt.")
                                 .font(helperFont)
@@ -638,88 +697,252 @@ struct AppSettingsView: View {
                 }
 
                 SettingsSectionBox {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Darstellung & Animationen")
-                            .font(sectionHeaderFont)
-                        Picker("", selection: Binding(
-                            get: { store.darkModeMode },
-                            set: { val in Task { await store.updatePreferences(darkModeMode: val) } }
-                        )) {
-                            Text("Automatisch").tag("system")
-                            Text("Light Mode").tag("light")
-                            Text("Dark Mode").tag("dark")
+                    VStack(alignment: .leading, spacing: 20) {
+                        // Dark Mode Selector
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Darstellung")
+                                .font(sectionHeaderFont)
+                            
+                            HStack(spacing: 12) {
+                                // Auto
+                                Button {
+                                    Task { await store.updatePreferences(darkModeMode: "system") }
+                                } label: {
+                                    VStack(spacing: 8) {
+                                        Image(systemName: "iphone")
+                                            .font(.title2)
+                                        Text("Auto")
+                                            .font(.caption.weight(.medium))
+                                    }
+                                    .foregroundStyle(store.darkModeMode == "system" ? .white : .primary)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 70)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .fill(store.darkModeMode == "system" ? Color.accentColor : Color(.secondarySystemBackground))
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                
+                                // Light
+                                Button {
+                                    Task { await store.updatePreferences(darkModeMode: "light") }
+                                } label: {
+                                    VStack(spacing: 8) {
+                                        Image(systemName: "sun.max.fill")
+                                            .font(.title2)
+                                        Text("Hell")
+                                            .font(.caption.weight(.medium))
+                                    }
+                                    .foregroundStyle(store.darkModeMode == "light" ? .white : .primary)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 70)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .fill(store.darkModeMode == "light" ? Color.orange : Color(.secondarySystemBackground))
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                
+                                // Dark
+                                Button {
+                                    Task { await store.updatePreferences(darkModeMode: "dark") }
+                                } label: {
+                                    VStack(spacing: 8) {
+                                        Image(systemName: "moon.fill")
+                                            .font(.title2)
+                                    Text("Dunkel")
+                                        .font(.caption.weight(.medium))
+                                    }
+                                    .foregroundStyle(store.darkModeMode == "dark" ? .white : .primary)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 70)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .fill(store.darkModeMode == "dark" ? Color.indigo : Color(.secondarySystemBackground))
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
-                        .pickerStyle(.segmented)
-                        Text("Geräteeinstellung folgt dem iOS-Modus, Light/Dark sind fest gewählt.")
-                            .font(helperFont)
-                            .foregroundStyle(.secondary)
+                        
+                        Divider()
 
-                        Toggle(
-                            isOn: Binding(
-                                get: { store.animationsEnabled },
-                                set: { val in Task { await store.updatePreferences(animationsEnabled: val) } }
-                            )
-                        ) {
-                            Text(store.animationsEnabled ? "Animationen aktiviert" : "Animationen deaktiviert")
-                        }
-
-                        Toggle(
-                            isOn: Binding(
-                                get: { store.showHolidayHints },
-                                set: { val in Task { await store.updatePreferences(holidayHintsEnabled: val) } }
-                            )
-                        ) {
-                            Text("Ferien-Hinweis auf Startseite anzeigen")
+                        // Feature Toggles with Icons
+                        VStack(spacing: 16) {
+                            // Speedometer
+                            HStack(spacing: 16) {
+                                Image(systemName: "speedometer")
+                                    .font(.title2)
+                                    .foregroundStyle(.cyan)
+                                    .frame(width: 32, height: 32)
+                                    .background(Circle().fill(Color.cyan.opacity(0.15)))
+                                
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Speedometer Cover")
+                                        .font(.subheadline.weight(.semibold))
+                                    Text("Startanimation beim Öffnen der App")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                
+                                Spacer()
+                                
+                                Toggle("", isOn: $showSpeedometerOnLaunch)
+                                    .labelsHidden()
+                            }
+                            
+                            // Animations
+                            HStack(spacing: 16) {
+                                Image(systemName: "sparkles")
+                                    .font(.title2)
+                                    .foregroundStyle(.purple)
+                                    .frame(width: 32, height: 32)
+                                    .background(Circle().fill(Color.purple.opacity(0.15)))
+                                
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Animationen")
+                                        .font(.subheadline.weight(.semibold))
+                                    Text("Bewegungseffekte und Übergänge")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                
+                                Spacer()
+                                
+                                Toggle(
+                                    "",
+                                    isOn: Binding(
+                                        get: { store.animationsEnabled },
+                                        set: { val in Task { await store.updatePreferences(animationsEnabled: val) } }
+                                    )
+                                )
+                                .labelsHidden()
+                            }
+                            
+                            // Holiday Hints
+                            HStack(spacing: 16) {
+                                Image(systemName: "beach.umbrella")
+                                    .font(.title2)
+                                    .foregroundStyle(.orange)
+                                    .frame(width: 32, height: 32)
+                                    .background(Circle().fill(Color.orange.opacity(0.15)))
+                                
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Ferien-Countdown")
+                                        .font(.subheadline.weight(.semibold))
+                                    Text("Hinweis auf kommende Ferien")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                
+                                Spacer()
+                                
+                                Toggle(
+                                    "",
+                                    isOn: Binding(
+                                        get: { store.showHolidayHints },
+                                        set: { val in Task { await store.updatePreferences(holidayHintsEnabled: val) } }
+                                    )
+                                )
+                                .labelsHidden()
+                            }
                         }
                     }
                 }
 
                 SettingsSectionBox {
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 20) {
                         Text("Erinnerung")
                             .font(sectionHeaderFont)
-
-                        Toggle(
-                            isOn: Binding(
-                                get: { store.standardRemindersEnabled },
-                                set: { val in Task { await store.updateStandardReminderEnabled(val) } }
+                            
+                        // Reminder Toggle Row
+                        HStack(spacing: 16) {
+                            Image(systemName: "bell.badge.fill")
+                                .font(.title2)
+                                .foregroundStyle(.indigo)
+                                .frame(width: 32, height: 32)
+                                .background(Circle().fill(Color.indigo.opacity(0.15)))
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Erinnerungen")
+                                    .font(.subheadline.weight(.semibold))
+                                    .minimumScaleFactor(0.9)
+                                    .lineLimit(1)
+                                Text("Für Prüfungen und Hausaufgaben")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            
+                            Spacer()
+                            
+                            Toggle(
+                                "",
+                                isOn: Binding(
+                                    get: { store.standardRemindersEnabled },
+                                    set: { val in 
+                                        Task { await store.updateStandardReminderEnabled(val) }
+                                    }
+                                )
                             )
-                        ) {
-                            Text(store.standardRemindersEnabled ? "Standard-Erinnerung aktiv" : "Standard-Erinnerung aus")
+                            .labelsHidden()
                         }
-
-                        DatePicker(
-                            "1 Tag vor Fälligkeit erinnern",
-                            selection: Binding(
-                                get: { homeworkReminderDate },
-                                set: { newVal in
-                                    let comps = Calendar.current.dateComponents([.hour, .minute], from: newVal)
-                                    let h = comps.hour ?? 19
-                                    let m = comps.minute ?? 0
-                                    Task { await store.updateHomeworkReminderTime(hour: h, minute: m) }
-                                }
-                            ),
-                            displayedComponents: .hourAndMinute
-                        )
-                        .datePickerStyle(.compact)
-                        .disabled(!store.standardRemindersEnabled)
-
+                        
+                        // Time Picker (Conditional)
+                        if store.standardRemindersEnabled {
+                            HStack(spacing: 16) {
+                                Image(systemName: "clock.fill")
+                                    .font(.title2)
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 32, height: 32)
+                                
+                                Text("Uhrzeit")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                
+                                Spacer()
+                                
+                                DatePicker(
+                                    "",
+                                    selection: Binding(
+                                        get: { homeworkReminderDate },
+                                        set: { newVal in
+                                            let comps = Calendar.current.dateComponents([.hour, .minute], from: newVal)
+                                            let h = comps.hour ?? 19
+                                            let m = comps.minute ?? 0
+                                            Task { await store.updateHomeworkReminderTime(hour: h, minute: m) }
+                                        }
+                                    ),
+                                    displayedComponents: .hourAndMinute
+                                )
+                                .labelsHidden()
+                                .datePickerStyle(.compact)
+                            }
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                        }
+                        
+                        Divider()
+                            
                         NavigationLink {
                             HelpCenterView(initialSection: .special)
                                 .environmentObject(store)
                         } label: {
                             HStack(spacing: 8) {
-                                Image(systemName: "info.circle")
-                                Text("Details zu Erinnerungen")
+                                Image(systemName: "questionmark.circle.fill")
+                                    .foregroundStyle(.secondary)
+                                Text("Wie funktionieren Erinnerungen?")
                                 Spacer()
                                 Image(systemName: "chevron.right")
-                                    .foregroundStyle(.secondary)
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(.secondary.opacity(0.5))
                             }
-                            .font(helperFont)
-                            .foregroundStyle(.secondary)
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                            .padding(.vertical, 4)
                         }
                         .buttonStyle(.plain)
                     }
+                    .animation(.spring(), value: store.standardRemindersEnabled)
                 }
             }
         }

@@ -6,6 +6,7 @@ struct GradeCalculator {
     let fachreferat: Fachreferat?
     let practicalPerformance: PracticalPerformance?
     let seminarPerformance: SeminarPerformance?
+    let examPoints: [String: Double?]
     let gradeYear: Int
     let schoolType: SchoolType
     
@@ -13,73 +14,261 @@ struct GradeCalculator {
     
     struct CalculationResult {
         let subjects: [SubjectCalculation]
-        let averageBeforeDrops: Double?
-        let averageAfterDrops: Double?
-        let finalGrade: Double?
+        let averageBeforeDrops: Double? // Average Points 0-15
+        let averageAfterDrops: Double?  // Average Points 0-15
+        let finalGrade: Double?         // Schnitt 1-6
+        let totalPoints: Double?
+        let maxPoints: Int?
+        let abiturResults: [AbiturResult]
+        let fachreferatGrade: Double?
+        let practicalGrade: Double?
+        let seminarGrade: Double?
     }
     
     struct SubjectCalculation {
         let subjectName: String
         let average: Double? // Current actual average of grades
+        let gradingMode: GradingMode?
+    }
+
+    struct AbiturResult {
+        let subjectName: String
+        let points: Double?
     }
     
     // --- Public API ---
     
     func calculate() -> CalculationResult {
-        // Simple Average of "Subject Averages" so far (simplified for report card view)
-        // Note: Full Abitur calculation is complex. For the report card "Zwischenstand", 
-        // usually users want the average of their current subject averages.
+        // 1. Prepare SubjectData for makeFobosoSummary (still needed for Abitur Prognosis parts if we want to keep them,
+        // or effectively we might strictly pivot to "App Mode" display?
+        // The user asked to "align it that all grades and the overall averages for the MSS value and the schnitt shows the same values as the rest of the app".
+        // The "rest of the app" (Home/Insights) primarily uses the "Status" view (raw averages).
+        // However, the "Report Card" often implies a "Projected Abitur" view.
+        // Given the request "calculations are slightly off from what the rest of the app is showing", I will prioritize the "Status" view alignment.
         
-        // 1. Calculate average for each subject
-        let subjectCalculations = subjects.map { sub -> SubjectCalculation in
-            let average = calculateSubjectAverage(sub)
-            return SubjectCalculation(subjectName: sub.name, average: average)
+        // 1. Prepare SubjectData for makeFobosoSummary (Strict Abitur view)
+        // For Foboso Summary, we still need basic mapping but maybe we should use the same normalized grades?
+        // Actually, makeFobosoSummary does its own processing? 
+        // No, it takes `SubjectData` which has `grades: [GradeProtocol]`.
+        // To be consistent, let's feed it the "best guess" normalized grades for both half-years.
+        
+        let subjectData = subjects.map { sub -> GradeCalculationService.SubjectData in
+            let h1 = getGradesForHalfYear(sub, halfYear: 1)
+            let h2 = getGradesForHalfYear(sub, halfYear: 2)
+            return GradeCalculationService.SubjectData.from(subject: sub, grades: h1 + h2)
         }
         
-        let validSubjectAverages = subjectCalculations.compactMap { $0.average }
+        // Note: We use { _, w in w } because we already normalized weights in getGradesForHalfYear
+        let weightLogic: (Int, Double) -> Double = { _, w in w }
         
-        // Average Before Drops (simply average of all subjects present)
-        let avgBefore = validSubjectAverages.isEmpty ? nil : validSubjectAverages.reduce(0, +) / Double(validSubjectAverages.count)
+        // --- 1. Subject Averages (Match HomeView) ---
         
-        // Average After Drops
-        // Getting "optimal" drops automatically is hard without specific logic.
-        // If the store doesn't persist drops, we can't show "User's drops".
-        // The FinalGradeView state is local. 
-        // PROPOSAL: For this PDF feature, we will calculate an "Optimized" version if we can,
-        // OR simpler: Just show the raw average if we can't access user drops.
-        // User asked for "Nach gestrichenen Halbjahren".
-        // Use a simple heuristic: Drop the worst X halfyears if applicable?
-        // Actually, without the explicit `dropSelections` map from the view, we can't EXACTLY replicate the view's state.
-        // However, the prompt implies "current" state.
-        // Since we can't easily reach into FinalGradeView's @State from here,
-        // We will assume "Before Drops" = All Grades, and "Final Grade" = calculated logic if possible.
-        // IF we cannot replicate drops easily, we might show just one average or auto-drop worst.
+        let subjectCalculations = subjects.map { sub -> SubjectCalculation in
+            // Use GradeCalculationService.calculateHalfYearAverage to get raw values
+            let v1 = GradeCalculationService.calculateHalfYearAverage(
+                grades: getGradesForHalfYear(sub, halfYear: 1),
+                subject: sub,
+                halfYear: 1,
+                effectiveGradeWeight: weightLogic
+            )
+            let v2 = GradeCalculationService.calculateHalfYearAverage(
+                grades: getGradesForHalfYear(sub, halfYear: 2),
+                subject: sub,
+                halfYear: 2,
+                effectiveGradeWeight: weightLogic
+            )
+            
+            let droppedHJ = sub.droppedHalfYear
+            let val1 = (droppedHJ == 1) ? nil : v1
+            let val2 = (droppedHJ == 2) ? nil : v2
+            
+            var avg: Double?
+            if let a = val1, let b = val2 {
+                avg = (a + b) / 2.0
+            } else if let a = val1 {
+                avg = a
+            } else if let b = val2 {
+                avg = b
+            } else {
+                avg = nil
+            }
+            
+            return SubjectCalculation(subjectName: sub.name, average: avg, gradingMode: sub.gradingMode)
+        }
         
-        // Let's stick to: "Current Average" (Average of all subject averages)
-        // And "Final Grade" -> This often means the Abitur grade logic if 12/13/11.
+        // --- 2. Overall Average (MSS) (Match InsightsView) ---
+        let avgAfter = GradeCalculationService.calculateOverallAverage(
+            subjects: subjects,
+            halfYearValueProvider: { subject, hy in
+                GradeCalculationService.calculateHalfYearAverage(
+                    grades: getGradesForHalfYear(subject, halfYear: hy),
+                    subject: subject,
+                    halfYear: hy,
+                    effectiveGradeWeight: weightLogic
+                )
+            },
+            droppedHalfYearProvider: { $0.droppedHalfYear },
+            halfYearFilter: nil, // All half years
+            fachreferat: fachreferat,
+            seminar: seminarPerformance,
+            practical: practicalPerformance,
+            examPoints: examPoints,
+            schoolType: schoolType,
+            gradeYear: gradeYear
+        )
         
+        // --- 3. Average Before Drops ---
+        let avgBefore = GradeCalculationService.calculateOverallAverage(
+            subjects: subjects,
+            halfYearValueProvider: { subject, hy in
+                GradeCalculationService.calculateHalfYearAverage(
+                    grades: getGradesForHalfYear(subject, halfYear: hy),
+                    subject: subject,
+                    halfYear: hy,
+                    effectiveGradeWeight: weightLogic
+                )
+            },
+            droppedHalfYearProvider: { _ in nil }, // No drops
+            halfYearFilter: nil,
+            fachreferat: fachreferat,
+            seminar: seminarPerformance,
+            practical: practicalPerformance,
+            examPoints: examPoints,
+            schoolType: schoolType,
+            gradeYear: gradeYear
+        )
+        
+        // --- 4. Final Grade (Schnitt) ---
+        // HomeView uses: pointsToGrade(average)
+        let finalGrade = avgAfter != nil ? GradeCalculationService.pointsToGrade(points: avgAfter!) : nil
+        
+        // --- 5. Validating "Total Points" & "Max Points" ---
+        // These are tricky. "Total Points" usually implies the Abitur Sum (300-900).
+        // But the "MSS" (points 0-15) is what we just calculated as avgAfter.
+        // If the user wants the "Overall Average for the MSS value" to look like the app, they probably mean the 0-15 value.
+        // The ReportCardView shows: "Gesamtpunkte: X / Y". This implies the Sum.
+        // However, if we simply sum up the raw averages, it won't be a valid Abitur Sum.
+        // Let's keep the "Foboso Summary" purely for the "Total Points / Max Points" display if available,
+        // BUT make sure the main "MSS" circle uses the avgAfter we just calculated.
+        
+        // Recalculate strict Foboso for Total/Max stats (purely informational)
+        let fSummary = GradeCalculationService.makeFobosoSummary(
+            schoolType: schoolType,
+            gradeYear: gradeYear,
+            subjects: subjectData,
+            examPoints: examPoints,
+            dropSelections: Dictionary(uniqueKeysWithValues: subjects.map { ($0.name, $0.droppedHalfYear) }),
+            fachreferat: fachreferat,
+            practicalPerformance: practicalPerformance,
+            seminarPerformance: seminarPerformance,
+            effectiveGradeWeight: weightLogic
+        )
+
+        // Abitur results display
+        let abiturResults = subjects.filter { $0.examSubject == true }.map { sub in
+            AbiturResult(subjectName: sub.name, points: examPoints[sub.name] ?? nil)
+        }
+        
+        // Extract practical/seminar grades for display
+        // We can just use the raw values from the structs directly if available, or calculate them.
+        let pracGrade: Double? = {
+            if let p = practicalPerformance, !p.grades.isEmpty {
+                 let limited = p.grades.sorted(by: { $0.date < $1.date }).prefix(2)
+                 if !limited.isEmpty {
+                     return limited.reduce(0.0) { $0 + $1.grade } / Double(limited.count)
+                 }
+            }
+            return nil
+        }()
+        
+        let semGrade: Double? = {
+            if let s = seminarPerformance {
+                return GradeCalculationService.calculateSeminarFinalPoints(s)
+            }
+            return nil
+        }()
+
         return CalculationResult(
             subjects: subjectCalculations,
             averageBeforeDrops: avgBefore,
-            averageAfterDrops: avgBefore, // Placeholder if no drop logic
-            finalGrade: avgBefore // Simplified for this context
+            averageAfterDrops: avgAfter, // Use the aligned MSS value
+            finalGrade: finalGrade,      // Use the aligned Grade value
+            totalPoints: fSummary.totalPoints, // Keep strict sum for "Gesamtpunkte" info
+            maxPoints: fSummary.maxPoints,
+            abiturResults: abiturResults,
+            fachreferatGrade: fachreferat?.grade,
+            practicalGrade: pracGrade,
+            seminarGrade: semGrade
         )
     }
+    // --- Private Helpers ---
     
-    private func calculateSubjectAverage(_ subject: Subject) -> Double? {
-        let grades = gradesBySubject[subject.name] ?? []
-        guard !grades.isEmpty else { return nil }
+    private struct CalculatedGrade: GradeProtocol {
+        let grade: Double
+        let weight: Double
+        let halfYear: Int?
+        let assessmentType: AssessmentType?
+    }
+    
+    private func derivedAssessmentType(for grade: GradeWithId, gradingMode: GradingMode) -> AssessmentType {
+        if let type = grade.assessmentType { return type }
+        switch gradingMode {
+        case .withSchulaufgaben:
+            if grade.weight >= 2 { return .schulaufgabe }
+            if grade.weight >= 1 { return .kurzarbeit }
+            return .muendlich
+        case .withoutSchulaufgaben:
+            if grade.weight >= 1 { return .kurzarbeit }
+            return .muendlich
+        }
+    }
+    
+    /// Replicates GradesStore.mapAssessments logic:
+    /// 1. Filters by halfYear (handling legacy nil cases)
+    /// 2. Rounds points to Integer
+    /// 3. Normalizes weights
+    /// 4. Derives assessment type
+    private func getGradesForHalfYear(_ subject: Subject, halfYear: Int) -> [CalculatedGrade] {
+        let rawGrades = gradesBySubject[subject.name] ?? []
         
-        var total = 0.0
-        var weight = 0.0
-        
-        for g in grades {
-            let w = g.weight // Simplified: In FinalGradeView there is logic for Exam vs Normal.
-            // Using direct weight is usually correct for "Current Standing".
-            total += g.grade * w
-            weight += w
+        // 1. Filtering Logic (Legacy Fallback)
+        let hasExplicitHalf = rawGrades.contains { $0.halfYear == halfYear }
+        var filtered = rawGrades.filter { g in
+            if hasExplicitHalf {
+                return g.halfYear == halfYear
+            } else {
+                return g.halfYear == nil || g.halfYear == halfYear
+            }
+        }
+        if filtered.isEmpty {
+             // If nothing matched, check for nil-halfYear entries (extreme legacy fallback)
+             let nilOnly = rawGrades.filter { $0.halfYear == nil }
+             if !nilOnly.isEmpty {
+                 filtered = nilOnly
+             }
         }
         
-        return weight > 0 ? total / weight : nil
+        let mode = subject.gradingMode ?? .withoutSchulaufgaben
+        
+        return filtered.map { g in
+            let type = derivedAssessmentType(for: g, gradingMode: mode)
+            
+            // 2. Rounding Logic (GradesStore does Int(g.grade.rounded()))
+            let roundedGrade = g.grade.rounded()
+            
+            // 3. Weight Normalization
+            // GradesStore: if type == .schulaufgabe { return g.weight } else { return g.weight <= 0 ? 1 : g.weight }
+            let normalizedWeight: Double = {
+                if type == .schulaufgabe { return g.weight }
+                return g.weight <= 0 ? 1 : g.weight
+            }()
+            
+            return CalculatedGrade(
+                grade: roundedGrade,
+                weight: normalizedWeight,
+                halfYear: halfYear, // Force to requested halfYear so calculateHalfYearAverage accepts it
+                assessmentType: type
+            )
+        }
     }
 }

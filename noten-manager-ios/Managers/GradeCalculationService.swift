@@ -1,6 +1,5 @@
 // GradeCalculationService.swift
 import Foundation
-import SwiftUI
 
 /// Unified service for calculating Abitur and school averages based on BayFOBOSO rules.
 enum GradeCalculationService {
@@ -11,21 +10,33 @@ enum GradeCalculationService {
         let examPointsDouble: Double
         let halfYearPoints: Double
         let seminarPointsDouble: Double
+        let seminarCount: Int
         let practicalPointsDouble: Double
+        let practicalCount: Int
         let fachreferatPointsDouble: Double
+        let fachreferatCount: Int
         let totalPoints: Double
+        let totalPointsRaw: Double
         let maxPoints: Int
         let grade: Double?
         let gradeRaw: Double?
     }
 
+    struct CalculationBreakdownItem: Identifiable {
+        let id = UUID()
+        let label: String
+        let value: Double
+        let weight: Double
+        let category: String
+    }
+
     struct SubjectData: Identifiable {
         let id: String
         let subject: Subject
-        let grades: [GradeWithId]
+        let grades: [any GradeProtocol]
         let isEligible: Bool // e.g., not elective, not Fachreferat
         
-        static func from(subject: Subject, grades: [GradeWithId]) -> SubjectData {
+        static func from(subject: Subject, grades: [any GradeProtocol]) -> SubjectData {
             let isEligible = subject.name != "Fachreferat" && !subject.isElective
             return SubjectData(id: subject.name, subject: subject, grades: grades, isEligible: isEligible)
         }
@@ -44,7 +55,7 @@ enum GradeCalculationService {
         effectiveGradeWeight: (Int, Double) -> Double
     ) -> CalculationResult {
         
-        let examWeightDouble: Double = (schoolType == .fos) ? (gradeYear >= 13 ? 2 : 3) : 2
+        let examWeightDouble: Double = (schoolType == .fos) ? (gradeYear >= 13 ? 2 : 2) : 2
         let hasSeminarRequirement = gradeYear >= 13
         
         // 1. Exam Points
@@ -62,6 +73,7 @@ enum GradeCalculationService {
         
         // 2. Half Year Results (HJE)
         var totalHalfYearPoints = 0.0
+        var totalHalfYearPointsRaw = 0.0
         var totalHalfYearCount = 0
         for s in subjects {
             if !s.isEligible { continue }
@@ -71,15 +83,19 @@ enum GradeCalculationService {
             let isHalfYear2Dropped = (dropValue == 2)
             
             if !isHalfYear1Dropped {
-                if let avg = calculateHalfYearAverage(grades: s.grades, subjectType: s.subject.type, halfYear: 1, effectiveGradeWeight: effectiveGradeWeight) {
-                    totalHalfYearPoints += avg
+                if let raw = calculateHalfYearAverage(grades: s.grades, subject: s.subject, halfYear: 1, effectiveGradeWeight: effectiveGradeWeight) {
+                    let rounded = roundHJE(raw)
+                    totalHalfYearPoints += Double(rounded)
+                    totalHalfYearPointsRaw += raw
                     totalHalfYearCount += 1
                 }
             }
             
             if !isHalfYear2Dropped {
-                if let avg = calculateHalfYearAverage(grades: s.grades, subjectType: s.subject.type, halfYear: 2, effectiveGradeWeight: effectiveGradeWeight) {
-                    totalHalfYearPoints += avg
+                if let raw = calculateHalfYearAverage(grades: s.grades, subject: s.subject, halfYear: 2, effectiveGradeWeight: effectiveGradeWeight) {
+                    let rounded = roundHJE(raw)
+                    totalHalfYearPoints += Double(rounded)
+                    totalHalfYearPointsRaw += raw
                     totalHalfYearCount += 1
                 }
             }
@@ -121,17 +137,22 @@ enum GradeCalculationService {
         if units == 0 {
             return CalculationResult(
                 examCount: actualExamCount, halfYearCount: totalHalfYearCount,
-                examPointsDouble: 0, halfYearPoints: 0, seminarPointsDouble: 0,
-                practicalPointsDouble: 0, fachreferatPointsDouble: 0,
-                totalPoints: 0, maxPoints: 0, grade: nil, gradeRaw: nil
+                examPointsDouble: 0, halfYearPoints: 0,
+                seminarPointsDouble: 0, seminarCount: 0,
+                practicalPointsDouble: 0, practicalCount: 0,
+                fachreferatPointsDouble: 0, fachreferatCount: 0,
+                totalPoints: 0, totalPointsRaw: 0, maxPoints: 0, grade: nil, gradeRaw: nil
             )
         }
         
         let maxPoints = units * 15
         let totalPoints = examPointsDouble + totalHalfYearPoints + fachreferatPoints + practicalPoints + seminarPoints
+        let totalPointsRaw = examPointsDouble + totalHalfYearPointsRaw + fachreferatPoints + practicalPoints + seminarPoints
         let gradeRaw = 17.0 / 3.0 - (5.0 * totalPoints) / Double(maxPoints)
-        let gradeRounded = (gradeRaw * 10.0).rounded(.toNearestOrAwayFromZero) / 10.0
-        let grade = max(1, min(6, gradeRounded))
+        // Bavarian Abitur grades are truncated to one decimal place, NOT rounded.
+        // We add a tiny epsilon to handle floating point precision issues (e.g. 1.6 being 1.59999...)
+        let gradeTruncated = floor((gradeRaw + 0.00001) * 10.0) / 10.0
+        let grade = max(1.0, min(6.0, gradeTruncated))
         
         return CalculationResult(
             examCount: actualExamCount,
@@ -139,9 +160,13 @@ enum GradeCalculationService {
             examPointsDouble: examPointsDouble,
             halfYearPoints: totalHalfYearPoints,
             seminarPointsDouble: seminarPoints,
+            seminarCount: seminarCount,
             practicalPointsDouble: practicalPoints,
+            practicalCount: practicalCount,
             fachreferatPointsDouble: fachreferatPoints,
+            fachreferatCount: fachreferatCount,
             totalPoints: totalPoints,
+            totalPointsRaw: totalPointsRaw,
             maxPoints: maxPoints,
             grade: grade,
             gradeRaw: gradeRaw
@@ -149,51 +174,102 @@ enum GradeCalculationService {
     }
     
     /// Calculates the average for a single subject, optionally respecting dropped half-years.
-    static func calculateSubjectAverage<T: GradeProtocol>(
+    /// Uses FOBOSO block weighting: calculates each half-year's average, then averages them.
+    static func calculateSubjectAverage(
         subject: Subject,
-        grades: [T],
+        grades: [any GradeProtocol],
         dropValue: Int?, // 1, 2 or nil
         effectiveGradeWeight: (Int, Double) -> Double
     ) -> Double? {
         let isHalfYear1Dropped = (dropValue == 1)
         let isHalfYear2Dropped = (dropValue == 2)
         
-        var total = 0.0
-        var totalWeight = 0.0
+        // Calculate each half-year average using FOBOSO block weighting
+        let hy1Avg = isHalfYear1Dropped ? nil : calculateHalfYearAverage(
+            grades: grades, subject: subject, halfYear: 1, effectiveGradeWeight: effectiveGradeWeight
+        )
+        let hy2Avg = isHalfYear2Dropped ? nil : calculateHalfYearAverage(
+            grades: grades, subject: subject, halfYear: 2, effectiveGradeWeight: effectiveGradeWeight
+        )
         
-        for g in grades {
-            if g.halfYear == 1 && isHalfYear1Dropped { continue }
-            if g.halfYear == 2 && isHalfYear2Dropped { continue }
-            
-            let w = effectiveGradeWeight(subject.type, g.weight)
-            total += g.grade * w
-            totalWeight += w
+        // Average the half-year values
+        switch (hy1Avg, hy2Avg) {
+        case let (a?, b?):
+            return (a + b) / 2.0
+        case let (a?, nil):
+            return a
+        case let (nil, b?):
+            return b
+        default:
+            return nil
         }
-        
-        guard totalWeight > 0 else { return nil }
-        return total / totalWeight
     }
     
-    static func calculateHalfYearAverage<T: GradeProtocol>(
-        grades: [T],
-        subjectType: Int,
+    static func roundHJE(_ raw: Double) -> Int {
+        guard raw.isFinite else { return 0 }
+        let fraction = raw - floor(raw)
+        if fraction < 0.5 {
+            return Int(floor(raw))
+        } else {
+            return Int(ceil(raw))
+        }
+    }
+    
+    static func calculateHalfYearAverage(
+        grades: [any GradeProtocol],
+        subject: Subject,
         halfYear: Int,
         effectiveGradeWeight: (Int, Double) -> Double
     ) -> Double? {
         let filtered = grades.filter { $0.halfYear == halfYear }
         guard !filtered.isEmpty else { return nil }
-        var total = 0.0
-        var totalWeight = 0.0
-        for g in filtered {
-            let w = effectiveGradeWeight(subjectType, g.weight)
-            guard w > 0 else { continue }
-            total += g.grade * w
-            totalWeight += w
+        
+        // Handle FOBOSO block weighting if applicable
+        let hasSAInGrades = filtered.contains(where: { $0.assessmentType == .schulaufgabe })
+        let isHauptfach = subject.gradingMode == .withSchulaufgaben || hasSAInGrades || (subject.gradingMode == nil && subject.type == 1)
+        
+        if isHauptfach {
+            let saGrades = filtered.filter { $0.assessmentType == .schulaufgabe }
+            let otherGrades = filtered.filter { $0.assessmentType != .schulaufgabe }
+            
+            var otherTotal = 0.0
+            var otherWeightSum = 0.0
+            
+            for g in otherGrades {
+                let w = effectiveGradeWeight(subject.type, g.weight)
+                guard w > 0 else { continue }
+                otherTotal += g.grade * w
+                otherWeightSum += w
+            }
+            
+            let otherAvg = otherWeightSum > 0 ? otherTotal / otherWeightSum : nil
+            let saPoints = saGrades.map { $0.grade }
+            
+            if let other = otherAvg, !saPoints.isEmpty {
+                // (OtherAvg + SA1 + SA2 + ...) / (1 + SACount)
+                let blocks = Double(saPoints.count) + 1.0
+                return (other + saPoints.reduce(0, +)) / blocks
+            } else if let other = otherAvg {
+                return other
+            } else if !saPoints.isEmpty {
+                return saPoints.reduce(0, +) / Double(saPoints.count)
+            }
+            return nil
+        } else {
+            // Simple weighted average for subjects without Schulaufgaben
+            var total = 0.0
+            var totalWeight = 0.0
+            for g in filtered {
+                let w = effectiveGradeWeight(subject.type, g.weight)
+                guard w > 0 else { continue }
+                total += g.grade * w
+                totalWeight += w
+            }
+            guard totalWeight > 0 else { return nil }
+            let avg = total / totalWeight
+            if avg.isNaN || avg.isInfinite { return nil }
+            return max(0, min(15, avg))
         }
-        guard totalWeight > 0 else { return nil }
-        let avg = total / totalWeight
-        if avg.isNaN || avg.isInfinite { return nil }
-        return max(0, min(15, avg))
     }
     
     static func calculateSeminarFinalPoints(_ sem: SeminarPerformance) -> Double? {
@@ -221,7 +297,13 @@ enum GradeCalculationService {
         subjects: [Subject],
         halfYearValueProvider: (Subject, Int) -> Double?,
         droppedHalfYearProvider: ((Subject) -> Int?)? = nil,
-        halfYearFilter: Int? = nil
+        halfYearFilter: Int? = nil,
+        fachreferat: Fachreferat? = nil,
+        seminar: SeminarPerformance? = nil,
+        practical: PracticalPerformance? = nil,
+        examPoints: [String: Double?] = [:],
+        schoolType: SchoolType? = nil,
+        gradeYear: Int? = nil
     ) -> Double? {
         let eligibleSubjects = subjects.filter { 
             $0.name != "Fachreferat" && !$0.isElective 
@@ -230,6 +312,8 @@ enum GradeCalculationService {
         var total = 0.0
         var count = 0.0
         
+        let examWeight: Double = (schoolType == .fos) ? (Double(gradeYear ?? 12) >= 13 ? 2 : 2) : 2
+        
         for subject in eligibleSubjects {
             let droppedHalf = droppedHalfYearProvider?(subject)
             let value: Double?
@@ -237,41 +321,166 @@ enum GradeCalculationService {
             switch halfYearFilter {
             case 1:
                 // If requesting half-year 1 but it's dropped, skip
-                if droppedHalf == 1 {
-                    value = nil
-                } else {
-                    value = halfYearValueProvider(subject, 1)
+                if droppedHalf != 1, let hv = halfYearValueProvider(subject, 1) {
+                    total += Double(roundHJE(hv))
+                    count += 1
                 }
             case 2:
                 // If requesting half-year 2 but it's dropped, skip
-                if droppedHalf == 2 {
-                    value = nil
-                } else {
-                    value = halfYearValueProvider(subject, 2)
+                if droppedHalf != 2, let hv = halfYearValueProvider(subject, 2) {
+                    total += Double(roundHJE(hv))
+                    count += 1
                 }
             default: // nil or any other = both half-years (respecting drops)
-                let v1 = droppedHalf == 1 ? nil : halfYearValueProvider(subject, 1)
-                let v2 = droppedHalf == 2 ? nil : halfYearValueProvider(subject, 2)
-                switch (v1, v2) {
-                case let (a?, b?):
-                    value = (a + b) / 2.0
-                case let (a?, nil):
-                    value = a
-                case let (nil, b?):
-                    value = b
-                default:
-                    value = nil
+                if droppedHalf != 1, let hv1 = halfYearValueProvider(subject, 1) {
+                    total += Double(roundHJE(hv1))
+                    count += 1
+                }
+                if droppedHalf != 2, let hv2 = halfYearValueProvider(subject, 2) {
+                    total += Double(roundHJE(hv2))
+                    count += 1
+                }
+            }
+        }
+        
+        // Add extra components ONLY for overall average (halfYearFilter == nil)
+        if halfYearFilter == nil {
+            // 1. Fachreferat (Weight: 1 Subject Equivalent)
+            if let fr = fachreferat {
+                total += fr.grade
+                count += 1
+            }
+            
+            // 2. fpA (Praktikum) - Only in FOS 11 (Weight: 1 Subject Equivalent)
+            if schoolType == .fos && gradeYear == 11, let practical = practical {
+                let limited = practical.grades.sorted(by: { $0.date < $1.date }).prefix(2)
+                if !limited.isEmpty {
+                    let avg = limited.reduce(0.0) { $0 + $1.grade } / Double(limited.count)
+                    total += avg
+                    count += 1
                 }
             }
             
-            if let v = value {
-                total += v
-                count += 1
+            // 3. Seminar (Weight: 2 Subject Equivalent in 13th grade)
+            if gradeYear == 13, let sem = seminar {
+                if let finalPoints = calculateSeminarFinalPoints(sem) {
+                    total += finalPoints * 2.0
+                    count += 2.0
+                }
+            }
+            
+            // 4. Abitur Exams (Weight: examWeight defined above)
+            for subject in subjects {
+                if let points = examPoints[subject.name], let p = points {
+                    let v = p.rounded(.toNearestOrAwayFromZero)
+                    total += v * examWeight
+                    count += examWeight
+                }
             }
         }
         
         guard count > 0 else { return nil }
         return total / count
+    }
+
+    static func calculateOverallAverageDetailed(
+        subjects: [Subject],
+        halfYearValueProvider: (Subject, Int) -> Double?,
+        droppedHalfYearProvider: ((Subject) -> Int?)? = nil,
+        halfYearFilter: Int? = nil,
+        fachreferat: Fachreferat? = nil,
+        seminar: SeminarPerformance? = nil,
+        practical: PracticalPerformance? = nil,
+        examPoints: [String: Double?] = [:],
+        schoolType: SchoolType? = nil,
+        gradeYear: Int? = nil
+    ) -> (items: [CalculationBreakdownItem], total: Double, divisor: Double, average: Double?) {
+        var items: [CalculationBreakdownItem] = []
+        let eligibleSubjects = subjects.filter { 
+            $0.name != "Fachreferat" && !$0.isElective 
+        }
+        
+        var total = 0.0
+        var count = 0.0
+        
+        let examWeight: Double = (schoolType == .fos) ? (Double(gradeYear ?? 12) >= 13 ? 2 : 2) : 2
+        
+        for subject in eligibleSubjects {
+            let droppedHalf = droppedHalfYearProvider?(subject)
+            
+            switch halfYearFilter {
+            case 1:
+                if droppedHalf != 1, let v = halfYearValueProvider(subject, 1) {
+                    let rounded = Double(roundHJE(v))
+                    items.append(CalculationBreakdownItem(label: "\(subject.name) (Hj. 1)", value: rounded, weight: 1.0, category: "Fächer"))
+                    total += rounded
+                    count += 1
+                }
+            case 2:
+                if droppedHalf != 2, let v = halfYearValueProvider(subject, 2) {
+                    let rounded = Double(roundHJE(v))
+                    items.append(CalculationBreakdownItem(label: "\(subject.name) (Hj. 2)", value: rounded, weight: 1.0, category: "Fächer"))
+                    total += rounded
+                    count += 1
+                }
+            default:
+                if droppedHalf != 1, let v1 = halfYearValueProvider(subject, 1) {
+                    let rounded = Double(roundHJE(v1))
+                    items.append(CalculationBreakdownItem(label: "\(subject.name) (Hj. 1)", value: rounded, weight: 1.0, category: "Fächer"))
+                    total += rounded
+                    count += 1
+                }
+                if droppedHalf != 2, let v2 = halfYearValueProvider(subject, 2) {
+                    let rounded = Double(roundHJE(v2))
+                    items.append(CalculationBreakdownItem(label: "\(subject.name) (Hj. 2)", value: rounded, weight: 1.0, category: "Fächer"))
+                    total += rounded
+                    count += 1
+                }
+            }
+        }
+        
+        if halfYearFilter == nil {
+            if let fr = fachreferat {
+                items.append(CalculationBreakdownItem(label: "Fachreferat", value: fr.grade, weight: 1.0, category: "Zusatzleistung"))
+                total += fr.grade
+                count += 1
+            }
+            
+            if schoolType == .fos && gradeYear == 11, let practical = practical {
+                let limited = practical.grades.sorted(by: { $0.date < $1.date }).prefix(2)
+                if !limited.isEmpty {
+                    let avg = limited.reduce(0.0) { $0 + $1.grade } / Double(limited.count)
+                    items.append(CalculationBreakdownItem(label: "Praktikum (fpA)", value: avg, weight: 1.0, category: "Zusatzleistung"))
+                    total += avg
+                    count += 1
+                }
+            }
+            
+            if gradeYear == 13, let sem = seminar {
+                if let finalPoints = calculateSeminarFinalPoints(sem) {
+                    let val = finalPoints * 2.0
+                    items.append(CalculationBreakdownItem(label: "Seminar", value: val, weight: 2.0, category: "Zusatzleistung"))
+                    total += val
+                    count += 2.0
+                }
+            }
+            
+            for subject in subjects {
+                if let points = examPoints[subject.name], let p = points {
+                    let v = p.rounded(.toNearestOrAwayFromZero)
+                    items.append(CalculationBreakdownItem(label: "Abiprüfung: \(subject.name)", value: v * examWeight, weight: examWeight, category: "Prüfungen"))
+                    total += v * examWeight
+                    count += examWeight
+                }
+            }
+        }
+        
+        return (items: items, total: total, divisor: count, average: count > 0 ? total / count : nil)
+    }
+
+    static func pointsToGrade(points: Double) -> Double {
+        let grade = (17.0 - points) / 3.0
+        return max(1.0, min(6.0, grade))
     }
 }
 

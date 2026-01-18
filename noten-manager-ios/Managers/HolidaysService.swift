@@ -151,6 +151,23 @@ final class HolidaysService {
 
         return candidates.sorted(by: { $0.start < $1.start }).first
     }
+    
+    func nextHoliday(from date: Date = Date()) async -> HolidayWindow? {
+        let holidays = await combinedHolidays(around: date)
+        
+        // Find first holiday that ends in future (so current or future)
+        // But usually "next holiday" implies one that hasn't started yet, or maybe we want to show current?
+        // Let's matching upcomingHolidayWithin logic: start >= date
+        // But actually, for a "Next Holiday" widget, we probably want the strict next one that starts in the future.
+        // If we want to show "Currently in holidays", that's a different feature.
+        // Request says "upcoming Ferien".
+        
+        let candidates: [HolidayWindow] = holidays
+            .filter { $0.start >= date } // holidays starting today or later
+            .map { HolidayWindow(name: $0.nameCp ?? $0.name, start: $0.start, end: $0.end) }
+            
+        return candidates.sorted(by: { $0.start < $1.start }).first
+    }
 
     // MARK: - Public Holidays (Feiertage)
     

@@ -72,7 +72,7 @@ struct ReportCardSheet: View {
                     }
                 }
             }
-            .onChange(of: selectedTitle) { _ in
+            .onChange(of: selectedTitle) {
                 Task { await preparePDF() }
             }
             .task {
@@ -93,6 +93,7 @@ struct ReportCardSheet: View {
             fachreferat: store.fachreferat,
             practicalPerformance: store.practicalPerformance,
             seminarPerformance: store.seminarPerformance,
+            examPoints: store.examPoints,
             gradeYear: store.gradeYear ?? 12,
             schoolType: store.schoolType
         )
@@ -100,9 +101,9 @@ struct ReportCardSheet: View {
         let result = calculator.calculate()
         
         // Prepare display data
-        let subjects: [(name: String, average: Double?, isAdvanced: Bool)] = store.subjects.sorted(by: { $0.order ?? 0 < $1.order ?? 0 }).map { subject in
+        let subjects: [(name: String, average: Double?, gradingMode: GradingMode?, isAdvanced: Bool)] = store.subjects.sorted(by: { $0.order ?? 0 < $1.order ?? 0 }).map { subject in
             let calc = result.subjects.first(where: { $0.subjectName == subject.name })
-            return (subject.name, calc?.average, subject.isElective)
+            return (subject.name, calc?.average, subject.gradingMode, subject.isElective)
         }
         
         // Setup Icon and Name
@@ -120,15 +121,22 @@ struct ReportCardSheet: View {
             }
         }
 
+        let abiturGrades: [(name: String, points: Double?)] = result.abiturResults.map { ($0.subjectName, $0.points) }
+
         let reportCard = ReportCardView(
             schoolYear: store.activeSchoolYearId ?? "Unbekannt",
             subjects: subjects,
-            seminarGrade: store.seminarPerformance?.individualPoints,
+            seminarGrade: result.seminarGrade,
             seminarTopic: store.seminarPerformance?.topic,
-            practicalGrade: nil,
+            fachreferatGrade: result.fachreferatGrade,
+            practicalGrade: result.practicalGrade,
+            abiturGrades: abiturGrades,
             studentName: name ?? "Schüler/in",
             averageBeforeDrops: result.averageBeforeDrops,
             averageAfterDrops: result.averageAfterDrops,
+            finalGrade: result.finalGrade,
+            totalPoints: result.totalPoints,
+            maxPoints: result.maxPoints,
             creationDate: Date(),
             appIcon: icon,
             title: selectedTitle

@@ -161,19 +161,21 @@ struct CalendarPageView: View {
                     .padding(.horizontal, 16)
                     
                     // MARK: - Settings Toggle
-                    Divider().padding(.vertical, 8)
-                    
-                    SettingsCard(
-                        title: "Nächster Termin",
-                        subtitle: "Auf der Startseite anzeigen",
-                        systemImage: "calendar.badge.clock",
-                        accent: .blue
-                    ) {
+                    HStack {
+                        Label("Vorschau auf Startseite", systemImage: "calendar.badge.clock")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        
+                        Spacer()
+                        
                         Toggle("", isOn: $showNextExamCard)
                             .labelsHidden()
+                            .scaleEffect(0.8)
                             .tint(.blue)
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 4)
+                    .padding(.bottom, 12)
                 }
             }
             .padding(.vertical, 16)

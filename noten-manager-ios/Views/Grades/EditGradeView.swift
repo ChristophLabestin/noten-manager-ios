@@ -550,24 +550,19 @@ struct EditGradeView: View {
 
     private func applyExamWeightIfAvailable(examId: String?) {
         guard let examId else { return }
-        if let exam = store.allExams.first(where: { $0.id == examId }) {
-            if let custom = exam.customWeight {
-                weightChoice = .custom
-                customWeightText = EditGradeView.formatWeight(custom)
-            } else if let w = exam.weight {
-                let doubleWeight = Double(w)
-                weightChoice = .preset(doubleWeight)
-                updateAssessmentTypeForWeight(doubleWeight)
-            }
-            return
-        }
-        if let exam = store.sharedExams.first(where: { $0.id == examId }) {
-            if let custom = exam.customWeight {
-                weightChoice = .custom
-                customWeightText = EditGradeView.formatWeight(custom)
-            } else if let w = exam.weight {
-                let doubleWeight = Double(w)
-                weightChoice = .preset(doubleWeight)
+        let exam = store.allExams.first(where: { $0.id == examId }) ?? store.sharedExams.first(where: { $0.id == examId })
+        guard let exam = exam else { return }
+
+        if let custom = exam.customWeight {
+            weightChoice = .custom
+            customWeightText = EditGradeView.formatWeight(custom)
+        } else if let w = exam.weight {
+            let doubleWeight = Double(w)
+            weightChoice = .preset(doubleWeight)
+            
+            if let type = exam.assessmentType {
+                assessmentType = type
+            } else {
                 updateAssessmentTypeForWeight(doubleWeight)
             }
         }

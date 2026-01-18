@@ -3,6 +3,7 @@ import SwiftUI
 struct InsightsView: View {
     @EnvironmentObject var store: GradesStore
     @EnvironmentObject var biometricManager: BiometricAuthManager
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var showHomeworkSheet: Bool = false
     @State private var showExamSheet: Bool = false
@@ -27,7 +28,13 @@ struct InsightsView: View {
             droppedHalfYearProvider: { subject in
                 subject.droppedHalfYear
             },
-            halfYearFilter: nil
+            halfYearFilter: nil,
+            fachreferat: store.fachreferat,
+            seminar: store.seminarPerformance,
+            practical: store.practicalPerformance,
+            examPoints: store.examPoints,
+            schoolType: store.schoolType,
+            gradeYear: store.gradeYear ?? 12
         )
     }
 
@@ -41,7 +48,9 @@ struct InsightsView: View {
             droppedHalfYearProvider: { subject in
                 subject.droppedHalfYear
             },
-            halfYearFilter: halfYear
+            halfYearFilter: halfYear,
+            schoolType: store.schoolType,
+            gradeYear: store.gradeYear ?? 12
         )
     }
 
@@ -170,38 +179,27 @@ struct InsightsView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
-                SettingsCard(
-                    title: "Insights",
-                    subtitle: "Schnitt, Fächer & Fortschritt",
-                    systemImage: "chart.bar.doc.horizontal.fill",
-                    accent: .indigo
-                ) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack(spacing: 10) {
-                            StatChip(title: "MSS", value: formatMSS(overallMSS), accent: .indigo)
-                            StatChip(title: "Schnitt", value: formatAverage(overallAverageValue), accent: .indigo)
-                            StatChip(title: "Noten", value: "\(totalGradesCount)", accent: .orange)
-                        }
-                        if hasOverdueHomeworks || hasHomeworkDueTomorrow || hasOverdueExams {
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 8) {
-                                    if hasOverdueHomeworks {
-                                        PillBadge(text: "Hausaufgaben fällig", systemImage: "exclamationmark.triangle.fill", foreground: .orange, background: Color.orange.opacity(0.14))
-                                    }
-                                    if hasHomeworkDueTomorrow {
-                                        PillBadge(text: "Hausaufgaben morgen", systemImage: "clock.badge.exclamationmark", foreground: .yellow, background: Color.yellow.opacity(0.16))
-                                    }
-                                    if hasOverdueExams {
-                                        PillBadge(text: "Prüfungen überfällig", systemImage: "calendar.badge.exclamationmark", foreground: .red, background: Color.red.opacity(0.12))
-                                    }
-                                }
-                            }
-                        } else {
-                            PillBadge(text: "Alles im Plan", systemImage: "checkmark.circle.fill", foreground: .green, background: Color.green.opacity(0.14))
-                        }
-                    }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Insights")
+                        .font(.title2.weight(.bold))
+                    Text("Schnitt, Fächer & Fortschritt")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
-                .softFadeIn(enabled: animationsOn, delay: 0.03, offset: 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .softFadeIn(enabled: animationsOn, delay: 0.05, offset: 10)
+
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                    StatChip(title: "MSS", value: formatMSS(overallMSS), accent: .indigo)
+                    let gradeValue = overallAverageValue.map { GradeCalculationService.pointsToGrade(points: $0) }
+                    StatChip(title: "Schnitt", value: formatMSS(gradeValue), accent: .indigo)
+                    StatChip(title: "Noten", value: "\(totalGradesCount)", accent: .orange)
+                }
+                .softFadeIn(enabled: animationsOn, delay: 0.1, offset: 12)
+
+                MSSHistoryChartView()
+                    .environmentObject(store)
+                    .softFadeIn(enabled: animationsOn, delay: 0.06, offset: 12)
 
                 SettingsCard(
                     title: "Was-wäre-wenn",
@@ -464,18 +462,29 @@ struct InsightsView: View {
 
     private func halfYearChip(title: String, value: Double?) -> some View {
         let color = gradeColor(value)
+        let gradeValue = value.map { GradeCalculationService.pointsToGrade(points: $0) }
+        
         return VStack(alignment: .leading, spacing: 4) {
             Text(title.uppercased())
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)
-            Text(formatAverage(value))
-                .font(.headline.weight(.semibold))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(color.opacity(0.14))
-                .foregroundStyle(color)
-                .clipShape(Capsule())
-                .privacyBlur()
+            
+            VStack(alignment: .leading, spacing: 0) {
+                Text(formatMSS(value))
+                    .font(.headline.weight(.semibold))
+                
+                if let gv = gradeValue {
+                    Text("Ø \(String(format: "%.2f", gv))")
+                        .font(.system(size: 10, weight: .bold))
+                        .opacity(0.8)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(color.opacity(0.14))
+            .foregroundStyle(color)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .privacyBlur()
         }
     }
 

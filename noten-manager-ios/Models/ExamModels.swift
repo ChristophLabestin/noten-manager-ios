@@ -18,6 +18,7 @@ struct Exam: Codable, Identifiable, Hashable, Sendable {
     let isShared: Bool
     let creatorId: String?
     let requiresGrade: Bool?
+    let assessmentType: AssessmentType?
 
     init(
         id: String,
@@ -36,7 +37,8 @@ struct Exam: Codable, Identifiable, Hashable, Sendable {
         createdAt: Date,
         isShared: Bool,
         creatorId: String?,
-        requiresGrade: Bool?
+        requiresGrade: Bool?,
+        assessmentType: AssessmentType? = nil
     ) {
         self.id = id
         self.groupId = groupId
@@ -55,6 +57,7 @@ struct Exam: Codable, Identifiable, Hashable, Sendable {
         self.isShared = isShared
         self.creatorId = creatorId
         self.requiresGrade = requiresGrade
+        self.assessmentType = assessmentType
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -75,6 +78,7 @@ struct Exam: Codable, Identifiable, Hashable, Sendable {
         case isShared
         case creatorId
         case requiresGrade
+        case assessmentType
     }
 
     init(from decoder: Decoder) throws {
@@ -102,6 +106,7 @@ struct Exam: Codable, Identifiable, Hashable, Sendable {
         isShared = try container.decodeIfPresent(Bool.self, forKey: .isShared) ?? false
         creatorId = try container.decodeIfPresent(String.self, forKey: .creatorId)
         requiresGrade = try container.decodeIfPresent(Bool.self, forKey: .requiresGrade)
+        assessmentType = try container.decodeIfPresent(AssessmentType.self, forKey: .assessmentType)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -123,6 +128,7 @@ struct Exam: Codable, Identifiable, Hashable, Sendable {
         try container.encode(isShared, forKey: .isShared)
         try container.encodeIfPresent(creatorId, forKey: .creatorId)
         try container.encodeIfPresent(requiresGrade, forKey: .requiresGrade)
+        try container.encodeIfPresent(assessmentType, forKey: .assessmentType)
     }
 
     var isActive: Bool {
