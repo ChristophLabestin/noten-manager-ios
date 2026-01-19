@@ -823,7 +823,7 @@ struct OnboardingFunnelView: View {
                         if isJoiningClass {
                             ProgressView()
                         } else {
-                            Text("Weiter")
+                            Text("Prüfen")
                         }
                     }
                     .frame(maxWidth: .infinity)

@@ -18,6 +18,7 @@ struct NotificationInboxItem: Identifiable, Codable, Hashable, Sendable {
     let examId: String?
     let examIds: [String]?
     let homeworkId: String?
+    let homeworkIds: [String]?
     let groupId: String?
     let isRead: Bool
 
@@ -30,6 +31,7 @@ struct NotificationInboxItem: Identifiable, Codable, Hashable, Sendable {
         examId: String?,
         examIds: [String]? = nil,
         homeworkId: String?,
+        homeworkIds: [String]? = nil,
         groupId: String?,
         isRead: Bool = false
     ) {
@@ -41,6 +43,7 @@ struct NotificationInboxItem: Identifiable, Codable, Hashable, Sendable {
         self.examId = examId
         self.examIds = examIds
         self.homeworkId = homeworkId
+        self.homeworkIds = homeworkIds
         self.groupId = groupId
         self.isRead = isRead
     }
@@ -54,6 +57,7 @@ struct NotificationInboxItem: Identifiable, Codable, Hashable, Sendable {
         case examId
         case examIds
         case homeworkId
+        case homeworkIds
         case groupId
         case isRead
     }
@@ -68,6 +72,7 @@ struct NotificationInboxItem: Identifiable, Codable, Hashable, Sendable {
         examId = try container.decodeIfPresent(String.self, forKey: .examId)
         examIds = try container.decodeIfPresent([String].self, forKey: .examIds)
         homeworkId = try container.decodeIfPresent(String.self, forKey: .homeworkId)
+        homeworkIds = try container.decodeIfPresent([String].self, forKey: .homeworkIds)
         groupId = try container.decodeIfPresent(String.self, forKey: .groupId)
         isRead = try container.decodeIfPresent(Bool.self, forKey: .isRead) ?? false
     }
@@ -82,6 +87,7 @@ struct NotificationInboxItem: Identifiable, Codable, Hashable, Sendable {
         try container.encodeIfPresent(examId, forKey: .examId)
         try container.encodeIfPresent(examIds, forKey: .examIds)
         try container.encodeIfPresent(homeworkId, forKey: .homeworkId)
+        try container.encodeIfPresent(homeworkIds, forKey: .homeworkIds)
         try container.encodeIfPresent(groupId, forKey: .groupId)
         try container.encode(isRead, forKey: .isRead)
     }
@@ -189,7 +195,9 @@ extension NotificationInboxItem {
         let explicitExamId = (userInfo["examId"] as? String) ?? extractExamId(from: identifier)
         let examIds = extractExamIds(from: userInfo, fallback: explicitExamId)
         let examId = explicitExamId ?? (examIds.count == 1 ? examIds.first : nil)
-        let homeworkId = (userInfo["homeworkId"] as? String) ?? extractHomeworkId(from: identifier)
+        let explicitHomeworkId = (userInfo["homeworkId"] as? String) ?? extractHomeworkId(from: identifier)
+        let homeworkIds = extractHomeworkIds(from: userInfo, fallback: explicitHomeworkId)
+        let homeworkId = explicitHomeworkId ?? (homeworkIds.count == 1 ? homeworkIds.first : nil)
         let groupId = userInfo["groupId"] as? String
 
         let title = content.title.isEmpty ? "Benachrichtigung" : content.title
@@ -204,6 +212,7 @@ extension NotificationInboxItem {
             examId: examId,
             examIds: examIds.isEmpty ? nil : examIds,
             homeworkId: homeworkId,
+            homeworkIds: homeworkIds.isEmpty ? nil : homeworkIds,
             groupId: groupId,
             isRead: markRead
         )
@@ -219,6 +228,7 @@ extension NotificationInboxItem {
             examId: examId,
             examIds: examIds,
             homeworkId: homeworkId,
+            homeworkIds: homeworkIds,
             groupId: groupId,
             isRead: isRead
         )
@@ -229,6 +239,22 @@ extension NotificationInboxItem {
             return ids
         }
         if let ids = userInfo["examIds"] as? [Any] {
+            let strings = ids.compactMap { $0 as? String }
+            if !strings.isEmpty {
+                return strings
+            }
+        }
+        if let fallback, !fallback.isEmpty {
+            return [fallback]
+        }
+        return []
+    }
+
+    private static func extractHomeworkIds(from userInfo: [AnyHashable: Any], fallback: String?) -> [String] {
+        if let ids = userInfo["homeworkIds"] as? [String] {
+            return ids
+        }
+        if let ids = userInfo["homeworkIds"] as? [Any] {
             let strings = ids.compactMap { $0 as? String }
             if !strings.isEmpty {
                 return strings

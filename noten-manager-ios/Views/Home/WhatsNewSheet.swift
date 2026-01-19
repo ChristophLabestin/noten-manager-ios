@@ -27,6 +27,12 @@ struct WhatsNewSheet: View {
             accent: .orange
         ),
         Feature(
+            title: "Detaillierte Berechnung",
+            description: "Tippe auf die Gesamtschnitt-Karte im Home-Screen, um die exakte MSS-Berechnung zu sehen.",
+            systemImage: "function",
+            accent: .purple
+        ),
+        Feature(
             title: "Kalender & Termine",
             description: "Behalte den Überblick über deine Prüfungen und Hausaufgaben in der neuen Kalenderansicht.",
             systemImage: "calendar",

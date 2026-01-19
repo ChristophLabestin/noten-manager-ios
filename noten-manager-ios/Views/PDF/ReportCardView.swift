@@ -170,14 +170,7 @@ struct ReportCardView: View {
             if !page.abiturExams.isEmpty {
                 Spacer().frame(height: 20)
                 VStack(spacing: 0) {
-                    HStack {
-                        Text("ABITUR / ABSCHLUSSPRÜFUNG")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(.gray)
-                            .tracking(1)
-                        Spacer()
-                    }
-                    .padding(.bottom, 10)
+                    sectionHeader("ABITUR / ABSCHLUSSPRÜFUNG")
                     
                     ForEach(page.abiturExams) { exam in
                         HStack {

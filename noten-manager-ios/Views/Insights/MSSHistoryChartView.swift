@@ -58,10 +58,10 @@ struct MSSHistoryChartView: View {
         .onReceive(store.$gradesBySubject) { _ in
             calculateHistory()
         }
-        .onChange(of: includeDroppedHalfYears) {
+        .onChange(of: includeDroppedHalfYears) { _, _ in
             calculateHistory()
         }
-        .onChange(of: store.isPrivacyModeActive) { active in
+        .onChange(of: store.isPrivacyModeActive) { _, active in
             if active {
                 withAnimation {
                     selectedPoint = nil
@@ -82,6 +82,17 @@ struct MSSHistoryChartView: View {
                 }
             }
         }
+    }
+
+    private func inferHalfYear(from date: Date) -> Int {
+        let calendar = Calendar.current
+        let month = calendar.component(.month, from: date)
+        // H2 is typically March (3) to July (7)
+        if month >= 3 && month <= 7 {
+            return 2
+        }
+        // All other months (Aug-Feb) are H1
+        return 1
     }
 
     private func calculateHistory() {
@@ -133,18 +144,90 @@ struct MSSHistoryChartView: View {
                 return
             }
             
+            // Pre-calculate effective GradingMode for each subject
+            // This mirrors GradesStore.gradingMode(for:) logic to ensuring consistent weighing
+            var subjectGradingModes: [String: GradingMode] = [:]
+            for subject in subjects {
+                if let explicit = subject.gradingMode {
+                    subjectGradingModes[subject.name] = explicit
+                } else {
+                    let sGrades = gradesMap[subject.name] ?? []
+                    // Only Schulaufgabe triggers withSchulaufgaben mode (not Kurzarbeit)
+                    let hasSchulaufgabe = sGrades.contains { $0.assessmentType == .schulaufgabe }
+                    // Also check for weighted exams in history if needed, but grade-check is usually sufficient for migrated data
+                    if hasSchulaufgabe {
+                        subjectGradingModes[subject.name] = .withSchulaufgaben
+                    } else {
+                        subjectGradingModes[subject.name] = (subject.type == 1) ? .withSchulaufgaben : .withoutSchulaufgaben
+                    }
+                }
+            }
+            
             var currentGradesBySubject: [String: [Grade]] = [:]
             var history: [MSSHistoryChartDataPoint] = []
             
             for event in events {
+                // If halfYear is nil, infer it from date so it's not excluded from calc
+                let effectiveHalfYear = event.halfYear ?? inferHalfYear(from: event.date)
+
+                // Resolve the correct subject with the effective GradingMode
+                guard var subject = subjects.first(where: { $0.name == event.subjectName }) else { continue }
+                if let mode = subjectGradingModes[subject.name] {
+                    // Create a copy with the resolved grading mode to ensure CalculationService uses correct logic
+                    subject = Subject(
+                        name: subject.name,
+                        type: subject.type,
+                        gradingMode: mode, // FORCE effective mode
+                        expectedSchulaufgabenPerTerm: subject.expectedSchulaufgabenPerTerm,
+                        date: subject.date,
+                        order: subject.order,
+                        teacher: subject.teacher,
+                        room: subject.room,
+                        email: subject.email,
+                        alias: subject.alias,
+                        droppedHalfYear: subject.droppedHalfYear,
+                        examSubject: subject.examSubject,
+                        examType: subject.examType,
+                        examPointsEncrypted: subject.examPointsEncrypted,
+                        writtenExamPointsEncrypted: subject.writtenExamPointsEncrypted,
+                        oralExamPointsEncrypted: subject.oralExamPointsEncrypted,
+                        isElective: subject.isElective
+                    )
+                }
+
+                // 2. Pure Type-Based Logic (Ignore Legacy Weight)
+                let gradingMode = subject.gradingMode ?? .withoutSchulaufgaben
+                
+                // A) Determine Type: Trust migrated type, default to .muendlich if missing/nil
+                // (User confirmed data is migrated, so types should be correct)
+                var effectiveType: AssessmentType = event.assessmentType ?? .muendlich
+                
+                // B) Override Type based on Mode
+                if gradingMode == .withoutSchulaufgaben {
+                    effectiveType = .muendlich
+                }
+                
+                // C) Assign Standard Weight based on Type
+                // For FOBOSO block calculation, only Schulaufgabe has weight 2.
+                // Kurzarbeit and muendlich are part of "Sonstige" block with weight 1.
+                let normalizedWeight: Double
+                switch effectiveType {
+                case .schulaufgabe:
+                    normalizedWeight = 2.0
+                case .kurzarbeit:
+                    normalizedWeight = 1.0  // Part of Sonstige, not a block grade
+                default:
+                    normalizedWeight = 1.0
+                }
+
                 let newGrade = Grade(
                     grade: event.grade,
-                    weight: event.weight,
+                    weight: normalizedWeight, 
                     date: event.date,
                     note: nil,
-                    halfYear: event.halfYear,
+                    halfYear: effectiveHalfYear,
                     linkedExamId: nil,
-                    assessmentType: event.assessmentType
+                    assessmentType: effectiveType
                 )
                 
                 var subjectGrades = currentGradesBySubject[event.subjectName] ?? []
@@ -152,23 +235,22 @@ struct MSSHistoryChartView: View {
                 currentGradesBySubject[event.subjectName] = subjectGrades
                 
                 let avg = GradeCalculationService.calculateOverallAverage(
-                    subjects: subjects,
-                    halfYearValueProvider: { subject, halfYear in
-                        guard let gradesForSubject = currentGradesBySubject[subject.name] else { return nil }
+                    subjects: subjects.map { $0.name == subject.name ? subject : $0 }, // Inject our modified subject
+                    halfYearValueProvider: { subj, halfYear in
+                        // Use the modified subject if it matches, to get correct grading mode
+                        let effectiveSubject = (subj.name == subject.name) ? subject : subj
+                        
+                        guard let gradesForSubject = currentGradesBySubject[effectiveSubject.name] else { return nil }
                         return GradeCalculationService.calculateHalfYearAverage(
                             grades: gradesForSubject,
-                            subject: subject,
+                            subject: effectiveSubject,
                             halfYear: halfYear,
-                            effectiveGradeWeight: { _, w in w }
+                            effectiveGradeWeight: { type, w in store.effectiveGradeWeight(subjectType: type, rawWeight: w) } 
                         )
                     },
-                    droppedHalfYearProvider: { subject in
-                        // If includeDropped logic is ON, we return nil (none dropped). 
-                        // Otherwise, we respect the subject's droppedHalfYear.
-                        if includeDropped {
-                            return nil 
-                        }
-                        return subject.droppedHalfYear
+                    droppedHalfYearProvider: { subj in
+                        if includeDropped { return nil }
+                        return subj.droppedHalfYear
                     },
                     halfYearFilter: nil,
                     fachreferat: fr,
@@ -176,12 +258,15 @@ struct MSSHistoryChartView: View {
                     practical: prac,
                     examPoints: ep,
                     schoolType: st,
-                    gradeYear: gy ?? 12
+                    gradeYear: gy ?? 12,
+                    useRawValues: true // Use raw averages for history progression display
                 )
                 
-                let subject = subjects.first(where: { $0.name == event.subjectName })
+
                 // If dropped, skip adding this point to history ENTIRELY
-                let pointIsDropped = !includeDropped && (subject?.droppedHalfYear == event.halfYear)
+                // Fix: explicit check for droppedHalfYear != nil to avoid nil == nil matching
+                // Also check against effectiveHalfYear
+                let pointIsDropped = !includeDropped && (subject.droppedHalfYear != nil && subject.droppedHalfYear == effectiveHalfYear)
                 
                 if pointIsDropped { continue }
                 
@@ -217,7 +302,7 @@ struct MSSHistoryChartView: View {
             .chartYScale(domain: yDomain)
             .chartXAxis {
                 AxisMarks(values: .automatic(desiredCount: 5)) { value in
-                    if let date = value.as(Date.self) {
+                    if value.as(Date.self) != nil {
                         AxisValueLabel(format: .dateTime.day().month(.abbreviated), centered: true)
                             .foregroundStyle(Color.secondary)
                             .font(.caption2)

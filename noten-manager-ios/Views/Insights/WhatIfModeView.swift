@@ -44,32 +44,28 @@ struct WhatIfModeView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity)
-                
-                ScrollView {
-                    VStack(spacing: 20) {
-                        WhatIfHeaderCard(
-                            currentAverage: currentAverage,
-                            simulatedAverage: simulatedAverage ?? currentAverage,
-                            deltaAverage: deltaAverage,
-                            includeDroppedGrades: $store.includeDroppedGrades,
-                            animationsEnabled: store.animationsEnabled
-                        )
+            ScrollView {
+                VStack(spacing: 20) {
+                    WhatIfHeaderCard(
+                        currentAverage: currentAverage,
+                        simulatedAverage: simulatedAverage ?? currentAverage,
+                        deltaAverage: deltaAverage,
+                        includeDroppedGrades: $store.includeDroppedGrades,
+                        animationsEnabled: store.animationsEnabled
+                    )
 
-                        let realDict = realGradesAsGradeDict()
-                        let simDict = combinedGrades()
+                    let realDict = realGradesAsGradeDict()
+                    let simDict = combinedGrades()
 
-                        VStack(spacing: 12) {
-                            ForEach(Array(filteredSubjects.enumerated()), id: \.element.name) { index, subject in
-                                makeSubjectRow(index: index, subject: subject, realDict: realDict, simDict: simDict)
-                            }
+                    VStack(spacing: 12) {
+                        ForEach(Array(filteredSubjects.enumerated()), id: \.element.name) { index, subject in
+                            makeSubjectRow(index: index, subject: subject, realDict: realDict, simDict: simDict)
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 10)
-                    .padding(.bottom, 30)
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+                .padding(.bottom, 30)
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -109,14 +105,15 @@ struct WhatIfModeView: View {
                         store.simulatedGrades.append(entry)
                     }
                 )
-                .presentationDetents([.medium, .large])
+                .environmentObject(store)
                 .presentationBackground {
-                    ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: 0.4)
+                    ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity)
                 }
+                .presentationDetents([.large])
             }
         }
     }
-
+    
     // MARK: - Data Conversion
 
     private func realGradesAsGradeDict() -> [String: [Grade]] {
@@ -177,7 +174,7 @@ struct WhatIfModeView: View {
             subject: subject,
             grades: list,
             dropValue: store.includeDroppedGrades ? nil : subject.droppedHalfYear,
-            effectiveGradeWeight: { self.store.effectiveGradeWeight(subjectType: $0, rawWeight: $1) }
+            effectiveGradeWeight: { [store] in store.effectiveGradeWeight(subjectType: $0, rawWeight: $1) }
         )
     }
 
@@ -190,7 +187,7 @@ struct WhatIfModeView: View {
                     grades: grades,
                     subject: subject,
                     halfYear: halfYear,
-                    effectiveGradeWeight: { self.store.effectiveGradeWeight(subjectType: $0, rawWeight: $1) }
+                    effectiveGradeWeight: { [store] in store.effectiveGradeWeight(subjectType: $0, rawWeight: $1) }
                 )
             },
             droppedHalfYearProvider: { subject in
@@ -237,6 +234,7 @@ struct WhatIfModeView: View {
         .softFadeIn(enabled: store.animationsEnabled, delay: 0.1 + Double(index) * 0.03)
     }
 }
+
 
 // MARK: - Subviews
 
@@ -334,8 +332,8 @@ struct SubjectWhatIfRow: View {
                         .font(.headline.weight(.bold))
                         .foregroundStyle(.primary)
                     
-                    let mode = store.gradingMode(for: subject)
-                    Text(mode == .withSchulaufgaben ? "Schulaufgaben" : "Keine Schulaufgaben")
+
+                    Text(store.gradingMode(for: subject) == .withSchulaufgaben ? "Schulaufgaben" : "Keine Schulaufgaben")
                         .font(.caption2.weight(.medium))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 6)
@@ -664,7 +662,7 @@ struct AddGhostGradeSheet: View {
                                 Label("Halbjahr", systemImage: "calendar")
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(.secondary)
-                                    
+                                
                                 Picker("Halbjahr", selection: $selectedHalfYear) {
                                     Text("1. Halbjahr").tag(1)
                                     Text("2. Halbjahr").tag(2)
@@ -691,10 +689,10 @@ struct AddGhostGradeSheet: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
-                        .padding(.horizontal, 20)
+                        .padding(.bottom, 20)
                 }
-                .padding(16)
-                .padding(.bottom, 20)
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
             }
             .navigationTitle("Neue Simulation")
             .navigationBarTitleDisplayMode(.inline)

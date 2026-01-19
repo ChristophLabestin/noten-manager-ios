@@ -13,6 +13,7 @@ struct ClassDetailView: View {
     @State private var showAddGroupByCodeSheet: Bool = false
     @State private var showAddGroupsSheet: Bool = false
     @State private var showAddBranchSheet: Bool = false
+    @State private var showLinkClassSheet: Bool = false
     @State private var classCourses: [Course] = []
     @State private var isLoadingCourses: Bool = true
     
@@ -99,6 +100,35 @@ struct ClassDetailView: View {
                     warningHint
                         .softFadeIn(enabled: animationsOn, delay: 0.25, offset: 10)
                 }
+                
+                // Join All mandatory courses
+                let unjoinedMandatory = otherCourses.filter { $0.type == .mandatory }
+                if !unjoinedMandatory.isEmpty {
+                    VStack(spacing: 8) {
+                        Button {
+                            Task {
+                                isJoiningAll = true
+                                for course in unjoinedMandatory {
+                                    try? await store.subscribeToBranch(branchCourses: [course])
+                                }
+                                await loadCourses()
+                                isJoiningAll = false
+                            }
+                        } label: {
+                            if isJoiningAll {
+                                ProgressView().tint(.white)
+                            } else {
+                                Label("Allen Pflichtfächern beitreten", systemImage: "person.badge.plus")
+                            }
+                        }
+                        .buttonStyle(SoftTintButtonStyle(accent: .indigo))
+                        
+                        Text("Einige Pflichtfächer sind noch nicht abonniert.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 8)
+                }
             }
             .padding()
             .padding(.bottom, 60)
@@ -124,12 +154,32 @@ struct ClassDetailView: View {
                         Label("Gruppe hinzufügen (Code)", systemImage: "rectangle.and.pencil.and.ellipsis")
                     }
                     
+                    Button {
+                        showLinkClassSheet = true
+                    } label: {
+                        Label("Klasse verknüpfen", systemImage: "link")
+                    }
+                    
                     Divider()
                     
                     Button {
                         showCreateGroupSheet = true
                     } label: {
                         Label("Neue Gruppe (Legacy)", systemImage: "person.3.fill")
+                    }
+                    
+                    Divider()
+                    
+                    Button {
+                        showAddBranchSheet = true
+                    } label: {
+                        Label("Zweig hinzufügen", systemImage: "arrow.triangle.branch")
+                    }
+                    
+                    Button {
+                        showAddGroupsSheet = true
+                    } label: {
+                        Label("Bestehende Gruppe hinzufügen", systemImage: "person.2.badge.plus")
                     }
                 } label: {
                     Image(systemName: "plus")
@@ -164,6 +214,10 @@ struct ClassDetailView: View {
                 Task { await loadCourses() }
             })
             .environmentObject(store)
+        }
+        .sheet(isPresented: $showLinkClassSheet) {
+            LinkClassSheet(sourceClassId: classId)
+                .environmentObject(store)
         }
     }
     
@@ -415,16 +469,31 @@ struct CourseRow: View {
         isSubscribed ? .green : .cyan
     }
     
+    @EnvironmentObject var store: GradesStore
+    @State private var isProcessing: Bool = false
+    
     var body: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(accentColor.opacity(0.1))
-                    .frame(width: 42, height: 42)
-                Image(systemName: isSubscribed ? "checkmark.circle.fill" : "book.fill")
-                    .font(.system(size: 18))
-                    .foregroundStyle(accentColor)
+        Button {
+            Task {
+                isProcessing = true
+                try? await store.toggleCourseSubscription(course: course)
+                isProcessing = false
             }
+        } label: {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(accentColor.opacity(0.1))
+                        .frame(width: 42, height: 42)
+                    
+                    if isProcessing {
+                        ProgressView().scaleEffect(0.8)
+                    } else {
+                        Image(systemName: isSubscribed ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 18))
+                            .foregroundStyle(accentColor)
+                    }
+                }
             
             VStack(alignment: .leading, spacing: 4) {
                 Text(course.name)
@@ -449,6 +518,9 @@ struct CourseRow: View {
                 .buttonStyle(.plain)
             }
         }
+        .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
         .padding(.horizontal, 12)
         .padding(.vertical, 14)
         .alert("Kurs löschen?", isPresented: $showDeleteConfirmation) {
@@ -1135,5 +1207,71 @@ struct AddBranchSheet: View {
         }
         
         isCreating = false
+    }
+}
+
+// MARK: - Link Class Sheet
+
+struct LinkClassSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var store: GradesStore
+    
+    let sourceClassId: String
+    
+    @State private var targetCode: String = ""
+    @State private var isLinking: Bool = false
+    @State private var errorMessage: String?
+    
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Klassencode (Ziel)", text: $targetCode)
+                        .textInputAutocapitalization(.characters)
+                        .font(.body.monospaced())
+                } header: {
+                    Text("Andere Klasse verknüpfen")
+                } footer: {
+                    Text("Nutzer, die deiner Klasse beitreten, bekommen die Option, auch dieser verknüpften Klasse beizutreten.")
+                }
+                
+                if let error = errorMessage {
+                    Section {
+                        Text(error)
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle("Klasse verknüpfen")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") { dismiss() }
+                }
+                
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Verknüpfen") {
+                        Task { await linkClass() }
+                    }
+                    .disabled(targetCode.isEmpty || isLinking)
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+    
+    @MainActor
+    private func linkClass() async {
+        isLinking = true
+        errorMessage = nil
+        
+        do {
+            try await store.linkClass(sourceId: sourceClassId, targetCode: targetCode)
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        
+        isLinking = false
     }
 }

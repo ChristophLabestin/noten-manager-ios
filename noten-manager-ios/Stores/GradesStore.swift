@@ -263,6 +263,7 @@ struct SchoolClass: Identifiable, Codable {
     let groupIds: [String]
     let createdAt: Date
     var config: ClassConfiguration?
+    var linkedClassIds: [String]? // IDs (Codes) of other classes linked to this one
     // Display helper
     var fetchedGroups: [GroupDetails]?
     var memberCount: Int?
@@ -354,6 +355,17 @@ final class GradesStore: ObservableObject {
     @Published var isPrivacyModeActive: Bool = false
     @Published var lastSeenVersion: String? = nil
     @Published var alwaysEnablePrivacyOnStart: Bool = false
+    @Published var mssDecimalPrecision: Int = 2 // 0, 1, or 2 decimal places for MSS display
+    @Published var showSubjectsAsGrid: Bool = false
+    
+    var maxDroppableHalfYears: Int {
+        GradeCalculationService.calculateMaxDroppableHalfYears(
+            subjects: subjects,
+            schoolType: schoolType,
+            grade: gradeYear ?? 0
+        )
+    }
+    @Published var showNextExamCard: Bool = true // Calendar View Setting
 
     var preferredColorScheme: ColorScheme? {
         switch darkModeMode {
@@ -362,6 +374,12 @@ final class GradesStore: ObservableObject {
         default: return nil
         }
     }
+    
+    func formatMSS(_ value: Double?) -> String {
+        guard let v = value else { return "-" }
+        return String(format: "%.\(mssDecimalPrecision)f", v)
+    }
+    
     @Published var gradeYear: Int? = nil // 11, 12 oder 13
     @Published var schoolType: SchoolType = .bos
     @Published var activeSchoolYearId: String? = nil // z. B. "2025-26"
@@ -386,12 +404,13 @@ final class GradesStore: ObservableObject {
     @Published var subscribedCourseIds: [String] = []
     @Published var courses: [Course] = []
     @Published var migratedGroupIds: Set<String> = [] // Groups that have been upgraded to Classes
+    @Published var activeClassId: String? = nil // Context: The class currently being attended in this year
 
     // MARK: - Simulations (Session-only, not local to views)
-    @Published var simulatedGrades: [SimulatedGradeEntry] = []
-    @Published var excludedRealGradeIds: Set<String> = []
-    @Published var includeDroppedGrades: Bool = false
-    @Published var simulatedExamPointsDict: [String: Double] = [:]
+    @Published var simulatedGrades: [SimulatedGradeEntry] = [] { didSet { saveSimulations() } }
+    @Published var excludedRealGradeIds: Set<String> = [] { didSet { saveSimulations() } }
+    @Published var includeDroppedGrades: Bool = false { didSet { saveSimulations() } }
+    @Published var simulatedExamPointsDict: [String: Double] = [:] { didSet { saveSimulations() } }
 
 
 
@@ -985,6 +1004,7 @@ final class GradesStore: ObservableObject {
     private func startSchoolYearsListener(uid: String) {
         if schoolYearsCollectionListener != nil { return }
         schoolYearsCollectionListener = db.collection("users").document(uid).collection("schoolYears")
+            .order(by: "id", descending: true)
             .addSnapshotListener { [weak self] snapshot, error in
                 ErrorLoggingService.logErrorIfEnabled(error)
                 Task { @MainActor in
@@ -2493,7 +2513,7 @@ final class GradesStore: ObservableObject {
                     subjectKey: exam.subjectKey,
                     title: exam.title,
                     notes: exam.notes,
-                    date: rescheduledDate, // Apply rescheduled date
+                    date: rescheduledDate, // Use rescheduled date
                     hasTime: exam.hasTime,
                     weight: exam.weight,
                     customWeight: exam.customWeight,
@@ -2730,6 +2750,31 @@ final class GradesStore: ObservableObject {
         compactView = (data["compactView"] as? Bool) ?? compactView
         animationsEnabled = (data["animationsEnabled"] as? Bool) ?? animationsEnabled
         showHolidayHints = (data["holidayHintsEnabled"] as? Bool) ?? showHolidayHints
+        if let precision = data["mssDecimalPrecision"] as? Int, (0...2).contains(precision) {
+            mssDecimalPrecision = precision
+        }
+        
+        if let showGrid = data["showSubjectsAsGrid"] as? Bool {
+            showSubjectsAsGrid = showGrid
+            UserDefaults.standard.set(showGrid, forKey: "grades_showSubjectsAsGrid")
+        }
+        
+        if let nextCard = data["showNextExamCard"] as? Bool {
+            showNextExamCard = nextCard
+            UserDefaults.standard.set(nextCard, forKey: "showNextExamCard") // Using raw key from AppStorage
+        } else if UserDefaults.standard.object(forKey: "showNextExamCard") != nil {
+            showNextExamCard = UserDefaults.standard.bool(forKey: "showNextExamCard")
+        }
+        
+        
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: "grades_showSubjectsAsGrid") != nil {
+            showSubjectsAsGrid = defaults.bool(forKey: "grades_showSubjectsAsGrid")
+        } else if defaults.object(forKey: "isSubjectGridView") != nil {
+            // Migration from legacy AppStorage key
+            showSubjectsAsGrid = defaults.bool(forKey: "isSubjectGridView")
+            defaults.set(showSubjectsAsGrid, forKey: "grades_showSubjectsAsGrid")
+        }
 
         if let themeVal = data["theme"] as? String, ["default","feminine"].contains(themeVal) {
             theme = themeVal
@@ -2788,20 +2833,8 @@ final class GradesStore: ObservableObject {
             }
         }
         
-        if let subs = data["subscribedCourseIds"] as? [String] {
-            let unique = Array(Set(subs)).sorted()
-            if unique != subscribedCourseIds {
-                subscribedCourseIds = unique
-                Task { [weak self] in self?.startCoursesListener() }
-            }
-        } else {
-             if !subscribedCourseIds.isEmpty {
-                 subscribedCourseIds = []
-                 coursesListener?.remove()
-                 coursesListener = nil
-                 courses = []
-             }
-        }
+        // subscribedCourseIds logic moved to applySchoolYearSettings (Ascension Architecture)
+        // Legacy "subscribedCourseIds" in User Profile is only used as fallback in applySchoolYearSettings.
 
         // Admin support access
         adminAccessGranted = (data["adminAccessGranted"] as? Bool) ?? false
@@ -2830,6 +2863,61 @@ final class GradesStore: ObservableObject {
 
     private func applySchoolYearSettings(from data: [String: Any], uid: String, fallbackUserData: [String: Any]? = nil) {
         let fallback = fallbackUserData ?? [:]
+        
+        // --- Class Ascension Logic ---
+        // 1. Try to load from School Year (Current Architecture)
+        var needsMigrationWrite = false
+        var migrationUpdate: [String: Any] = [:]
+        
+        if let yearActiveId = data["activeClassId"] as? String {
+             activeClassId = yearActiveId
+        } else if let fbActiveId = fallback["activeClassId"] as? String {
+             // Fallback to user profile (Legacy/Migration)
+             activeClassId = fbActiveId
+             // JIT Migration: Write to year doc so we don't rely on fallback next time
+             // Only if we found something to migrate
+             if !fbActiveId.isEmpty {
+                 needsMigrationWrite = true
+                 migrationUpdate["activeClassId"] = fbActiveId
+             }
+        } else {
+             // Missing in Both -> Reset
+             activeClassId = nil
+        }
+        
+        if let yearSubs = data["subscribedCourseIds"] as? [String] {
+            let unique = Array(Set(yearSubs)).sorted()
+            if unique != subscribedCourseIds {
+                subscribedCourseIds = unique
+                Task { [weak self] in self?.startCoursesListener() }
+            }
+        } else if let fbSubs = fallback["subscribedCourseIds"] as? [String] {
+             // Fallback
+             let unique = Array(Set(fbSubs)).sorted()
+            if unique != subscribedCourseIds {
+                subscribedCourseIds = unique
+                Task { [weak self] in self?.startCoursesListener() }
+            }
+            if !unique.isEmpty {
+                needsMigrationWrite = true
+                migrationUpdate["subscribedCourseIds"] = unique
+            }
+        } else {
+             // No subscriptions in year OR user profile -> clear if not empty
+             if !subscribedCourseIds.isEmpty {
+                 subscribedCourseIds = []
+                 coursesListener?.remove()
+                 coursesListener = nil
+                 courses = []
+             }
+        }
+        
+        if needsMigrationWrite, let yearId = activeSchoolYearId {
+            Task {
+                let yearRef = db.collection("users").document(uid).collection("schoolYears").document(yearId)
+                try? await yearRef.setData(migrationUpdate, merge: true)
+            }
+        }
 
         let yearExamGroupIds = data["examGroupIds"] as? [String]
         let fbExamGroupIds = fallback["examGroupIds"] as? [String]
@@ -3043,6 +3131,13 @@ final class GradesStore: ObservableObject {
         }
         darkMode = effectiveDarkMode(for: darkModeMode)
         lastSeenVersion = defaults.string(forKey: "grades_lastSeenVersion")
+        
+        if defaults.object(forKey: "showNextExamCard") != nil {
+            showNextExamCard = defaults.bool(forKey: "showNextExamCard")
+        } else {
+            showNextExamCard = true
+        }
+
         if defaults.object(forKey: "grades_standardRemindersEnabled") != nil {
             standardRemindersEnabled = defaults.bool(forKey: "grades_standardRemindersEnabled")
         }
@@ -3061,6 +3156,9 @@ final class GradesStore: ObservableObject {
         } else {
             showHolidayHints = true
         }
+        if let precision = defaults.object(forKey: "grades_mssDecimalPrecision") as? Int, (0...2).contains(precision) {
+            mssDecimalPrecision = precision
+        }
 
         hasSeenClassesOnboarding = defaults.bool(forKey: "grades_hasSeenClassesOnboarding")
 
@@ -3070,6 +3168,7 @@ final class GradesStore: ObservableObject {
             isPrivacyModeActive = true
         }
         Task { await self.applyAppIconSelectionIfNeeded() }
+        loadSimulations()
     }
 
     func clearGradeSimulations() {
@@ -3080,6 +3179,40 @@ final class GradesStore: ObservableObject {
 
     func clearExamSimulations() {
         simulatedExamPointsDict = [:]
+    }
+
+    // MARK: - Simulation Persistence
+    private func loadSimulations() {
+        let defaults = UserDefaults.standard
+        if let data = defaults.data(forKey: "grades_simulatedGrades"),
+           let decoded = try? JSONDecoder().decode([SimulatedGradeEntry].self, from: data) {
+            simulatedGrades = decoded
+        }
+        if let data = defaults.data(forKey: "grades_excludedRealGradeIds"),
+           let decoded = try? JSONDecoder().decode(Set<String>.self, from: data) {
+            excludedRealGradeIds = decoded
+        }
+        if defaults.object(forKey: "grades_includeDroppedGrades") != nil {
+            includeDroppedGrades = defaults.bool(forKey: "grades_includeDroppedGrades")
+        }
+        if let data = defaults.data(forKey: "grades_simulatedExamPointsDict"),
+           let decoded = try? JSONDecoder().decode([String: Double].self, from: data) {
+            simulatedExamPointsDict = decoded
+        }
+    }
+
+    private func saveSimulations() {
+        let defaults = UserDefaults.standard
+        if let encoded = try? JSONEncoder().encode(simulatedGrades) {
+            defaults.set(encoded, forKey: "grades_simulatedGrades")
+        }
+        if let encoded = try? JSONEncoder().encode(excludedRealGradeIds) {
+            defaults.set(encoded, forKey: "grades_excludedRealGradeIds")
+        }
+        defaults.set(includeDroppedGrades, forKey: "grades_includeDroppedGrades")
+        if let encoded = try? JSONEncoder().encode(simulatedExamPointsDict) {
+            defaults.set(encoded, forKey: "grades_simulatedExamPointsDict")
+        }
     }
         
 
@@ -3887,6 +4020,45 @@ final class GradesStore: ObservableObject {
         return code
     }
     
+    func linkClass(sourceId: String, targetCode: String) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
+        }
+        
+        // Check ownership
+        guard classOwners[sourceId] == uid else {
+             throw NSError(domain: "GradesStore", code: -4, userInfo: [NSLocalizedDescriptionKey: "Keine Berechtigung"])
+        }
+        
+        let code = normalizedExamGroupCode(targetCode)
+        guard !code.isEmpty else {
+             throw NSError(domain: "GradesStore", code: -2, userInfo: [NSLocalizedDescriptionKey: "Ungültiger Code"])
+        }
+        
+        // Verify target exists
+        let targetDoc = try await db.collection("classes").document(code).getDocument()
+        guard targetDoc.exists else {
+             throw NSError(domain: "GradesStore", code: -3, userInfo: [NSLocalizedDescriptionKey: "Zielklasse nicht gefunden"])
+        }
+        
+        // Update source
+        try await db.collection("classes").document(sourceId).updateData([
+            "linkedClassIds": FieldValue.arrayUnion([code])
+        ])
+        
+        // Local update if already fetched
+        if var details = classDetails[sourceId] {
+            var current = details.linkedClassIds ?? []
+            if !current.contains(code) {
+                current.append(code)
+                details.linkedClassIds = current
+                await MainActor.run {
+                    classDetails[sourceId] = details
+                }
+            }
+        }
+    }
+    
     // MARK: - New Course-Based Class Creation
     
     struct ClassCreationConfiguration {
@@ -3933,8 +4105,10 @@ final class GradesStore: ObservableObject {
          let yearRef = try await requireYearRef(uid: uid)
          batch.updateData(["classIds": FieldValue.arrayUnion([code])], forDocument: yearRef)
          
+         let commonSubjects = Array(Set(config.commonSubjects))
+         
          // 2. Create Common Courses
-         for subject in config.commonSubjects {
+         for subject in commonSubjects {
              let courseRef = db.collection("courses").document()
              let course = Course(
                  id: courseRef.documentID,
@@ -3969,12 +4143,34 @@ final class GradesStore: ObservableObject {
          
          try await batch.commit()
          
+         // 4. Auto-subscribe creator to mandatory courses
+         let mandatoryCourses = try await fetchCoursesForClass(classId: code).filter { $0.type == .mandatory }
+         let mandatoryIds = mandatoryCourses.map { $0.id }
+         if let yearRef = try? await requireYearRef(uid: uid) {
+             var updates: [String: Any] = ["activeClassId": code]
+             if !mandatoryIds.isEmpty {
+                 updates["subscribedCourseIds"] = FieldValue.arrayUnion(mandatoryIds)
+             }
+             try? await yearRef.updateData(updates)
+             // Also update user profile for legacy
+             let userRef = db.collection("users").document(uid)
+             if !mandatoryIds.isEmpty {
+                 try? await userRef.updateData(["subscribedCourseIds": FieldValue.arrayUnion(mandatoryIds)])
+             }
+         }
+
          // Local update
          await MainActor.run {
             if !classIds.contains(code) {
                 classIds.append(code)
                 classNames[code] = config.name
                 classOwners[code] = uid
+                self.activeClassId = code
+                for id in mandatoryIds {
+                    if !subscribedCourseIds.contains(id) {
+                        subscribedCourseIds.append(id)
+                    }
+                }
             }
          }
          
@@ -4025,17 +4221,16 @@ final class GradesStore: ObservableObject {
          let yearRef = try await requireYearRef(uid: uid)
          batch.updateData(["classIds": FieldValue.arrayUnion([classId])], forDocument: yearRef)
          
-         let userRef = db.collection("users").document(uid)
-         // Assuming single active class for simplicity, or just update the list.
-         // Also update subscriptions
+         // 2. Update School Year with Class Context
+         // Migrated from User Profile to School Year for "Ascension" support
          let courseIds = selectedCourses.map { $0.id }
          if !courseIds.isEmpty {
              batch.updateData([
                 "subscribedCourseIds": FieldValue.arrayUnion(courseIds),
-                "activeClassId": classId // Set as primary/active
-             ], forDocument: userRef)
+                "activeClassId": classId
+             ], forDocument: yearRef)
          } else {
-             batch.updateData(["activeClassId": classId], forDocument: userRef)
+             batch.updateData(["activeClassId": classId], forDocument: yearRef)
          }
          
          try await batch.commit()
@@ -4043,7 +4238,7 @@ final class GradesStore: ObservableObject {
          // Local update handled by listeners
     }
     
-    func fetchClassInfo(with rawCode: String) async throws -> (id: String, name: String, config: ClassConfiguration?) {
+    func fetchClassInfo(with rawCode: String) async throws -> (id: String, name: String, config: ClassConfiguration?, linkedClassIds: [String]?) {
         guard Auth.auth().currentUser != nil else {
              throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
         }
@@ -4059,6 +4254,7 @@ final class GradesStore: ObservableObject {
         }
         
         let name = data["name"] as? String ?? "Unbenannte Klasse"
+        let linkedClassIds = data["linkedClassIds"] as? [String]
         
         var config: ClassConfiguration? = nil
         if let configData = data["courseConfiguration"] as? [String: Any] {
@@ -4069,7 +4265,7 @@ final class GradesStore: ObservableObject {
             }
         }
         
-        return (code, name, config)
+        return (code, name, config, linkedClassIds)
     }
     
     func fetchCoursesForClass(classId: String) async throws -> [Course] {
@@ -4100,9 +4296,22 @@ final class GradesStore: ObservableObject {
          if let coursesRequest = try? await db.collection("courses").whereField("classId", isEqualTo: code).getDocuments() {
              let courseIdsToRemove = coursesRequest.documents.map { $0.documentID }
              if !courseIdsToRemove.isEmpty {
+                 // Remove from User Profile
                  try? await userRef.updateData([
                      "subscribedCourseIds": FieldValue.arrayRemove(courseIdsToRemove)
                  ])
+                 
+                 // Remove from SchoolYear (Active Year)
+                 if let yearRef = try? await requireYearRef(uid: uid) {
+                     try? await yearRef.updateData([
+                         "subscribedCourseIds": FieldValue.arrayRemove(courseIdsToRemove)
+                     ])
+                 }
+                 
+                 // Local Cleanup
+                 await MainActor.run {
+                     self.subscribedCourseIds.removeAll { courseIdsToRemove.contains($0) }
+                 }
              }
          }
          
@@ -4111,15 +4320,19 @@ final class GradesStore: ObservableObject {
          if let userDoc = try? await userRef.getDocument(),
             let currentActive = userDoc.data()?["activeClassId"] as? String,
             currentActive == code {
-             try? await userRef.updateData(["activeClassId": FieldValue.delete()])
+             try? await userRef.updateData([
+                 "activeClassId": FieldValue.delete(),
+                 "activeSchoolYearId": FieldValue.delete()
+             ])
+             await MainActor.run {
+                 self.activeSchoolYearId = nil
+             }
          }
 
          await MainActor.run {
              classIds.removeAll { $0 == code }
              classNames.removeValue(forKey: code)
              classDetails.removeValue(forKey: code)
-             // Clean up subscribedCourseIds local state implicitly via listener or refresh
-             // But strictly speaking we should remove them from `subscribedCourseIds` locally too if not waiting for listener
          }
     }
 
@@ -4220,7 +4433,7 @@ final class GradesStore: ObservableObject {
         // 3. Fetch Subjects
         let subjectsSnapshot = try await groupRef.collection("subjects").getDocuments()
         let subjectDocs = subjectsSnapshot.documents
-        let subjects = subjectDocs.compactMap { $0.data()["name"] as? String }
+        let subjects = Array(Set(subjectDocs.compactMap { $0.data()["name"] as? String }))
         
         guard !subjects.isEmpty else {
              throw NSError(domain: "GradesStore", code: -5, userInfo: [NSLocalizedDescriptionKey: "Die Gruppe hat keine Fächer."])
@@ -4536,7 +4749,7 @@ final class GradesStore: ObservableObject {
         
         // Fetch subjects from the group
         let subjectsSnapshot = try await groupRef.collection("subjects").getDocuments()
-        let subjects = subjectsSnapshot.documents.compactMap { $0.data()["name"] as? String }
+        let subjects = Array(Set(subjectsSnapshot.documents.compactMap { $0.data()["name"] as? String }))
         
         guard !subjects.isEmpty else {
             throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Gruppe hat keine Fächer"])
@@ -4683,6 +4896,12 @@ final class GradesStore: ObservableObject {
             "subscribedCourseIds": FieldValue.arrayUnion(courseIds)
         ])
         
+        if let yearRef = try? await requireYearRef(uid: uid) {
+            try await yearRef.updateData([
+                "subscribedCourseIds": FieldValue.arrayUnion(courseIds)
+            ])
+        }
+        
         await MainActor.run {
             for id in courseIds {
                 if !subscribedCourseIds.contains(id) {
@@ -4704,10 +4923,25 @@ final class GradesStore: ObservableObject {
             "subscribedCourseIds": FieldValue.arrayRemove(courseIds)
         ])
         
+        if let yearRef = try? await requireYearRef(uid: uid) {
+            try await yearRef.updateData([
+                "subscribedCourseIds": FieldValue.arrayRemove(courseIds)
+            ])
+        }
+        
         await MainActor.run {
             subscribedCourseIds.removeAll { courseIds.contains($0) }
         }
     }
+    
+    func toggleCourseSubscription(course: Course) async throws {
+        if subscribedCourseIds.contains(course.id) {
+            try await unsubscribeFromBranch(branchCourses: [course])
+        } else {
+            try await subscribeToBranch(branchCourses: [course])
+        }
+    }
+
     
     /// Creates a new branch in an existing class with the specified subjects/courses.
     /// - Parameter classId: The ID of the class.
@@ -5252,6 +5486,7 @@ final class GradesStore: ObservableObject {
         } else {
             subjects = subjects.map { $0.name == name ? s : $0 }
         }
+        await MainActor.run { self.objectWillChange.send() }
     }
 
     func importSubjectsFromGroups(groupIds: [String]? = nil, allowedNames: Set<String>? = nil) async -> Int {
@@ -7268,7 +7503,10 @@ final class GradesStore: ObservableObject {
                            darkModeMode: String? = nil,
                            compactView: Bool? = nil,
                            animationsEnabled: Bool? = nil,
-                           holidayHintsEnabled: Bool? = nil) async {
+                           holidayHintsEnabled: Bool? = nil,
+                           mssDecimalPrecision: Int? = nil,
+                           showNextExamCard: Bool? = nil,
+                           showSubjectsAsGrid: Bool? = nil) async {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         let clampedIntensity = themeIntensity.map { max(0, min(1, $0)) }
 
@@ -7286,6 +7524,9 @@ final class GradesStore: ObservableObject {
         if let compactView { self.compactView = compactView }
         if let animationsEnabled { self.animationsEnabled = animationsEnabled }
         if let holidayHintsEnabled { self.showHolidayHints = holidayHintsEnabled }
+        if let mssDecimalPrecision, (0...2).contains(mssDecimalPrecision) { self.mssDecimalPrecision = mssDecimalPrecision }
+        if let showNextExamCard { self.showNextExamCard = showNextExamCard }
+        if let showSubjectsAsGrid { self.showSubjectsAsGrid = showSubjectsAsGrid }
 
         // lokal speichern, damit Einstellungen direkt beim App-Start verfügbar sind
         let defaults = UserDefaults.standard
@@ -7296,6 +7537,9 @@ final class GradesStore: ObservableObject {
         if let compactView { defaults.set(compactView, forKey: "grades_compactView") }
         if let animationsEnabled { defaults.set(animationsEnabled, forKey: "grades_animationsEnabled") }
         if let holidayHintsEnabled { defaults.set(holidayHintsEnabled, forKey: "grades_showHolidayHints") }
+        if let mssDecimalPrecision { defaults.set(mssDecimalPrecision, forKey: "grades_mssDecimalPrecision") }
+        if let showNextExamCard { defaults.set(showNextExamCard, forKey: "showNextExamCard") }
+        if let showSubjectsAsGrid { defaults.set(showSubjectsAsGrid, forKey: "grades_showSubjectsAsGrid") }
 
         var payload: [String: Any] = [:]
         if let theme { payload["theme"] = theme }
@@ -7305,6 +7549,9 @@ final class GradesStore: ObservableObject {
         if let compactView { payload["compactView"] = compactView }
         if let animationsEnabled { payload["animationsEnabled"] = animationsEnabled }
         if let holidayHintsEnabled { payload["holidayHintsEnabled"] = holidayHintsEnabled }
+        if let mssDecimalPrecision { payload["mssDecimalPrecision"] = mssDecimalPrecision }
+        if let showNextExamCard { payload["showNextExamCard"] = showNextExamCard }
+        if let showSubjectsAsGrid { payload["showSubjectsAsGrid"] = showSubjectsAsGrid }
 
         guard !payload.isEmpty else { return }
         do {
@@ -7788,6 +8035,16 @@ final class GradesStore: ObservableObject {
             }
             // Delete the subject document itself
             try await subjectRef.delete()
+            
+            // Remove from subscribedCourseIds if needed
+            if subscribedCourseIds.contains(subjectName) {
+                var updated = subscribedCourseIds
+                updated.removeAll { $0 == subjectName }
+                try? await yearRef.setData(["subscribedCourseIds": updated], merge: true)
+                await MainActor.run {
+                    self.subscribedCourseIds = updated
+                }
+            }
 
             // Optimistically update local state
             await MainActor.run {

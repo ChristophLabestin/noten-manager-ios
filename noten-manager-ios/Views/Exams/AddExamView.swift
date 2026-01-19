@@ -55,7 +55,7 @@ struct AddExamView: View {
         case .withSchulaufgaben:
             return [
                 ("Schulaufgabe", 2, .schulaufgabe),
-                ("Kurzarbeit", 1, .kurzarbeit),
+                ("Kurzarbeit", 2, .kurzarbeit),
                 ("Mündlich / EX", 1, .muendlich)
             ]
         case .withoutSchulaufgaben:
@@ -108,6 +108,21 @@ struct AddExamView: View {
             return combine(date: date, with: time)
         }
         return Calendar.current.startOfDay(for: date)
+    }
+
+    /// Sync examWeight and examAssessmentType to first option for the given subject's grading mode.
+    /// This ensures that if the user doesn't manually change the weight picker, the assessmentType
+    /// is still correctly set based on the subject type.
+    private func syncWeightAndTypeForSubject(_ name: String) {
+        guard !isGeneralEvent && !isFachreferatEvent else { return }
+        guard !useCustomWeight else { return }
+        let gm = gradingMode(for: name)
+        let options = weightOptions(for: gm)
+        // Set to first option (usually Schulaufgabe for Hauptfach, Kurzarbeit for Nebenfach)
+        if let first = options.first {
+            examWeight = first.value
+            examAssessmentType = first.type
+        }
     }
 
     private func combine(date: Date, with time: Date) -> Date {
@@ -455,6 +470,9 @@ struct AddExamView: View {
                 let initialSubject = isFachreferatEvent ? fachreferatSubjectName : subjectName
                 updateSelectedGroupsForSubject(initialSubject)
                 shareWithGroup = !selectedGroupIds.isEmpty
+                
+                // Sync weight/type defaults for initial subject
+                syncWeightAndTypeForSubject(subjectName)
             }
             .onChange(of: subjectName) { _, newSubject in
                 if !isGeneralEvent && !isFachreferatEvent {
@@ -462,6 +480,8 @@ struct AddExamView: View {
                     if !selectedGroupIds.isEmpty {
                         shareWithGroup = true
                     }
+                    // Sync weight/type when subject changes
+                    syncWeightAndTypeForSubject(newSubject)
                 }
             }
             .onChange(of: fachreferatSubjectName) { _, newSubject in

@@ -14,60 +14,82 @@ This skill defines how to handle grade calculations in `noten-manager-ios`, ensu
 *   **Grades**: 1 to 6 (standard German grades), derived from points.
     *   `GradeCalculationService.pointsToGrade(points: Double)`
 
-### 2. Grading Modes (`GradingMode`)
-Subjects can be graded in two main modes, affecting weighting:
-*   **`withSchulaufgaben`**:
-    *   **Schulaufgabe** (Exam): Weight 2.0 (usually).
-    *   **Kurzarbeit/Stegreifaufgabe**: Weight 1.0.
-    *   **Mündlich**: Weight 1.0.
-    *   *Note*: Sometimes simplified to 2:1 ratio for "Written" vs "Oral".
-*   **`withoutSchulaufgaben`**:
-    *   All grades are typically equal weight or follow specific small-scale weighting.
+### 2. Assessment Types (`AssessmentType`)
+Each grade must have an explicit `assessmentType`:
+*   **`.schulaufgabe`**: Written exam (Schulaufgabe). Weight typically 2.0 in Hauptfach.
+*   **`.kurzarbeit`**: Short written test. Part of "Sonstige" block in Hauptfach.
+*   **`.muendlich`**: Oral grade, Stegreifaufgabe, or other participation. Part of "Sonstige" block.
 
-### 3. Half-Year Calculations
-*   **Formula**: `(Sum of (Grade * Weight)) / (Sum of Weights)`.
-*   **Rounding**: Calculations are generally exact internally, but formatted to 0-2 decimal places for display. **HJE (Halbjahresergebnisse)** are integers (0-15).
+### 3. Grading Modes (`GradingMode`)
+Subjects can be graded in two modes:
+*   **`withSchulaufgaben`** (Hauptfach):
+    *   Uses FOBOSO block weighting formula.
+    *   Each Schulaufgabe = 1 block.
+    *   All other grades (Kurzarbeit + mündlich) = 1 combined "Sonstige" block.
+*   **`withoutSchulaufgaben`** (Nebenfach):
+    *   Simple weighted average of all grades.
 
-### 4. Overall Average (Schnitt)
-The "Schnitt" (Average) shown in the app works differently depending on the view:
+### 4. FOBOSO Block Weighting Formula
 
-*   **Home/Insights ("Status" View)**:
-    *   Uses `GradeCalculationService.calculateOverallAverage`.
-    *   Logic: Average of the *valid half-year values* of all subjects.
-    *   **Logic**:
-        ```swift
-        Avg = Sum(SubjectAverage) / Count(Subjects)
-        ```
-    *   *SubjectAverage*: `(H1 + H2) / 2` (if both exist), or just the existing one.
-    *   **Crucial**: Dropped half-years (`subject.droppedHalfYear`) are EXCLUDED.
+**For Hauptfächer (subjects with Schulaufgaben):**
 
-*   **Abitur Prognosis (Report Card)**:
-    *   Uses `GradeCalculator.calculate()`.
-    *   Includes "Fachreferat", "Seminararbeit", and "Fachpraktische Ausbildung" in strict weighting buckets.
-    *   Calculates "Total Points" (max 900) vs. simple "Average".
+```
+HJE = (SonstigeAvg + SA₁ + SA₂ + ...) / (1 + AnzahlSAs)
+```
+
+Where:
+- `SonstigeAvg` = Weighted average of all non-Schulaufgabe grades (Kurzarbeiten + mündlich)
+- `SA₁, SA₂, ...` = Individual Schulaufgabe points
+- `AnzahlSAs` = Number of Schulaufgaben
+
+**Example:** SA=10, KA=8, MÜ=12
+- SonstigeAvg = (8 + 12) / 2 = 10
+- HJE = (10 + 10) / 2 = 10.0
+
+**For Nebenfächer (subjects without Schulaufgaben):**
+```
+HJE = Sum(Grade × Weight) / Sum(Weights)
+```
+
+### 5. Half-Year Results (HJE)
+*   **Rounding**: HJE values are rounded to integers (0-15) using `roundHJE()` before being used in overall average calculations.
+*   **Rounding rule**: Values ≥0.5 round up, <0.5 round down.
+*   **Final vs Interim**: A final HJE requires all blocks (SA + Sonstige). Otherwise, show interim/range.
+
+### 6. Overall Average (Schnitt)
+
+**Home/Insights View:**
+Uses `GradeCalculationService.calculateOverallAverage`:
+```swift
+Avg = Sum(roundedHJE for each subject) / Count(subjects)
+```
+- Dropped half-years (`subject.droppedHalfYear`) are EXCLUDED.
+- Uses rounded HJE values by default (unless `useRawValues = true`).
+
+**Abitur Prognosis (Report Card):**
+Uses `GradeCalculator.calculate()`:
+- Includes Fachreferat, Seminararbeit, fpA in strict weighting buckets.
+- Calculates total points (max 900) and average.
 
 ## Critical Files
 
-### `Managers/GradeCalculator.swift`
-The high-level orchestrator for the "Report Card" view. It creates a `CalculationResult` containing:
-*   `averageAfterDrops`: The MSS average (0-15) aligned with the Home view.
-*   `totalPoints`: The strict Abitur point sum.
-
-### `Managers/GradeCalculationService.swift` (Implicit)
-Contains the pure math functions:
-*   `calculateHalfYearAverage(...)`
-*   `calculateOverallAverage(...)`
-*   `pointsToGrade(...)`
+| File | Description |
+|------|-------------|
+| `Managers/GradeEngine.swift` | Core FOBOSO block weighting logic |
+| `Managers/GradeCalculationService.swift` | Pure math functions: `calculateHalfYearAverage`, `calculateOverallAverage`, `roundHJE` |
+| `Managers/GradeCalculator.swift` | High-level orchestrator for Report Card view |
+| `Stores/GradesStore.swift` | `bestAvailableHalfYearValue` - bridge to GradeEngine |
 
 ## Common Pitfalls
 
-1.  **Rounding Errors**: Never manually round intermediate steps unless FOBOSO explicitly says to (e.g., HJE are integers). Use `Double` for averages.
-2.  **Dropped Grades**: Always check `subject.droppedHalfYear` before including a subject's HJE in the average.
-3.  **Weighting**: Always check `grade.weight`. Do not assume default weighting (1.0).
-4.  **Assessment Types**: Use `derivedAssessmentType` to handle legacy grades that might miss explicit types.
+1.  **Kurzarbeit is NOT a block grade**: Only Schulaufgabe counts as a block. Kurzarbeit must be averaged with mündlich grades in the "Sonstige" block.
+2.  **AssessmentType must be explicit**: When creating grades from exams, ensure `assessmentType` is correctly set (not just inferred from weight).
+3.  **Rounding Errors**: Use `roundHJE()` only at final HJE stage, not for intermediate calculations.
+4.  **Dropped Grades**: Always check `subject.droppedHalfYear` before including in average.
 
 ## How to Modify Calculations
 
-1.  **Modify `GradeCalculationService`** for low-level math changes.
-2.  **Modify `GradeCalculator`** for high-level aggregation strategy (e.g. how Abitur buckets are formed).
-3.  **Validate** against `GradesStore` computed properties to ensure UI updates.
+1.  **Modify `GradeEngine.computeHalfYear`** for block weighting changes.
+2.  **Modify `GradeCalculationService.calculateHalfYearAverage`** for alternative calculation paths.
+3.  **Modify `GradeCalculator`** for Abitur aggregation strategy.
+4.  **Validate** against `GradesStore.bestAvailableHalfYearValue` to ensure UI updates correctly.

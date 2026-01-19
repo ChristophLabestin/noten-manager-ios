@@ -121,8 +121,7 @@ struct InsightsView: View {
     }
 
     private func formatMSS(_ value: Double?) -> String {
-        guard let v = value else { return "-" }
-        return String(format: "%.2f", v)
+        store.formatMSS(value)
     }
 
     private func gradeColor(_ value: Double?) -> Color {
@@ -229,7 +228,7 @@ struct InsightsView: View {
                 if hj1 != nil || hj2 != nil {
                     SettingsCard(
                         title: "Halbjahre im Vergleich",
-                        subtitle: "Schnitt je Halbjahr",
+                        subtitle: "Streichung: \(store.maxDroppableHalfYears) möglich",
                         systemImage: "rectangle.split.2x1",
                         accent: .cyan
                     ) {

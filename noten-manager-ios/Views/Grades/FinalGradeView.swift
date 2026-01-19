@@ -30,13 +30,14 @@ struct FinalGradeView: View {
     @State private var dropSelections: [String: HalfYearDropOption] = [:]
     @State private var maxDroppedHalfYears: Int = 3
     // State removed: finalGradeTapState, finalGradeToFixed
-    @State private var showHomeworkSheet: Bool = false
-    @State private var showExamSheet: Bool = false
     @State private var showWhatIfGradesSheet: Bool = false
     @State private var showWhatIfSimulationMode: Bool = false
     @State private var showWhatIfExamSheet: Bool = false
     @State private var showSeminarSheet: Bool = false
     @State private var showStatusDetails: Bool = false
+    @State private var detailHomework: Homework? = nil
+    @State private var detailExam: Exam? = nil
+    @State private var dailySummaryData: DailySummaryData? = nil
     @State private var previousYearSnapshot: SchoolYearSnapshot?
     @State private var isLoadingPreviousYear: Bool = false
     @State private var showNotifications: Bool = false
@@ -50,6 +51,7 @@ struct FinalGradeView: View {
     @State private var swapCandidate: SwapCandidate? = nil
     @State private var showManageDrops: Bool = false
     @State private var scrollOffset: CGFloat = 0
+    @State private var useMSSInHero: Bool = false
     
     fileprivate struct SubjectHandle: Identifiable, Hashable {
         let id: String
@@ -158,7 +160,7 @@ struct FinalGradeView: View {
     private var schoolType: SchoolType { store.schoolType }
     private var gradeYear: Int { store.gradeYear ?? 12 }
     private var hasExamSimulation: Bool { !store.simulatedExamPointsDict.isEmpty }
-    private var hasSimulation: Bool { hasExamSimulation || !store.simulatedGrades.isEmpty }
+    private var hasSimulation: Bool { hasExamSimulation || !store.simulatedGrades.isEmpty || !store.excludedRealGradeIds.isEmpty }
     private var activeExamPointsBySubject: [String: Double?] {
         var merged = store.examPoints
         for (key, value) in store.simulatedExamPointsDict {
@@ -179,6 +181,14 @@ struct FinalGradeView: View {
             return chipForegroundColor.opacity(isDark ? 0.30 : 0.15)
         }
         return Color.blue.opacity(0.1)
+    }
+    
+    private var deltaColor: Color {
+        guard let base = baselineFinalGradeValue, let sim = simulatedFinalGradeValue else { return .orange }
+        // Lower grade is better (1.0 vs 2.0)
+        if sim < base { return .green }
+        if sim > base { return .orange }
+        return .secondary
     }
     
     private var hasOverdueHomeworks: Bool {
@@ -314,6 +324,9 @@ struct FinalGradeView: View {
                     showPDFSheet: $showPDFSheet,
                     showSwapOptions: $showSwapOptions,
                     showWhatIfSimulationMode: $showWhatIfSimulationMode,
+                    detailHomework: $detailHomework,
+                    detailExam: $detailExam,
+                    dailySummaryData: $dailySummaryData,
                     store: store,
                     notificationInbox: notificationInbox,
                     examSubjectHandles: examSubjectHandles,
@@ -331,18 +344,24 @@ struct FinalGradeView: View {
                     previousYearSnapshot: previousYearSnapshot,
                     triggerUpdate: triggerUpdate,
                     makeFobosoSummary: { self.makeFobosoSummary(examPoints: $0) },
-                    finalGradeText: { self.finalGradeText(for: $0) }
+                    finalGradeText: { self.finalGradeText(for: $0) },
+                    mergedExamPoints: { self.mergedExamPoints(base: $0, overrides: $1) }
                 ))
                 .onChange(of: store.encryptionKey == nil) { _, _ in
                     Task {
                         await loadPreviousYearSnapshotIfNeeded()
                     }
                 }
-                .task {
+                .onAppear {
                     syncDropSelectionsFromData()
+                    recomputeMaxDroppedHalfYears()
                 }
                 .onChange(of: store.subjects) { _, _ in
                     syncDropSelectionsFromData()
+                    recomputeMaxDroppedHalfYears()
+                }
+                .onChange(of: store.gradeYear) { _, _ in
+                    recomputeMaxDroppedHalfYears()
                 }
                 .toolbar {
                     ToolbarItem(placement: .navigationBarLeading) {
@@ -508,9 +527,25 @@ struct FinalGradeView: View {
                 Text("Abschlussnote")
                     .font(.title2.weight(.bold))
                 HStack(spacing: 6) {
-                    Text("Stand heute")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    if hasSimulation {
+                        HStack(spacing: 4) {
+                            Text("Simulation aktiv")
+                            if !store.excludedRealGradeIds.isEmpty {
+                                Text("•")
+                                Text("\(store.excludedRealGradeIds.count) ausgeklammert")
+                            }
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(Color.pink)
+                        .clipShape(Capsule())
+                    } else {
+                        Text("Stand heute")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
                     
                     if let year = store.activeSchoolYearId {
                         Text("•")
@@ -533,29 +568,48 @@ struct FinalGradeView: View {
         private var heroChips: some View {
             HStack(spacing: 0) {
                 // Left: Valid Grade (Schnitt)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Schnitt")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.secondary)
-                    
-                    ZStack {
-                        Text(finalGradeText)
-                            .font(.system(size: 42, weight: .bold, design: .rounded))
-                            .foregroundStyle(store.isPrivacyModeActive ? .primary : finalGradeColor(finalGradeValueForColor))
-                            .contentTransition(.numericText())
-                            .privacyBlur()
-                            .monospacedDigit()
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(useMSSInHero ? "Schnitt (Pkt)" : "Schnitt")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.secondary)
+                            
+                            Spacer()
+                            
+                            Toggle("", isOn: $useMSSInHero)
+                                .labelsHidden()
+                                .scaleEffect(0.7)
+                                .frame(width: 40, height: 20)
+                        }
                         
-                        if hasExamSimulation {
-                            Image(systemName: "wand.and.stars")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(.pink)
-                                .offset(x: 40, y: -12)
+                        ZStack {
+                            Text(useMSSInHero ? heroMSSValue : finalGradeText)
+                                .font(.system(size: 42, weight: .bold, design: .rounded))
+                                .foregroundStyle(store.isPrivacyModeActive ? .primary : finalGradeColor(finalGradeValueForColor))
+                                .contentTransition(.numericText())
+                                .privacyBlur()
+                                .monospacedDigit()
+                            
+                            if hasSimulation {
+                                Image(systemName: "wand.and.stars")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(.pink)
+                                    .offset(x: 40, y: -12)
+                            }
+                        }
+                        
+                        if !store.excludedRealGradeIds.isEmpty {
+                            Text("\(store.excludedRealGradeIds.count) ausgeklammert")
+                                .font(.system(size: 8, weight: .black))
+                                .foregroundStyle(.orange)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(.orange.opacity(0.1))
+                                .clipShape(Capsule())
+                                .offset(y: -4)
                         }
                     }
-                }
-                // Removed maxWidth: .infinity to give right column more space
-                .frame(minWidth: 100, alignment: .leading)
+                    .frame(minWidth: 120, alignment: .leading)
                 
                 Divider()
                     .frame(height: 44)
@@ -590,7 +644,14 @@ struct FinalGradeView: View {
             .padding(.horizontal, 20)
             .background(GradeCardStyle.surface(colorScheme: scheme, theme: store.theme, accent: .indigo))
             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .overlay(GradeCardStyle.border(colorScheme: scheme, accent: .indigo))
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(
+                        hasSimulation ? Color.pink.opacity(0.5) : GradeCardStyle.borderStrokeColor(colorScheme: scheme, accent: Color.indigo),
+                        lineWidth: hasSimulation ? 2 : 1
+                    )
+            )
             .shadow(
                 color: Color.black.opacity(scheme == .dark ? 0.45 : 0.08),
                 radius: 8,
@@ -614,7 +675,8 @@ struct FinalGradeView: View {
         private var heroMSSText: String {
             guard fobosoSummary.maxPoints > 0 else { return "MSS: -" }
             let avgPoints = (fobosoSummary.totalPoints * 15.0) / Double(fobosoSummary.maxPoints)
-            return "MSS: \(String(format: "%.2f", avgPoints))"
+            // Use raw value for precision, let store.formatMSS handle formatting/rounding preference
+            return "MSS: \(store.formatMSS(avgPoints))"
         }
         
         
@@ -635,11 +697,10 @@ struct FinalGradeView: View {
                         HStack(spacing: 12) {
                             StatChip(title: "Aktuell", value: baselineFinalGradeText, accent: .indigo)
                             StatChip(title: "Simulation", value: finalGradeText, accent: .pink)
-                            StatChip(title: "Δ", value: formatFinalGradeDelta(base: baselineFinalGradeValue, simulated: simulatedFinalGradeValue), accent: .orange)
+                            StatChip(title: "Δ", value: formatFinalGradeDelta(base: baselineFinalGradeValue, simulated: simulatedFinalGradeValue), accent: deltaColor)
                         }
-                        Text(hasSimulation ? "Simulation aktiv: Eingaben werden nicht gespeichert und gelten nur hier." : "Füge fiktive Prüfungsnoten hinzu oder teste zusätzliche Noten – alles bleibt lokal.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+
+
                         
                         HStack(spacing: 12) {
                             Button {
@@ -1374,8 +1435,51 @@ struct FinalGradeView: View {
             }
         }
         
-        private var finalGradeValueForColor: Double? {
-            finalGradeValue(using: activeExamPointsBySubject)
+        /// Calculates the overall average MSS (0-15 points) using the same calculation as HomeView
+        /// This uses raw half-year values without rounding for consistency
+        private func overallAverageMSS(examPoints: [String: Double?], isBaseline: Bool = false) -> Double? {
+            // Filter out excluded real grades when not baseline
+            let subjects = store.subjects
+            
+            return GradeCalculationService.calculateOverallAverage(
+                subjects: subjects,
+                halfYearValueProvider: { [self] subject, hy in
+                    // Use half year values from grades, respecting exclusions when not baseline
+                    if isBaseline {
+                        return store.bestAvailableHalfYearValue(subject: subject, halfYear: hy)
+                    } else {
+                        // Get grades excluding simulated exclusions
+                        let allGrades = store.gradesBySubject[subject.name] ?? []
+                        let filtered = allGrades.filter { !store.excludedRealGradeIds.contains($0.id) }
+                        let ghosts = store.simulatedGrades.filter { $0.subjectName == subject.name }
+                        
+                        let combined: [any GradeProtocol] = filtered + ghosts
+                        return GradeCalculationService.calculateHalfYearAverage(
+                            grades: combined,
+                            subject: subject,
+                            halfYear: hy,
+                            effectiveGradeWeight: { [store] in store.effectiveGradeWeight(subjectType: $0, rawWeight: $1) }
+                        )
+                    }
+                },
+                droppedHalfYearProvider: { subject in
+                    subject.droppedHalfYear
+                },
+                halfYearFilter: nil,
+                fachreferat: store.fachreferat,
+                seminar: store.seminarPerformance,
+                practical: store.practicalPerformance,
+                examPoints: examPoints,
+                schoolType: store.schoolType,
+                gradeYear: store.gradeYear ?? 12,
+                useRawValues: true
+            )
+        }
+        
+        /// Converts MSS (0-15) to grade (1-6) using the standard formula: Grade = (17 - Points) / 3
+        private func mssToGrade(_ mss: Double?) -> Double? {
+            guard let p = mss else { return nil }
+            return (17.0 - p) / 3.0
         }
         
         private var finalGradeText: String {
@@ -1387,17 +1491,28 @@ struct FinalGradeView: View {
         }
         
         private var baselineFinalGradeValue: Double? {
-            finalGradeValue(using: store.examPoints)
+            mssToGrade(overallAverageMSS(examPoints: store.examPoints, isBaseline: true))
         }
         
         private var simulatedFinalGradeValue: Double? {
-            finalGradeValue(using: activeExamPointsBySubject)
+            mssToGrade(overallAverageMSS(examPoints: activeExamPointsBySubject, isBaseline: false))
+        }
+        
+        private var finalGradeValueForColor: Double? {
+            simulatedFinalGradeValue
+        }
+        
+        private func finalGradeRawValue(using points: [String: Double?]) -> Double? {
+            mssToGrade(overallAverageMSS(examPoints: points, isBaseline: false))
         }
         
         private func formatFinalGradeDelta(base: Double?, simulated: Double?) -> String {
             guard let base, let simulated else { return "-" }
             let delta = simulated - base
             if abs(delta) < 0.005 { return "0.00" }
+            // For grades, negative delta is improvement.
+            // But mathematically: New - Old. 1.8 - 2.0 = -0.2.
+            // Display standard numeric delta.
             let prefix = delta > 0 ? "+" : ""
             return "\(prefix)\(String(format: "%.2f", delta))"
         }
@@ -1442,10 +1557,13 @@ struct FinalGradeView: View {
         private func finalGradeValue(using points: [String: Double?]) -> Double? {
             let summary = makeFobosoSummary(examPoints: points)
             if summary.maxPoints > 0 {
-                // Priority: full grade from formula
+                // Priority: use raw grade for precision
+                if let gRaw = summary.gradeRaw { return gRaw }
+                
+                // Fallback to official rounded grade
                 if let g = summary.grade { return g }
                 
-                // Fallback: calculate average grade from total weighted points
+                // Last fallback: calculate average grade from total weighted points
                 let averagePoints = (summary.totalPoints * 15.0) / Double(summary.maxPoints)
                 return pointsToGrade(averagePoints)
             }
@@ -1455,21 +1573,21 @@ struct FinalGradeView: View {
             
         private func finalGradeText(for points: [String: Double?]) -> String {
                 let decimals = 2
-                let summary = makeFobosoSummary(examPoints: points)
-                if summary.maxPoints > 0 {
-                    // Always use raw grade for precision if available
-                    if let gRaw = summary.gradeRaw {
-                        return String(format: "%.\(decimals)f", gRaw)
+                
+                // Use the same calculation as HomeView for consistency
+                if let mss = overallAverageMSS(examPoints: points, isBaseline: false) {
+                    if useMSSInHero {
+                        // Show MSS points (0-15 scale)
+                        return String(format: "%.\(decimals)f", mss)
+                    } else {
+                        // Convert to grade (1-6 scale)
+                        let grade = (17.0 - mss) / 3.0
+                        return String(format: "%.\(decimals)f", grade)
                     }
-                    
-                    // Fallback to average points to grade
-                    let averagePoints = (summary.totalPoints * 15.0) / Double(summary.maxPoints)
-                    return pointsToGradeText(averagePoints, decimals: decimals)
                 }
-                // Fallback
-                let fallbackVal = abiturFinalAverage(points: points) ?? gradesOnlyFinalAverage
-                guard let val = fallbackVal else { return "-" }
-                return String(format: "%.\(decimals)f", val)
+                
+                // Fallback if no average available
+                return "-"
             }
             
         private func roundedExamPoints(_ value: Double?) -> Double? {
@@ -1803,7 +1921,7 @@ struct FinalGradeView: View {
                 return total / Double(sortedPracticalGrades.count)
             }
             
-            private func makeFobosoSummary(examPoints: [String: Double?]? = nil) -> (examCount: Int,
+            private func makeFobosoSummary(examPoints: [String: Double?]? = nil, isBaseline: Bool = false) -> (examCount: Int,
                                                                                      halfYearCount: Int,
                                                                                      examPointsDouble: Double,
                                                                                      halfYearPoints: Double,
@@ -1815,8 +1933,8 @@ struct FinalGradeView: View {
                                                                                      averageAfterDrops: Double?) {
                 let subjects = eligibleSubjectHandles.map { handle in
                     let real = handle.grades
-                    let filteredReal = real.filter { !store.excludedRealGradeIds.contains($0.id) }
-                    let ghosts = store.simulatedGrades.filter { $0.subjectName == handle.subject.name }
+                    let filteredReal = isBaseline ? real : real.filter { !store.excludedRealGradeIds.contains($0.id) }
+                    let ghosts = isBaseline ? [] : store.simulatedGrades.filter { $0.subjectName == handle.subject.name }
                     let combined: [GradeProtocol] = filteredReal + ghosts
                     
                     return GradeCalculationService.SubjectData(id: handle.id, subject: handle.subject, grades: combined, isEligible: handle.isEligible)
@@ -1867,7 +1985,7 @@ struct FinalGradeView: View {
                                                 grade: Double?,
                                                 gradeRaw: Double?,
                                                 averageAfterDrops: Double?) {
-                makeFobosoSummary(examPoints: store.examPoints)
+                makeFobosoSummary(examPoints: store.examPoints, isBaseline: true)
             }
             
             private func calculateImpact(for handle: SubjectHandle, halfYear: Int) -> Double? {
@@ -2561,12 +2679,16 @@ struct FinalGradeView: View {
         }
         
         private func handleNotificationSelection(_ item: NotificationInboxItem) {
-            if let _ = item.homeworkId {
-                showHomeworkSheet = true
-            } else if let _ = item.examId {
-                showExamSheet = true
+            if let hwId = item.homeworkId, let hw = store.allHomeworks.first(where: { $0.id == hwId }) {
+                detailHomework = hw
+            } else if let examId = item.examId, let exam = store.allExams.first(where: { $0.id == examId }) {
+                detailExam = exam
             } else if item.kind == .daily {
-                showHomeworkSheet = true
+                let examIds = item.examIds ?? (item.examId.map { [$0] } ?? [])
+                let homeworkIds = item.homeworkIds ?? (item.homeworkId.map { [$0] } ?? [])
+                let exams = store.allExams.filter { examIds.contains($0.id) }
+                let hws = store.allHomeworks.filter { homeworkIds.contains($0.id) }
+                dailySummaryData = DailySummaryData(exams: exams, homeworks: hws, date: Date().addingTimeInterval(86400))
             }
         }
     struct ScrollOffsetKey: PreferenceKey {
@@ -2597,6 +2719,9 @@ extension FinalGradeView {
         @Binding var showPDFSheet: Bool
         @Binding var showSwapOptions: Bool
         @Binding var showWhatIfSimulationMode: Bool
+        @Binding var detailHomework: Homework?
+        @Binding var detailExam: Exam?
+        @Binding var dailySummaryData: DailySummaryData?
         
         var store: GradesStore
         var notificationInbox: NotificationInboxStore
@@ -2620,6 +2745,7 @@ extension FinalGradeView {
         let triggerUpdate: () -> Void
         let makeFobosoSummary: ([String: Double?]?) -> (examCount: Int, halfYearCount: Int, examPointsDouble: Double, halfYearPoints: Double, seminarPointsDouble: Double, totalPoints: Double, maxPoints: Int, grade: Double?, gradeRaw: Double?, averageAfterDrops: Double?)
         let finalGradeText: ([String: Double?]) -> String
+        let mergedExamPoints: ([String: Double?], [String: Double]) -> [String: Double?]
         
         fileprivate init(
             showNotifications: Binding<Bool>,
@@ -2631,6 +2757,9 @@ extension FinalGradeView {
             showPDFSheet: Binding<Bool>,
             showSwapOptions: Binding<Bool>,
             showWhatIfSimulationMode: Binding<Bool>,
+            detailHomework: Binding<Homework?>,
+            detailExam: Binding<Exam?>,
+            dailySummaryData: Binding<DailySummaryData?>,
             store: GradesStore,
             notificationInbox: NotificationInboxStore,
             examSubjectHandles: [SubjectHandle],
@@ -2648,7 +2777,8 @@ extension FinalGradeView {
             previousYearSnapshot: Any?,
             triggerUpdate: @escaping () -> Void,
             makeFobosoSummary: @escaping ([String: Double?]?) -> (examCount: Int, halfYearCount: Int, examPointsDouble: Double, halfYearPoints: Double, seminarPointsDouble: Double, totalPoints: Double, maxPoints: Int, grade: Double?, gradeRaw: Double?, averageAfterDrops: Double?),
-            finalGradeText: @escaping ([String: Double?]) -> String
+            finalGradeText: @escaping ([String: Double?]) -> String,
+            mergedExamPoints: @escaping ([String: Double?], [String: Double]) -> [String: Double?]
         ) {
             self._showNotifications = showNotifications
             self._showWhatIfGradesSheet = showWhatIfGradesSheet
@@ -2659,6 +2789,9 @@ extension FinalGradeView {
             self._showPDFSheet = showPDFSheet
             self._showSwapOptions = showSwapOptions
             self._showWhatIfSimulationMode = showWhatIfSimulationMode
+            self._detailHomework = detailHomework
+            self._detailExam = detailExam
+            self._dailySummaryData = dailySummaryData
             self.store = store
             self.notificationInbox = notificationInbox
             self.examSubjectHandles = examSubjectHandles
@@ -2677,6 +2810,7 @@ extension FinalGradeView {
             self.triggerUpdate = triggerUpdate
             self.makeFobosoSummary = makeFobosoSummary
             self.finalGradeText = finalGradeText
+            self.mergedExamPoints = mergedExamPoints
         }
         
         func body(content: Content) -> some View {
@@ -2696,18 +2830,30 @@ extension FinalGradeView {
                 }
                 .sheet(isPresented: $showWhatIfGradesSheet) {
                     makeWhatIfView()
+                        .presentationBackground {
+                            ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity)
+                        }
                 }
                 .sheet(isPresented: $showWhatIfSimulationMode) {
                     WhatIfModeView()
                         .environmentObject(store)
+                        .presentationBackground {
+                            ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity)
+                        }
                 }
                 .sheet(isPresented: $showWhatIfExamSheet) {
                     AbiturExamView()
                         .environmentObject(store)
+                        .presentationBackground {
+                            ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity)
+                        }
                 }
                 .sheet(isPresented: $showSeminarSheet) {
                     SeminarPerformanceView()
                         .environmentObject(store)
+                        .presentationBackground {
+                            ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity)
+                        }
                 }
                 .sheet(isPresented: $showStatusDetails) {
                     statusDetailSheet
@@ -2738,14 +2884,25 @@ extension FinalGradeView {
                 } message: { candidate in
                     Text("Das \(candidate.halfYear). Halbjahr von \(candidate.subject.name) wird gegen das gestrichene Halbjahr getauscht.")
                 }
+                .sheet(item: $detailHomework) { hw in
+                    HomeworkDetailSheet(homework: hw, onEdit: { _ in })
+                        .environmentObject(store)
+                }
+                .sheet(item: $detailExam) { ex in
+                    ExamDetailSheet(exam: ex, onEdit: { _ in })
+                        .environmentObject(store)
+                }
+                .sheet(item: $dailySummaryData) { data in
+                    DailySummarySheet(data: data)
+                        .environmentObject(store)
+                }
         }
         
         private func makeWhatIfView() -> some View {
             let examSubjects = store.subjects.filter { $0.examSubject == true }
-            let subjectNames = examSubjects.map { $0.name }
             
             let existingPoints = Dictionary(uniqueKeysWithValues: examSubjects.map { subject in
-                 (subject.name, GradeCalculationService.calculateSubjectAverage(subject: subject, grades: store.gradesBySubject[subject.name] ?? [], dropValue: subject.droppedHalfYear, effectiveGradeWeight: { store.effectiveGradeWeight(subjectType: $0, rawWeight: $1) }))
+                 (subject.name, store.examPoints[subject.name] ?? nil)
             })
             
             let existingSimulation = store.simulatedExamPointsDict
@@ -2757,8 +2914,9 @@ extension FinalGradeView {
                 baselineGradeText: baselineFinalGradeText,
                 baselineGradeValue: baselineFinalGradeValue,
                 computePreview: { overrides in
-                    let summary = makeFobosoSummary(overrides)
-                    return (finalGradeText(overrides), summary.grade)
+                    let merged = mergedExamPoints(store.examPoints, overrides)
+                    let summary = makeFobosoSummary(merged)
+                    return (finalGradeText(merged), summary.gradeRaw)
                 },
                 gradeColor: finalGradeColor,
                 onApply: { overrides in

@@ -135,7 +135,7 @@ struct SubjectDetailView: View {
         case .withSchulaufgaben:
             return [
                 ("Schulaufgabe", 2, .schulaufgabe),
-                ("Kurzarbeit", 1, .kurzarbeit),
+                ("Kurzarbeit", 2, .kurzarbeit),
                 ("Mündlich / EX", 1, .muendlich)
             ]
         case .withoutSchulaufgaben:
@@ -1424,7 +1424,7 @@ struct SubjectDetailView: View {
         
         @ViewBuilder
         private func gradeCard(_ grade: GradeWithId) -> some View {
-            let typeLabel = gradeTypeLabel(weight: grade.weight)
+            let typeLabel = gradeTypeLabel(grade)
             let halfYearText = halfYearLabel(grade.halfYear)
             let noteText = grade.note ?? ""
             
@@ -1484,7 +1484,11 @@ struct SubjectDetailView: View {
             }
         }
         
-        private func gradeTypeLabel(weight: Double) -> String {
+        private func gradeTypeLabel(_ grade: GradeWithId) -> String {
+            if let type = grade.assessmentType {
+                return type.prettyName
+            }
+            let weight = grade.weight
             if weight == 3 { return "Fachreferat" }
             if let match = weightOptions().first(where: { $0.value == weight }) {
                 return match.title

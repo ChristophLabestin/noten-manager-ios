@@ -98,9 +98,7 @@ struct FinalGradeWhatIfView: View {
                 }
                 .padding(16)
             }
-            .background(
-                ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity)
-            )
+
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -113,7 +111,18 @@ struct FinalGradeWhatIfView: View {
                     }
                     .accessibilityLabel("Schließen")
                 }
+                
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Fertig") {
+                        dismiss()
+                    }
+                    .font(.headline)
+                    .foregroundStyle(accentColor)
+                }
             }
+        }
+        .presentationBackground {
+            ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity)
         }
         .onAppear {
             refreshPreview()
@@ -175,7 +184,7 @@ struct FinalGradeWhatIfView: View {
                         Spacer()
                         Text(delta)
                             .font(.subheadline.weight(.bold))
-                            .foregroundStyle(previewValue ?? 0 >= baselineGradeValue ?? 0 ? .green : .orange)
+                            .foregroundStyle(previewValue ?? 0 <= baselineGradeValue ?? 0 ? .green : .orange)
                             .monospacedDigit()
                     }
                     .padding(.horizontal, 4)

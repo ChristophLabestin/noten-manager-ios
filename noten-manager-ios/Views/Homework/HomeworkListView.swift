@@ -20,7 +20,7 @@ struct HomeworkListView: View {
 
     private var openHomeworks: [Homework] {
         linkedHomeworks
-            .filter { !$0.isCompleted && !isAutoCompletedPastDue($0) }
+            .filter { !$0.isCompleted }
             .sorted { lhs, rhs in
                 let l = sortKey(for: lhs)
                 let r = sortKey(for: rhs)
@@ -31,7 +31,7 @@ struct HomeworkListView: View {
 
     private var completedHomeworks: [Homework] {
         linkedHomeworks
-            .filter { $0.isCompleted || isAutoCompletedPastDue($0) }
+            .filter { $0.isCompleted }
             .sorted {
                 let a = $0.dueDate ?? $0.createdAt
                 let b = $1.dueDate ?? $1.createdAt
@@ -198,8 +198,7 @@ struct HomeworkListView: View {
 
     @ViewBuilder
     private func homeworkRow(_ hw: Homework) -> some View {
-        let autoCompleted = isAutoCompletedPastDue(hw)
-        let treatedCompleted = hw.isCompleted || autoCompleted
+        let treatedCompleted = hw.isCompleted
         let badge = badgeState(for: hw, treatedCompleted: treatedCompleted)
         let personalNote = store.userNoteForHomework(hw)
         
@@ -463,11 +462,14 @@ struct HomeworkListView: View {
         let now = Date()
         if let due = hw.dueDate {
             let startToday = cal.startOfDay(for: now)
-            let autoCompleted = due < startToday
-            if hw.isCompleted || autoCompleted {
+            
+            if hw.isCompleted {
                 return (3, due)
             }
-            if due < startToday || cal.isDateInToday(due) {
+            if due < startToday {
+                return (-1, due) // Overdue -> Highest Priority (top of list)
+            }
+            if cal.isDateInToday(due) {
                 return (0, due)
             }
             if cal.isDateInTomorrow(due) {
@@ -492,12 +494,13 @@ struct HomeworkListView: View {
         if cal.isDateInTomorrow(due) {
             return ("Morgen fällig", .orange, nil)
         }
+        
+        let startToday = cal.startOfDay(for: Date())
+        if due < startToday {
+            return ("Überfällig", .red, "exclamationmark.circle.fill")
+        }
+        
         return ("Geplant", .green, nil)
-    }
-    private func isAutoCompletedPastDue(_ hw: Homework) -> Bool {
-        guard let due = hw.dueDate else { return false }
-        let startToday = Calendar.current.startOfDay(for: Date())
-        return due < startToday
     }
 }
 

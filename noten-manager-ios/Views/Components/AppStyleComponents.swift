@@ -168,7 +168,6 @@ struct SettingsCard<Content: View, Trailing: View>: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(cardSurface)
-        .overlay(cardBorder)
         .shadow(
             color: Color.black.opacity(colorScheme == .dark ? 0.45 : 0.08),
             radius: 6,
@@ -254,27 +253,18 @@ struct SettingsCard<Content: View, Trailing: View>: View {
     }
 
     private var cardSurface: some View {
-        RoundedRectangle(cornerRadius: 22, style: .continuous)
-            .fill(
-                LinearGradient(
-                    colors: [baseTop, baseBottom],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                accent.opacity(colorScheme == .dark ? 0.08 : 0.05),
-                                Color.clear
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
+        ZStack {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [baseTop, baseBottom],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
                     )
-            )
+                )
+            
+            cardBorder
+        }
     }
 
     private var cardBorder: some View {
@@ -668,9 +658,11 @@ struct ThemedBackground: View {
     }
 
     var body: some View {
-        ZStack {
-            baseColor
-            tintLayer.opacity(clampedIntensity)
+        GeometryReader { _ in
+            ZStack {
+                baseColor
+                tintLayer.opacity(clampedIntensity)
+            }
         }
         .ignoresSafeArea()
     }
@@ -713,6 +705,10 @@ struct GradeCardStyle {
 
     static func border(colorScheme: ColorScheme, accent: Color) -> some View {
         RoundedRectangle(cornerRadius: 22, style: .continuous)
-            .stroke(accent.opacity(colorScheme == .dark ? 0.18 : 0.12), lineWidth: 1)
+            .stroke(borderStrokeColor(colorScheme: colorScheme, accent: accent), lineWidth: 1)
+    }
+
+    static func borderStrokeColor(colorScheme: ColorScheme, accent: Color) -> Color {
+        accent.opacity(colorScheme == .dark ? 0.18 : 0.12)
     }
 }

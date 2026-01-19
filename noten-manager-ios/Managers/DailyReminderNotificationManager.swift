@@ -172,10 +172,15 @@ enum DailyReminderNotificationManager {
                     userInfo["examId"] = examIds[0]
                 }
             }
-            if let hw = tomorrowHomeworks.sorted(by: { ($0.dueDate ?? .distantFuture) < ($1.dueDate ?? .distantFuture) }).first {
-                userInfo["homeworkId"] = hw.id
-                if let gid = hw.groupId, !gid.isEmpty {
-                    userInfo["groupId"] = gid
+            
+            let homeworkIds = tomorrowHomeworks.map(\.id)
+            if !homeworkIds.isEmpty {
+                userInfo["homeworkIds"] = homeworkIds
+                if let hw = tomorrowHomeworks.sorted(by: { ($0.dueDate ?? .distantFuture) < ($1.dueDate ?? .distantFuture) }).first {
+                    userInfo["homeworkId"] = hw.id
+                    if let gid = hw.groupId, !gid.isEmpty {
+                        userInfo["groupId"] = gid
+                    }
                 }
                 content.categoryIdentifier = categoryWithHomeworkIdentifier
             } else {
@@ -217,39 +222,41 @@ enum DailyReminderNotificationManager {
     }
 
     private static func buildBody(homeworks: [Homework], exams: [Exam]) -> String {
-        var parts: [String] = []
-        if !homeworks.isEmpty {
-            let names = homeworks.map { $0.title }
-            if names.count == 1 {
-                parts.append("Hausaufgabe: \(names[0])")
-            } else {
-                let list = names.prefix(2).joined(separator: ", ")
-                let remaining = names.count - 2
-                if remaining > 0 {
-                    parts.append("Hausaufgaben: \(list) +\(remaining) weitere")
-                } else {
-                    parts.append("Hausaufgaben: \(list)")
-                }
-            }
+        // Case 1: Both
+        if !homeworks.isEmpty && !exams.isEmpty {
+            let examPart = exams.count == 1
+                ? (exams[0].subjectName.isEmpty ? "eine Klausur" : "die \(exams[0].subjectName) Klausur")
+                : "\(exams.count) Klausuren"
+            
+            let hwPart = homeworks.count == 1
+                ? (homeworks[0].subjectName.isEmpty ? "eine Hausaufgabe" : "Hausaufgabe in \(homeworks[0].subjectName)")
+                : "\(homeworks.count) Hausaufgaben"
+            
+            return "Morgen steht \(examPart) an und du hast noch \(hwPart). Tippe für Details."
         }
-
+        
+        // Case 2: Only Exams
         if !exams.isEmpty {
-            let names = exams.map { exam in
-                exam.subjectName.isEmpty ? exam.title : "\(exam.title) in \(exam.subjectName)"
-            }
-            if names.count == 1 {
-                parts.append("Klausur: \(names[0])")
+            if exams.count == 1 {
+                let e = exams[0]
+                let subject = e.subjectName.isEmpty ? "" : " in \(e.subjectName)"
+                return "Morgen: \(e.title)\(subject). Viel Erfolg! 🍀"
             } else {
-                let list = names.prefix(2).joined(separator: ", ")
-                let remaining = names.count - 2
-                if remaining > 0 {
-                    parts.append("Klausuren: \(list) +\(remaining) weitere")
-                } else {
-                    parts.append("Klausuren: \(list)")
-                }
+                return "Morgen stehen \(exams.count) Klausuren an. Viel Erfolg! 🍀"
             }
         }
-
-        return parts.joined(separator: " • ")
+        
+        // Case 3: Only Homework
+        if !homeworks.isEmpty {
+            if homeworks.count == 1 {
+                let h = homeworks[0]
+                let subject = h.subjectName.isEmpty ? "" : " in \(h.subjectName)"
+                return "Nicht vergessen: Hausaufgabe \"\(h.title)\"\(subject) ist für morgen fällig."
+            } else {
+                return "Du hast für morgen \(homeworks.count) offene Hausaufgaben."
+            }
+        }
+        
+        return "Schau dir an, was morgen ansteht."
     }
 }

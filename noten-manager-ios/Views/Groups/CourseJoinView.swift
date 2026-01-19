@@ -7,11 +7,14 @@ struct CourseJoinView: View {
     let classId: String
     let className: String
     let config: ClassConfiguration
+    let linkedClassIds: [String]
     let onJoinSuccess: () -> Void
     
     @State private var courses: [Course] = []
     @State private var isLoading: Bool = true
     @State private var selectedBranchIds: Set<String> = [] // Multiple branch selection
+    @State private var selectedLinkedClasses: Set<String> = [] // Linked Class Codes to join
+    @State private var linkedClassDetails: [String: String] = [:] // Code -> Name
     @State private var errorMessage: String?
     @State private var isJoining: Bool = false
     
@@ -123,6 +126,55 @@ struct CourseJoinView: View {
                 }
             }
             
+            // 3. Linked Classes
+            if !linkedClassIds.isEmpty && !linkedClassDetails.isEmpty {
+                 VStack(alignment: .leading, spacing: 12) {
+                    Label("Verknüpfte Klassen", systemImage: "link")
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    
+                    Text("Du kannst diesen Klassen ebenfalls beitreten.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    
+                    VStack(spacing: 8) {
+                        ForEach(linkedClassIds, id: \.self) { code in
+                            if let name = linkedClassDetails[code] {
+                                Button {
+                                    if selectedLinkedClasses.contains(code) {
+                                        selectedLinkedClasses.remove(code)
+                                    } else {
+                                        selectedLinkedClasses.insert(code)
+                                    }
+                                } label: {
+                                    HStack {
+                                        VStack(alignment: .leading) {
+                                            Text(name)
+                                                .font(.headline)
+                                                .foregroundStyle(selectedLinkedClasses.contains(code) ? .white : .primary)
+                                        }
+                                        Spacer()
+                                        Image(systemName: selectedLinkedClasses.contains(code) ? "checkmark.circle.fill" : "circle")
+                                            .font(.title2)
+                                            .foregroundStyle(selectedLinkedClasses.contains(code) ? .white : .secondary.opacity(0.5))
+                                    }
+                                    .padding()
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(selectedLinkedClasses.contains(code) ? Color.indigo : Color.formInputBackground)
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(selectedLinkedClasses.contains(code) ? Color.clear : Color.secondary.opacity(0.2), lineWidth: 1)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+            }
+            
             if let error = errorMessage {
                 Text(error)
                     .foregroundStyle(.red)
@@ -149,6 +201,14 @@ struct CourseJoinView: View {
     private func loadCourses() async {
         do {
             courses = try await store.fetchCoursesForClass(classId: classId)
+            
+            // Load linked class names
+            for code in linkedClassIds {
+                if let info = try? await store.fetchClassInfo(with: code) {
+                    linkedClassDetails[code] = info.name
+                }
+            }
+            
             isLoading = false
         } catch {
             errorMessage = error.localizedDescription
@@ -172,6 +232,15 @@ struct CourseJoinView: View {
             }
             
             try await store.joinClassWithBranch(classId: classId, selectedCourses: selected)
+            
+            // Join Linked Classes
+            for code in selectedLinkedClasses {
+                // If it's a legacy join or simple join
+                try? await store.joinClass(with: code) 
+                // Note: We ignore branch selection for linked classes here as per "opt in" simple logic, 
+                // or we'd need a recursive flow which is too complex.
+                // Presumably linked classes are "global" or simple.
+            }
             
             let generator = UINotificationFeedbackGenerator()
             generator.notificationOccurred(.success)

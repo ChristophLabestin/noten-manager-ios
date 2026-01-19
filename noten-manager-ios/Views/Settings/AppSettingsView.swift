@@ -870,6 +870,38 @@ struct AppSettingsView: View {
                                 )
                                 .labelsHidden()
                             }
+                            
+                            // MSS Decimal Precision
+                            HStack(spacing: 16) {
+                                Image(systemName: "number.circle.fill")
+                                    .font(.title2)
+                                    .foregroundStyle(.teal)
+                                    .frame(width: 32, height: 32)
+                                    .background(Circle().fill(Color.teal.opacity(0.15)))
+                                
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("MSS-Nachkommastellen")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                    Text("Rundung des Gesamtschnitts")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                                
+                                Spacer()
+                                
+                                Picker("", selection: Binding(
+                                    get: { store.mssDecimalPrecision },
+                                    set: { val in Task { await store.updatePreferences(mssDecimalPrecision: val) } }
+                                )) {
+                                    Text("0").tag(0)
+                                    Text("1").tag(1)
+                                    Text("2").tag(2)
+                                }
+                                .pickerStyle(.segmented)
+                                .frame(width: 110)
+                            }
                         }
                     }
                 }

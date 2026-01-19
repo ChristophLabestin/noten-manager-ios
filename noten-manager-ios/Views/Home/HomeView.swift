@@ -19,8 +19,8 @@ struct HomeView: View {
     @State private var halfYear: HalfYearFilter = .all
     @State private var isEditingOrder: Bool = false
     @State private var customOrderWorkingCopy: [String] = []
-    @AppStorage("isSubjectGridView") private var isGridView: Bool = false
-    @AppStorage("showNextExamCard") private var showNextExamCard: Bool = true
+    // isSubjectGridView is now managed by GradesStore
+    // showNextExamCard is now managed by GradesStore
     @AppStorage("launchOfferPurchased") private var launchOfferPurchased = false
 
     @State private var navigateToSettings: Bool = false
@@ -35,6 +35,7 @@ struct HomeView: View {
     @State private var showHomeworkSheet: Bool = false
     @State private var showExamSheet: Bool = false
     @State private var showNotifications: Bool = false
+    @State private var showDailySummarySheet: Bool = false
     @State private var selectedSubject: Subject? = nil
     @State private var subjectLinkActive: Bool = false
     @State private var showPraktikumDetail: Bool = false
@@ -245,6 +246,24 @@ struct HomeView: View {
         return map
     }
 
+    // MARK: - Daily Summary Helper
+    
+    private var tomorrowSummaryData: DailySummaryData {
+        let cal = Calendar.current
+        let tomorrow = cal.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+        
+        let exams: [Exam] = store.allExams.filter { exam in
+            !exam.isCompleted && cal.isDate(exam.date, inSameDayAs: tomorrow)
+        }
+        
+        let homeworks: [Homework] = store.allHomeworks.filter { hw in
+            guard !hw.isCompleted, let due = hw.dueDate else { return false }
+            return cal.isDate(due, inSameDayAs: tomorrow)
+        }
+        
+        return DailySummaryData(exams: exams, homeworks: homeworks, date: tomorrow)
+    }
+
     private func countLabel(_ count: Int, singular: String, plural: String) -> String {
         count == 1 ? singular : plural
     }
@@ -321,8 +340,7 @@ struct HomeView: View {
     }
 
     private func formatAverage(_ value: Double?) -> String {
-        guard let v = value else { return "-" }
-        return String(format: "%.2f", v)
+        store.formatMSS(value)
     }
 
     private func gradeColor(_ value: Double?) -> Color {
@@ -738,11 +756,15 @@ struct HomeView: View {
                     }
 
                     Button {
+                        let newValue = !store.showSubjectsAsGrid
                         withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                            isGridView.toggle()
+                            store.showSubjectsAsGrid = newValue
+                        }
+                        Task {
+                            await store.updatePreferences(showSubjectsAsGrid: newValue)
                         }
                     } label: {
-                        Image(systemName: isGridView ? "list.bullet" : "squareshape.split.2x2")
+                        Image(systemName: store.showSubjectsAsGrid ? "list.bullet" : "squareshape.split.2x2")
                             .font(.caption.weight(.semibold))
                             .imageScale(.medium)
                             .frame(width: 40, height: 40)
@@ -893,7 +915,7 @@ struct HomeView: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
 
-            if showNextExamCard {
+            if store.showNextExamCard {
                 nextAppointmentView
                     .softFadeIn(enabled: animationsOn, delay: 0.07, offset: 10)
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
@@ -951,7 +973,7 @@ struct HomeView: View {
                         }
                     }
                 }
-            } else if isGridView {
+            } else if store.showSubjectsAsGrid {
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
                     ForEach(Array(sortedSubjectsComputed.enumerated()), id: \.element.id) { entry in
                         let subject = entry.element
@@ -1103,10 +1125,15 @@ struct HomeView: View {
                 showMigrationInfoSheet = true
             }
 
-            // What's New Sheet logic
-            let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
-            if !currentVersion.isEmpty && store.lastSeenVersion != currentVersion && !showMigrationInfoSheet {
-                showWhatsNewSheet = true
+            // What's New Sheet logic (delayed to ensure view hierarchy is ready)
+            Task {
+                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s
+                let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+                if !currentVersion.isEmpty && store.lastSeenVersion != currentVersion && !showMigrationInfoSheet {
+                    await MainActor.run {
+                        showWhatsNewSheet = true
+                    }
+                }
             }
         }
         .sheet(isPresented: $showMigrationInfoSheet) {
@@ -1115,6 +1142,10 @@ struct HomeView: View {
         }
         .sheet(isPresented: $showWhatsNewSheet) {
             WhatsNewSheet()
+                .environmentObject(store)
+        }
+        .sheet(isPresented: $showDailySummarySheet) {
+            DailySummarySheet(data: tomorrowSummaryData)
                 .environmentObject(store)
         }
         .onChange(of: store.shouldShowMigrationInfo) { _, show in
@@ -1214,7 +1245,7 @@ struct HomeView: View {
         } else if let _ = item.examId {
             showExamSheet = true
         } else if item.kind == .daily {
-            showHomeworkSheet = true
+            showDailySummarySheet = true
         }
     }
 

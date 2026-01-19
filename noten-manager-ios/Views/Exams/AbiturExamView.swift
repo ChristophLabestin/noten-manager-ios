@@ -37,18 +37,8 @@ struct AbiturExamView: View {
         store.effectiveGradeWeight(subjectType: subjectType, rawWeight: grade.weight)
     }
 
-    private func calculateHalfYearAverageForSubject(_ grades: [GradeWithId], _ subjectType: Int, _ halfYear: Int) -> Double? {
-        let filtered = grades.filter { $0.halfYear == halfYear }
-        guard !filtered.isEmpty else { return nil }
-        var total = 0.0
-        var totalWeight = 0.0
-        for g in filtered {
-            let w = calculateGradeWeightForSubject(subjectType, g)
-            total += g.grade * w
-            totalWeight += w
-        }
-        guard totalWeight > 0 else { return nil }
-        return total / totalWeight
+    private func calculateHalfYearAverageForSubject(_ subject: Subject, _ halfYear: Int) -> Double? {
+        store.bestAvailableHalfYearValue(subject: subject, halfYear: halfYear)
     }
 
     private func formatAverage(_ value: Double?) -> String {
@@ -92,12 +82,11 @@ struct AbiturExamView: View {
         var count = 0
         for subject in store.subjects {
             if subject.name == "Fachreferat" { continue }
-            let subjectGrades = store.gradesBySubject[subject.name] ?? []
             let dropOption = subject.droppedHalfYear
             let isHalfYear1Dropped = (dropOption == 1)
             let isHalfYear2Dropped = (dropOption == 2)
-            let first = isHalfYear1Dropped ? nil : calculateHalfYearAverageForSubject(subjectGrades, subject.type, 1)
-            let second = isHalfYear2Dropped ? nil : calculateHalfYearAverageForSubject(subjectGrades, subject.type, 2)
+            let first = isHalfYear1Dropped ? nil : calculateHalfYearAverageForSubject(subject, 1)
+            let second = isHalfYear2Dropped ? nil : calculateHalfYearAverageForSubject(subject, 2)
             if let f = first { totalPoints += f; count += 1 }
             if let s = second { totalPoints += s; count += 1 }
         }

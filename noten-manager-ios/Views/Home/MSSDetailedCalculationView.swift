@@ -142,7 +142,7 @@ struct MSSDetailedCalculationView: View {
                         Text("Schnitt")
                             .font(.caption.weight(.bold))
                             .foregroundStyle(.secondary)
-                        Text(breakdown.average.map { String(format: "%.2f", $0) } ?? "-")
+                        Text(store.formatMSS(breakdown.average))
                             .font(.system(size: 28, weight: .bold, design: .rounded))
                             .foregroundStyle(gradeColor(breakdown.average))
                             .privacyBlur()

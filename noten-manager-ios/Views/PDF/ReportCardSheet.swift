@@ -10,7 +10,7 @@ struct ReportCardSheet: View {
     // State
     @State private var pdfURL: URL?
     @State private var isLoading: Bool = false
-    @State private var showAbiturExams: Bool = true
+    @State private var showAbiturExams: Bool = false
     @State private var showPoints: Bool = true
     @State private var showGrades: Bool = true
     @State private var showIndividualGrades: Bool = false
@@ -249,6 +249,11 @@ struct ReportCardSheet: View {
             schoolType: store.schoolType
         )
         self.calculatorResult = calculator.calculate()
+        
+        // Auto-disable Abitur if empty
+        if let res = self.calculatorResult, res.abiturResults.isEmpty {
+            self.showAbiturExams = false
+        }
     }
 
     private func updatePDFAsync() {
@@ -369,6 +374,7 @@ struct ReportCardSheet: View {
                     Toggle(isOn: $showAbiturExams) {
                         Label("Abiturnoten anzeigen", systemImage: "graduationcap")
                     }
+                    .disabled((calculatorResult?.abiturResults.isEmpty ?? true))
                     Toggle(isOn: $showPoints) {
                         Label("Gesamtpunkte anzeigen", systemImage: "sum")
                     }

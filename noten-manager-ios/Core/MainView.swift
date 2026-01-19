@@ -82,6 +82,7 @@ struct MainView: View {
     
     // Fancy Speedometer Cover State
     @State private var showSpeedometerCover: Bool = false
+    @State private var dailySummaryData: DailySummaryData?
     
     @Namespace private var namespace
 
@@ -409,6 +410,10 @@ struct MainView: View {
                     )
                 )
                 .environmentObject(gradesStore)
+            }
+            .sheet(item: $dailySummaryData) { data in
+                DailySummarySheet(data: data)
+                    .environmentObject(gradesStore)
             }
     }
 
@@ -788,31 +793,14 @@ struct MainView: View {
             }
         case .daily:
             let examIds = item.examIds ?? (item.examId.map { [$0] } ?? [])
-            if examIds.count > 1 {
-                showExamListSheet = true
-                return
-            }
-            if let examId = examIds.first,
-               let exam = gradesStore.allExams.first(where: { $0.id == examId }) {
-                deeplinkExam = exam
-                return
-            }
-            if let homeworkId = item.homeworkId {
-                let homework = gradesStore.allHomeworks.first { hw in
-                    guard hw.id == homeworkId else { return false }
-                    if let gid = item.groupId {
-                        return hw.groupId == gid
-                    }
-                    return true
-                }
-                if let homework {
-                    deeplinkHomework = homework
-                } else {
-                    showHomeworkListSheet = true
-                }
-            } else {
-                showExamListSheet = true
-            }
+            let homeworkIds = item.homeworkIds ?? (item.homeworkId.map { [$0] } ?? [])
+            
+            let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+            let tomorrowExams = gradesStore.allExams.filter { examIds.contains($0.id) }
+            let tomorrowHomeworks = gradesStore.allHomeworks.filter { homeworkIds.contains($0.id) }
+            
+            self.dailySummaryData = DailySummaryData(exams: tomorrowExams, homeworks: tomorrowHomeworks, date: tomorrow)
+            return
         default:
             break
         }

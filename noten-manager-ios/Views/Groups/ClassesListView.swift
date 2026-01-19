@@ -422,7 +422,7 @@ private struct ClassCardView: View {
     var body: some View {
         SettingsCard(
             title: store.classNames[classId] ?? "Unbenannte Klasse",
-            subtitle: nil,
+            subtitle: "Code: \(classId)",
             systemImage: "rectangle.stack.fill",
             accent: .indigo,
             trailing: {

@@ -17,6 +17,7 @@ struct ClassJoinView: View {
         let id: String
         let name: String
         let config: ClassConfiguration
+        let linkedClassIds: [String]
     }
     
     // Reuse QR Scanner logic if desired, but let's stick to manual first for Classes to simplify scope
@@ -128,6 +129,7 @@ struct ClassJoinView: View {
                         classId: ctx.id,
                         className: ctx.name,
                         config: ctx.config,
+                         linkedClassIds: ctx.linkedClassIds,
                         onJoinSuccess: {
                             dismiss()
                         }
@@ -169,11 +171,25 @@ struct ClassJoinView: View {
             
             if let config = info.config {
                 // New System -> Course Selection
-                self.joinContext = ClassJoinContext(id: info.id, name: info.name, config: config)
+                self.joinContext = ClassJoinContext(
+                    id: info.id,
+                    name: info.name,
+                    config: config,
+                    linkedClassIds: info.linkedClassIds ?? []
+                )
                 self.showCourseSelection = true
             } else {
                 // Legacy System -> Direct Join
                 try await store.joinClass(with: code)
+                
+                // Handle linked classes for legacy join?
+                if let linkedIds = info.linkedClassIds, !linkedIds.isEmpty {
+                    // Ideally we prompt here too, but for now focusing on New System as requested
+                    // Or auto-join? No, "opt in".
+                    // Since legacy flow has no UI for options, we might skip it or show an alert after success.
+                    // For simplicity, I'll ignore linked classes for legacy join unless I want to create a separate sheet.
+                }
+
                 successMessage = "Erfolgreich beigetreten!"
                 let generator = UINotificationFeedbackGenerator()
                 generator.notificationOccurred(.success)

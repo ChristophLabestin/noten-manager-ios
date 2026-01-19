@@ -385,11 +385,11 @@ struct HelpCenterView: View {
                         .font(.headline)
                     infoRow(
                         title: "Schulaufgaben-Blöcke",
-                        text: "Jede Schulaufgabe zählt als eigener Block (1:1). In Hauptfächern bilden alle sonstigen Leistungen (Ex, mündlich, Kurzarbeit) zusammen den letzten Block."
+                        text: "Jede Schulaufgabe zählt als eigener Block. In Hauptfächern bilden alle sonstigen Leistungen (Kurzarbeiten, Ex, mündlich) zusammen einen gemeinsamen Block. Formel: (Sonstige-Schnitt + SA₁ + SA₂ + …) ÷ (1 + Anzahl SAs)"
                     )
                     infoRow(
-                        title: "Sonstige Leistungen",
-                        text: "In Nebenfächern ohne Schulaufgaben werden alle Leistungen gewichtet gemittelt. Kurzarbeiten zählen dabei meist doppelt."
+                        title: "Nebenfächer",
+                        text: "In Fächern ohne Schulaufgaben werden alle Leistungen gewichtet gemittelt. Die Gewichtung der einzelnen Noten wird dabei berücksichtigt."
                     )
                 }
             }

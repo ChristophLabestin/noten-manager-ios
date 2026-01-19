@@ -23,7 +23,7 @@ struct CalendarPageView: View {
     @State private var editingExam: Exam?
     @State private var editingHomework: Homework?
     @State private var holidays: [HolidayPeriod] = []
-    @AppStorage("showNextExamCard") private var showNextExamCard: Bool = true
+    // showNextExamCard is now managed by GradesStore
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -170,7 +170,14 @@ struct CalendarPageView: View {
                         
                         Spacer()
                         
-                        Toggle("", isOn: $showNextExamCard)
+                        Toggle("", isOn: Binding(
+                            get: { store.showNextExamCard },
+                            set: { newValue in
+                                Task {
+                                    await store.updatePreferences(showNextExamCard: newValue)
+                                }
+                            }
+                        ))
                             .labelsHidden()
                             .scaleEffect(0.8)
                             .tint(.blue)

@@ -15,8 +15,7 @@ struct HalfYearComputation {
 
 final class GradeEngine {
     func computeHalfYear(subject: SubjectV2, term: TermV2, assessments: [Assessment]) -> HalfYearComputation {
-        // Callers already provide assessments filtered for the subject/term; avoid subjectId mismatch
-        // when legacy subject IDs are not valid UUIDs.
+        // FOBOSO: Blocks = ONLY Schulaufgaben. Sonstige = Kurzarbeiten + mündliche
         let sa = assessments.filter { $0.type == .schulaufgabe }
         let other = assessments.filter { $0.type != .schulaufgabe }
 

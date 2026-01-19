@@ -57,7 +57,7 @@ struct EditGradeView: View {
         case .withSchulaufgaben:
             return [
                 ("Schulaufgabe", 2, .schulaufgabe),
-                ("Kurzarbeit", 1, .kurzarbeit),
+                ("Kurzarbeit", 2, .kurzarbeit),
                 ("Mündlich / EX", 1, .muendlich)
             ]
         case .withoutSchulaufgaben:
