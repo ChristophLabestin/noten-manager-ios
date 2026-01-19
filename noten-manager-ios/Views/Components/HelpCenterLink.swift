@@ -15,27 +15,27 @@ struct HelpCenterLink: View {
         Button {
             showHelp = true
         } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .fill(accent.opacity(colorScheme == .dark ? 0.22 : 0.14))
-                        .frame(width: 46, height: 46)
+                        .frame(width: 36, height: 36)
                         .overlay(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
                                 .stroke(accent.opacity(colorScheme == .dark ? 0.30 : 0.20), lineWidth: 1)
                         )
                     Image(systemName: "questionmark.circle.fill")
-                        .font(.headline.weight(.bold))
+                        .font(.body.weight(.bold))
                         .foregroundStyle(accent)
                 }
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(title)
-                        .font(.title3.weight(.bold))
+                        .font(.body.weight(.bold))
                         .foregroundStyle(.primary)
                     if let subtitle, !subtitle.isEmpty {
                         Text(subtitle)
-                            .font(.subheadline)
+                            .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -43,18 +43,19 @@ struct HelpCenterLink: View {
                 Spacer()
 
                 Image(systemName: "chevron.right")
-                    .font(.caption.weight(.bold))
+                    .font(.caption2.weight(.bold))
                     .foregroundStyle(.secondary)
                     .opacity(0.5)
             }
-            .padding(12)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
             .background(GradeCardStyle.surface(colorScheme: colorScheme, theme: store.theme, accent: accent))
             .overlay(GradeCardStyle.border(colorScheme: colorScheme, accent: accent))
             .shadow(
-                color: Color.black.opacity(colorScheme == .dark ? 0.45 : 0.08),
-                radius: 6,
+                color: Color.black.opacity(colorScheme == .dark ? 0.40 : 0.06),
+                radius: 4,
                 x: 0,
-                y: 4
+                y: 2
             )
         }
         .buttonStyle(.plain)

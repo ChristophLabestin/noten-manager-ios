@@ -116,6 +116,11 @@ struct AddGradeView: View {
         return value
     }
 
+    private func gradingMode(for name: String) -> GradingMode {
+        let subject = subjects.first(where: { $0.name == name })
+        return subject?.gradingMode ?? ((subject?.type == 1) ? .withSchulaufgaben : .withoutSchulaufgaben)
+    }
+
     private func formatWeight(_ value: Double) -> String {
         if value == floor(value) {
             return String(Int(value))
@@ -172,8 +177,7 @@ struct AddGradeView: View {
                                         .background(Color.formInputBackground)
                                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-                                    let subject = subjects.first(where: { $0.name == subjectName })
-                                    let gradingMode = subject?.gradingMode ?? ((subject?.type == 1) ? .withSchulaufgaben : .withoutSchulaufgaben)
+                                    let gradingMode = gradingMode(for: subjectName)
 
                                     VStack(alignment: .leading, spacing: 8) {
                                         Text("Art")

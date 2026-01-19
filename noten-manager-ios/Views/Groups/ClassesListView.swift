@@ -17,12 +17,13 @@ struct ClassesListView: View {
     @State private var scanError: String?
     @State private var showScanErrorAlert = false
     @State private var showGroupMergeSheet = false
+    @State private var showSocialCreateSheet = false
     
     private var animationsOn: Bool { store.animationsEnabled }
     
     var body: some View {
         ScrollView {
-            VStack(spacing: 20) {
+            VStack(spacing: 16) {
                 // Header Section
                 headerSection
                     .softFadeIn(enabled: animationsOn, delay: 0.05, offset: 10)
@@ -59,7 +60,7 @@ struct ClassesListView: View {
                     .softFadeIn(enabled: animationsOn, delay: 0.3, offset: 14)
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 16)
+            .padding(.vertical, 8)
             .padding(.bottom, 100)
         }
         .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
@@ -82,6 +83,10 @@ struct ClassesListView: View {
         }
         .sheet(isPresented: $showGroupMergeSheet) {
             GroupMergeView()
+                .environmentObject(store)
+        }
+        .sheet(isPresented: $showSocialCreateSheet) {
+            SocialGroupCreationView()
                 .environmentObject(store)
         }
         .alert("Fehler beim Beitreten", isPresented: $showScanErrorAlert) {
@@ -174,8 +179,8 @@ struct ClassesListView: View {
     private var statsSection: some View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
             StatChip(title: "Klassen", value: "\(store.classIds.count)", accent: .indigo)
-            StatChip(title: "Gruppen", value: "\(store.groupIds.count)", accent: .cyan)
-            StatChip(title: "Unabhängig", value: "\(independentGroups.count)", accent: .orange)
+            StatChip(title: "Gruppen", value: "\(independentGroups.count)", accent: .cyan)
+            StatChip(title: "Kurse", value: "\(store.courses.count)", accent: .orange)
         }
     }
     
@@ -230,13 +235,22 @@ struct ClassesListView: View {
                 .padding(.horizontal, 4)
             
             ForEach(independentGroups, id: \.self) { gid in
-                IndependentGroupCardView(
-                    groupId: gid,
-                    isOwner: store.groupOwners[gid] == Auth.auth().currentUser?.uid,
-                    memberCount: store.groupMemberIds[gid]?.count ?? 0,
-                    onLeave: { groupPendingLeave = gid },
-                    onMigrate: { groupPendingMigration = gid }
-                )
+                if store.groupTypes[gid] == "social" {
+                    SocialGroupCardView(
+                        groupId: gid,
+                        isOwner: store.groupOwners[gid] == Auth.auth().currentUser?.uid,
+                        memberCount: store.groupMemberIds[gid]?.count ?? 0,
+                        onLeave: { groupPendingLeave = gid }
+                    )
+                } else {
+                    IndependentGroupCardView(
+                        groupId: gid,
+                        isOwner: store.groupOwners[gid] == Auth.auth().currentUser?.uid,
+                        memberCount: store.groupMemberIds[gid]?.count ?? 0,
+                        onLeave: { groupPendingLeave = gid },
+                        onMigrate: { groupPendingMigration = gid }
+                    )
+                }
             }
         }
     }
@@ -249,6 +263,13 @@ struct ClassesListView: View {
             accent: .indigo
         ) {
             VStack(spacing: 12) {
+                // Section: Klassen
+                Text("Klassen")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 4)
+                
                 Button {
                     showCreateSheet = true
                 } label: {
@@ -268,15 +289,46 @@ struct ClassesListView: View {
                 Button {
                     showJoinSheet = true
                 } label: {
-                    Label("Code eingeben", systemImage: "keyboard")
+                    Label("Klassen-Code eingeben", systemImage: "keyboard")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(SoftTintButtonStyle(accent: .gray))
+                
+                Divider()
+                    .padding(.vertical, 4)
+                
+                // Section: Gruppen
+                Text("Lerngruppen")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 4)
+                
+                Button {
+                    showSocialCreateSheet = true
+                } label: {
+                    Label("Neue soziale Gruppe", systemImage: "person.2.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(SoftTintButtonStyle(accent: .indigo))
+
+                Button {
+                    showScannerSheet = true
+                } label: {
+                    Label("Gruppe beitreten (QR)", systemImage: "qrcode.viewfinder")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(SoftTintButtonStyle(accent: .cyan))
+                
+                Button {
+                    showGroupJoinSheet = true
+                } label: {
+                    Label("Gruppen-Code eingeben", systemImage: "keyboard")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(SoftTintButtonStyle(accent: .gray))
                 
                 if !independentGroups.isEmpty {
-                    Divider()
-                        .padding(.vertical, 4)
-                    
                     Button {
                         showGroupMergeSheet = true
                     } label: {
@@ -511,3 +563,84 @@ private struct IndependentGroupCardView: View {
         }
     }
 }
+
+private struct SocialGroupCardView: View {
+    @EnvironmentObject var store: GradesStore
+    let groupId: String
+    let isOwner: Bool
+    let memberCount: Int
+    let onLeave: () -> Void
+    
+    @State private var showShareSheet = false
+    
+    var body: some View {
+        SettingsCard(
+            title: store.groupNames[groupId] ?? "Soziale Gruppe",
+            subtitle: nil,
+            systemImage: "person.2.fill",
+            accent: .indigo,
+            trailing: {
+                if isOwner {
+                    PillBadge(text: "Owner", systemImage: "crown.fill", foreground: .indigo, background: .indigo.opacity(0.1))
+                }
+            }
+        ) {
+            VStack(alignment: .leading, spacing: 14) {
+                // Stats Row
+                HStack(spacing: 16) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "person.2.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("\(memberCount) Mitglieder")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                
+                // Action Buttons
+                HStack(spacing: 12) {
+                    Button {
+                        showShareSheet = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "qrcode")
+                            Text("Teilen")
+                        }
+                        .font(.caption.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(SoftTintButtonStyle(accent: .indigo, verticalPadding: 10))
+                    
+                    NavigationLink {
+                        SocialGroupDetailView(groupId: groupId)
+                            .environmentObject(store)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text("Öffnen")
+                            Image(systemName: "chevron.right")
+                        }
+                        .font(.caption.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(SoftTintButtonStyle(accent: .cyan, verticalPadding: 10))
+                }
+            }
+        }
+        .contextMenu {
+            Button(role: .destructive) {
+                onLeave()
+            } label: {
+                Label("Verlassen", systemImage: "rectangle.portrait.and.arrow.right")
+            }
+        }
+        .sheet(isPresented: $showShareSheet) {
+            ShareCodeSheet(
+                code: groupId,
+                name: store.groupNames[groupId] ?? "Gruppe",
+                type: .socialGroup
+            )
+        }
+    }
+}
+

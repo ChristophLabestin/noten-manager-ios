@@ -108,33 +108,57 @@ struct ShareTargetSelector: View {
                                     }
                                 }
                                 
-                                // 3. Groups Section (Legacy)
-                                let classAssociatedGroupIds = Set(store.classDetails.values.flatMap(\.groupIds))
-                                let hiddenGroupIds = store.migratedGroupIds.union(classAssociatedGroupIds)
-                                let visibleGroupIds = store.groupIds.filter { !hiddenGroupIds.contains($0) }
-                                
-                                if !visibleGroupIds.isEmpty {
-                                    VStack(alignment: .leading, spacing: 10) {
-                                        Label("Gruppen", systemImage: "person.3.fill")
-                                            .font(.footnote.weight(.semibold))
-                                            .foregroundStyle(.secondary)
-                                        
-                                        // Deduplicate group IDs
-                                        let uniqueGroupIds = Array(Set(visibleGroupIds)).sorted()
-                                        FlowLayout(spacing: 8) {
-                                            ForEach(uniqueGroupIds, id: \.self) { gid in
-                                                GroupSelectionChip(
-                                                    groupId: gid,
-                                                    isSelected: selectedGroupIds.contains(gid),
-                                                    isAutoSelected: autoSelectedGroupIds.contains(gid),
-                                                    isImplicitlySelected: isGroupImplicitlySelected(gid)
-                                                ) {
-                                                    toggleGroup(gid)
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                                // 3. Groups Section (Legacy & Social)
+                                 let classAssociatedGroupIds = Set(store.classDetails.values.flatMap(\.groupIds))
+                                 let hiddenGroupIds = store.migratedGroupIds.union(classAssociatedGroupIds)
+                                 let visibleGroupIds = store.groupIds.filter { !hiddenGroupIds.contains($0) }
+                                 
+                                 let socialGroupIds = visibleGroupIds.filter { store.groupTypes[$0] == "social" }
+                                 let legacyGroupIds = visibleGroupIds.filter { store.groupTypes[$0] != "social" }
+                                 
+                                 if !socialGroupIds.isEmpty {
+                                     VStack(alignment: .leading, spacing: 10) {
+                                         Label("Soziale Gruppen", systemImage: "person.2.fill")
+                                             .font(.footnote.weight(.semibold))
+                                             .foregroundStyle(.secondary)
+                                         
+                                         let sortedSocial = socialGroupIds.sorted { (store.groupNames[$0] ?? "").localizedCaseInsensitiveCompare(store.groupNames[$1] ?? "") == .orderedAscending }
+                                         FlowLayout(spacing: 8) {
+                                             ForEach(sortedSocial, id: \.self) { gid in
+                                                 GroupSelectionChip(
+                                                     groupId: gid,
+                                                     isSelected: selectedGroupIds.contains(gid),
+                                                     isAutoSelected: autoSelectedGroupIds.contains(gid),
+                                                     isImplicitlySelected: isGroupImplicitlySelected(gid)
+                                                 ) {
+                                                     toggleGroup(gid)
+                                                 }
+                                             }
+                                         }
+                                     }
+                                 }
+                                 
+                                 if !legacyGroupIds.isEmpty {
+                                     VStack(alignment: .leading, spacing: 10) {
+                                         Label("Themengruppen (Fächer)", systemImage: "person.3.fill")
+                                             .font(.footnote.weight(.semibold))
+                                             .foregroundStyle(.secondary)
+                                         
+                                         let sortedLegacy = legacyGroupIds.sorted { (store.groupNames[$0] ?? "").localizedCaseInsensitiveCompare(store.groupNames[$1] ?? "") == .orderedAscending }
+                                         FlowLayout(spacing: 8) {
+                                             ForEach(sortedLegacy, id: \.self) { gid in
+                                                 GroupSelectionChip(
+                                                     groupId: gid,
+                                                     isSelected: selectedGroupIds.contains(gid),
+                                                     isAutoSelected: autoSelectedGroupIds.contains(gid),
+                                                     isImplicitlySelected: isGroupImplicitlySelected(gid)
+                                                 ) {
+                                                     toggleGroup(gid)
+                                                 }
+                                             }
+                                         }
+                                     }
+                                 }
                                 
                                 // Info Footer
                                 HStack(alignment: .top, spacing: 8) {

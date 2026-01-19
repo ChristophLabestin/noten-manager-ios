@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ReportCardView: View {
     let schoolYear: String
-    let subjects: [(name: String, average: Double?, gradingMode: GradingMode?, isAdvanced: Bool)]
+    let subjects: [(name: String, average: Double?, gradingMode: GradingMode?, isAdvanced: Bool, grades: [GradeDetail])]
     let seminarGrade: Double?
     let seminarTopic: String?
     let fachreferatGrade: Double?
@@ -17,6 +17,16 @@ struct ReportCardView: View {
     let creationDate: Date
     let appIcon: UIImage?
     let title: String
+    let showAbiturExams: Bool
+    let showPoints: Bool
+    let showGrades: Bool
+    let showIndividualGrades: Bool
+    
+    struct GradeDetail {
+        let value: Double
+        let type: AssessmentType?
+        let weight: Double
+    }
     
     // A4 Dimensions
     private let pageWidth: CGFloat = 595
@@ -44,39 +54,43 @@ struct ReportCardView: View {
                 // Final Grade Circles
                 HStack(spacing: 12) {
                     // Points Circle
-                    ZStack {
-                        Circle()
-                            .strokeBorder(Color.indigo.opacity(0.3), lineWidth: 2)
-                        
-                        VStack(spacing: 0) {
-                            Text(formatPoints(averageAfterDrops))
-                                .font(.system(size: 20, weight: .bold, design: .rounded))
-                                .foregroundStyle(.primary)
-                            Text("Punkte")
-                                .font(.system(size: 7, weight: .bold))
-                                .foregroundStyle(.secondary)
-                                .textCase(.uppercase)
+                    if showPoints {
+                        ZStack {
+                            Circle()
+                                .strokeBorder(Color.indigo.opacity(0.3), lineWidth: 2)
+                            
+                            VStack(spacing: 0) {
+                                Text(formatPoints(averageAfterDrops))
+                                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.primary)
+                                Text("Punkte")
+                                    .font(.system(size: 7, weight: .bold))
+                                    .foregroundStyle(.secondary)
+                                    .textCase(.uppercase)
+                            }
                         }
+                        .frame(width: 60, height: 60)
                     }
-                    .frame(width: 60, height: 60)
 
                     // Grade Circle
-                    ZStack {
-                        Circle()
-                            .strokeBorder(Color.indigo, lineWidth: 3)
-                            .background(Circle().fill(Color.indigo.opacity(0.05)))
-                        
-                        VStack(spacing: 0) {
-                            Text(formatGrade(finalGrade))
-                                .font(.system(size: 26, weight: .black, design: .rounded))
-                                .foregroundStyle(.indigo)
-                            Text("Schnitt")
-                                .font(.system(size: 8, weight: .bold))
-                                .foregroundStyle(.secondary)
-                                .textCase(.uppercase)
+                    if showGrades {
+                        ZStack {
+                            Circle()
+                                .strokeBorder(Color.indigo, lineWidth: 3)
+                                .background(Circle().fill(Color.indigo.opacity(0.05)))
+                            
+                            VStack(spacing: 0) {
+                                Text(formatGrade(finalGrade))
+                                    .font(.system(size: 26, weight: .black, design: .rounded))
+                                    .foregroundStyle(.indigo)
+                                Text("Schnitt")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(.secondary)
+                                    .textCase(.uppercase)
+                            }
                         }
+                        .frame(width: 80, height: 80)
                     }
-                    .frame(width: 80, height: 80)
                 }
             }
             .padding(.horizontal, 40)
@@ -119,7 +133,7 @@ struct ReportCardView: View {
                     sectionHeader("MIT SCHULAUFGABEN")
                     
                     ForEach(withSA, id: \.name) { subject in
-                        subjectRow(name: subject.name, average: subject.average)
+                        subjectRow(name: subject.name, average: subject.average, grades: subject.grades)
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -130,7 +144,7 @@ struct ReportCardView: View {
                     sectionHeader("OHNE SCHULAUFGABEN")
                     
                     ForEach(withoutSA, id: \.name) { subject in
-                        subjectRow(name: subject.name, average: subject.average)
+                        subjectRow(name: subject.name, average: subject.average, grades: subject.grades)
                     }
                     
                     // Extras in right column if space allows, or below
@@ -177,7 +191,7 @@ struct ReportCardView: View {
             }
             
             // Abitur Exams
-            if !abiturGrades.isEmpty {
+            if showAbiturExams && !abiturGrades.isEmpty {
                 Spacer().frame(height: 20)
                 HStack {
                     Text("ABITUR / ABSCHLUSSPRÜFUNG")
@@ -282,20 +296,60 @@ struct ReportCardView: View {
         .padding(.bottom, 8)
     }
     
-    private func subjectRow(name: String, average: Double?) -> some View {
+    private func subjectRow(name: String, average: Double?, grades: [GradeDetail] = []) -> some View {
         VStack(spacing: 0) {
-            HStack {
-                Text(name)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.primary)
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(name)
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.primary)
+                    
+                    if showIndividualGrades && !grades.isEmpty {
+                        // Compact list of individual grades
+                        FlowLayout(spacing: 4) {
+                            ForEach(0..<grades.count, id: \.self) { index in
+                                let g = grades[index]
+                                Text("\(formatGradeValue(g.value))\(assessmentTypeSuffix(g.type))")
+                                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 2)
+                                    .background(Color.gray.opacity(0.1))
+                                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                            }
+                        }
+                    }
+                }
+                
                 Spacer()
+                
                 Text(formatPoints(average))
                     .font(.system(size: 14, weight: .bold, design: .rounded))
                     .foregroundStyle(colorForGrade(average))
             }
             .padding(.vertical, 8)
+            
             Divider()
                 .opacity(0.3)
+        }
+    }
+    
+    private func formatGradeValue(_ value: Double) -> String {
+        if value.truncatingRemainder(dividingBy: 1) == 0 {
+            return String(format: "%.0f", value)
+        } else {
+            return String(format: "%.1f", value)
+        }
+    }
+    
+    private func assessmentTypeSuffix(_ type: AssessmentType?) -> String {
+        guard let type = type else { return "" }
+        switch type {
+        case .schulaufgabe: return " (SA)"
+        case .kurzarbeit: return " (KA)"
+        case .stegreifaufgabe: return " (EX)"
+        case .muendlich: return " (MU)"
+        case .praktisch: return " (PR)"
+        case .projekt: return " (PJ)"
         }
     }
 }

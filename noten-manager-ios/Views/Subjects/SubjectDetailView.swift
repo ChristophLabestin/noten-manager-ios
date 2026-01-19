@@ -199,12 +199,14 @@ struct SubjectDetailView: View {
     }
 
     private func gradeColor(_ value: Double) -> Color {
+        if store.isPrivacyModeActive { return .primary }
         if value >= 7 { return .green }
         if value >= 4 { return .orange }
         return .red
     }
     
     private func avgColor(_ value: Double?) -> Color {
+        if store.isPrivacyModeActive { return .primary }
         guard let v = value else { return .secondary }
         return gradeColor(v)
     }
@@ -745,43 +747,45 @@ struct SubjectDetailView: View {
                             }
                         }
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-            }
-            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
-            .sheetNavigationTitle(editSheetTitle)
+                .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
+                .sheetNavigationTitle(editSheetTitle)
 
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button {
-                        cancelEditSubject()
-                    } label: {
-                        Image(systemName: "chevron.down")
-                            .imageScale(.medium)
-                    }
-                    .accessibilityLabel("Abbrechen")
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        Task { await handleSaveSubject() }
-                    } label: {
-                        if isSavingSubject {
-                            ProgressView()
-                        } else {
-                            Image(systemName: "checkmark")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button {
+                            cancelEditSubject()
+                        } label: {
+                            Image(systemName: "chevron.down")
                                 .imageScale(.medium)
                         }
+                        .foregroundStyle(.primary)
+                        .accessibilityLabel("Abbrechen")
                     }
-                    .accessibilityLabel("Speichern")
-                    .disabled(isSavingSubject)
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button {
+                            Task { await handleSaveSubject() }
+                        } label: {
+                            if isSavingSubject {
+                                ProgressView()
+                            } else {
+                                Image(systemName: "checkmark")
+                                    .imageScale(.medium)
+                            }
+                        }
+                        .foregroundStyle(.primary)
+                        .accessibilityLabel("Speichern")
+                        .disabled(isSavingSubject)
+                    }
                 }
+                .navigationDestination(isPresented: $showSchulaufgabeMergeSheet) {
+                    schulaufgabeMergeView
+                }
+                .scrollDismissesKeyboard(.interactively)
+                .hideKeyboardOnTap()
             }
-            .navigationDestination(isPresented: $showSchulaufgabeMergeSheet) {
-                schulaufgabeMergeView
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .hideKeyboardOnTap()
         }
         .sheet(isPresented: $showNoteSheet) {
             NavigationStack {

@@ -151,6 +151,9 @@ struct WhatIfModeView: View {
                     }
                 )
                 .presentationDetents([.medium, .large])
+                .presentationBackground {
+                    ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: 0.4)
+                }
             }
         }
     }
@@ -264,7 +267,7 @@ struct WhatIfHeaderCard: View {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 12) {
                     StatChip(title: "Aktuell", value: formatAverage(currentAverage), accent: .indigo)
-                    StatChip(title: "Simulation", value: formatAverage(simulatedAverage), accent: avgColor(simulatedAverage))
+                    StatChip(title: "Simulation", value: formatAverage(simulatedAverage), accent: .secondary)
                     StatChip(title: "Δ", value: formatDelta(deltaAverage), accent: .orange)
                 }
                 
@@ -308,7 +311,8 @@ struct WhatIfHeaderCard: View {
     }
 }
 
-private func avgColor(_ v: Double?) -> Color {
+private func avgColor(_ v: Double?, privacyActive: Bool = false) -> Color {
+    if privacyActive { return .primary }
     guard let v else { return .secondary }
     if v >= 7 { return .green }
     if v >= 4 { return .orange }
@@ -364,7 +368,7 @@ struct SubjectWhatIfRow: View {
                         
                         Text(formatAvg(simulatedAvg))
                             .font(.headline.weight(.bold).monospacedDigit())
-                            .foregroundStyle(avgColor(simulatedAvg))
+                            .foregroundStyle(avgColor(simulatedAvg, privacyActive: store.isPrivacyModeActive))
                     }
                     
                     let delta = (simulatedAvg ?? 0) - (currentAvg ?? 0)
@@ -428,7 +432,7 @@ struct SubjectWhatIfRow: View {
                             } else {
                                 VStack(spacing: 8) {
                                     ForEach(simulatedGrades) { grade in
-                                        SimulatedGradeRow(grade: grade, onRemove: { onRemoveGhost(grade.id) })
+                                        SimulatedGradeRow(grade: grade, privacyActive: store.isPrivacyModeActive, onRemove: { onRemoveGhost(grade.id) })
                                     }
                                 }
                                 .padding(.horizontal, 16)
@@ -486,10 +490,11 @@ struct SubjectWhatIfRow: View {
 
 struct SimulatedGradeRow: View {
     let grade: SimulatedGradeEntry
+    let privacyActive: Bool
     let onRemove: () -> Void
     
     private var accentColor: Color {
-        avgColor(grade.grade)
+        avgColor(grade.grade, privacyActive: privacyActive)
     }
     
     var body: some View {
@@ -599,111 +604,107 @@ struct AddGhostGradeSheet: View {
     
     var body: some View {
         NavigationStack {
-            ZStack {
-                ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: 0.4)
-                
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 20) {
-                        // Points Selection
-                        SettingsCard(
-                            title: "Punkte wählen",
-                            subtitle: "Wie viele Punkte simulierst du?",
-                            systemImage: "target",
-                            accent: .pink
-                        ) {
-                            VStack(spacing: 12) {
-                                // Current Selection Display
-                                Text("\(grade)")
-                                    .font(.system(size: 36, weight: .black, design: .rounded))
-                                    .foregroundStyle(.pink)
-                                    .frame(width: 60, height: 60)
-                                    .background(.pink.opacity(0.1))
-                                    .clipShape(Circle())
-                                    .overlay(Circle().stroke(.pink.opacity(0.2), lineWidth: 1.5))
-                                
-                                LazyVGrid(columns: columns, spacing: 6) {
-                                    ForEach(0...15, id: \.self) { val in
-                                        Button {
-                                            grade = val
-                                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                        } label: {
-                                            Text("\(val)")
-                                                .font(.subheadline.weight(.semibold).monospacedDigit())
-                                                .frame(maxWidth: .infinity)
-                                                .frame(height: 36)
-                                                .background(grade == val ? Color.pink : Color.secondary.opacity(0.1))
-                                                .foregroundStyle(grade == val ? .white : .primary)
-                                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                        }
-                                        .buttonStyle(.plain)
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 20) {
+                    // Points Selection
+                    SettingsCard(
+                        title: "Punkte wählen",
+                        subtitle: "Wie viele Punkte simulierst du?",
+                        systemImage: "target",
+                        accent: .pink
+                    ) {
+                        VStack(spacing: 12) {
+                            // Current Selection Display
+                            Text("\(grade)")
+                                .font(.system(size: 36, weight: .black, design: .rounded))
+                                .foregroundStyle(.pink)
+                                .frame(width: 60, height: 60)
+                                .background(.pink.opacity(0.1))
+                                .clipShape(Circle())
+                                .overlay(Circle().stroke(.pink.opacity(0.2), lineWidth: 1.5))
+                            
+                            LazyVGrid(columns: columns, spacing: 6) {
+                                ForEach(0...15, id: \.self) { val in
+                                    Button {
+                                        grade = val
+                                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                    } label: {
+                                        Text("\(val)")
+                                            .font(.subheadline.weight(.semibold).monospacedDigit())
+                                            .frame(maxWidth: .infinity)
+                                            .frame(height: 36)
+                                            .background(grade == val ? Color.pink : Color.secondary.opacity(0.1))
+                                            .foregroundStyle(grade == val ? .white : .primary)
+                                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                                     }
+                                    .buttonStyle(.plain)
                                 }
                             }
                         }
-                        
-                        // Category Selection
-                        SettingsCard(
-                            title: "Kategorie & Halbjahr",
-                            subtitle: "Details der Simulation",
-                            systemImage: "list.bullet.indent",
-                            accent: .pink
-                        ) {
-                            VStack(spacing: 16) {
-                                // assessment type
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Label("Leistungsart", systemImage: "tag.fill")
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(.secondary)
-                                    
-                                    Picker("Typ", selection: $assessmentType) {
-                                        if gradingMode == .withSchulaufgaben {
-                                            Text("Schulaufgabe").tag(AssessmentType.schulaufgabe)
-                                        }
-                                        Text("Kurzarbeit").tag(AssessmentType.kurzarbeit)
-                                        Text("Mündlich / EX").tag(AssessmentType.muendlich)
-                                    }
-                                    .pickerStyle(.segmented)
-                                }
-                                
-                                Divider().opacity(0.5)
-                                
-                                // Half year
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Label("Halbjahr", systemImage: "calendar")
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(.secondary)
-                                        
-                                    Picker("Halbjahr", selection: $selectedHalfYear) {
-                                        Text("1. Halbjahr").tag(1)
-                                        Text("2. Halbjahr").tag(2)
-                                    }
-                                    .pickerStyle(.segmented)
-                                }
-                            }
-                        }
-                        
-                        Button {
-                            let w = assessmentType == .schulaufgabe ? 2.0 : 1.0
-                            onAdd(Double(grade), w, false, selectedHalfYear, assessmentType)
-                            dismiss()
-                        } label: {
-                            HStack {
-                                Text("Simulation hinzufügen")
-                                Image(systemName: "plus.circle.fill")
-                            }
-                            .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(SoftTintButtonStyle(accent: .pink, font: .headline.weight(.bold), verticalPadding: 16))
-                        
-                        Text("Simulierte Noten sind nur lokal und beeinflussen nicht deine echten Daten.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 20)
                     }
-                    .padding(16)
-                    .padding(.bottom, 20)
+                    
+                    // Category Selection
+                    SettingsCard(
+                        title: "Kategorie & Halbjahr",
+                        subtitle: "Details der Simulation",
+                        systemImage: "list.bullet.indent",
+                        accent: .pink
+                    ) {
+                        VStack(spacing: 16) {
+                            // assessment type
+                            VStack(alignment: .leading, spacing: 8) {
+                                Label("Leistungsart", systemImage: "tag.fill")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                
+                                Picker("Typ", selection: $assessmentType) {
+                                    if gradingMode == .withSchulaufgaben {
+                                        Text("Schulaufgabe").tag(AssessmentType.schulaufgabe)
+                                    }
+                                    Text("Kurzarbeit").tag(AssessmentType.kurzarbeit)
+                                    Text("Mündlich / EX").tag(AssessmentType.muendlich)
+                                }
+                                .pickerStyle(.segmented)
+                            }
+                            
+                            Divider().opacity(0.5)
+                            
+                            // Half year
+                            VStack(alignment: .leading, spacing: 8) {
+                                Label("Halbjahr", systemImage: "calendar")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                    
+                                Picker("Halbjahr", selection: $selectedHalfYear) {
+                                    Text("1. Halbjahr").tag(1)
+                                    Text("2. Halbjahr").tag(2)
+                                }
+                                .pickerStyle(.segmented)
+                            }
+                        }
+                    }
+                    
+                    Button {
+                        let w = assessmentType == .schulaufgabe ? 2.0 : 1.0
+                        onAdd(Double(grade), w, false, selectedHalfYear, assessmentType)
+                        dismiss()
+                    } label: {
+                        HStack {
+                            Text("Simulation hinzufügen")
+                            Image(systemName: "plus.circle.fill")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(SoftTintButtonStyle(accent: .pink, font: .headline.weight(.bold), verticalPadding: 16))
+                    
+                    Text("Simulierte Noten sind nur lokal und beeinflussen nicht deine echten Daten.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 20)
                 }
+                .padding(16)
+                .padding(.bottom, 20)
             }
             .navigationTitle("Neue Simulation")
             .navigationBarTitleDisplayMode(.inline)

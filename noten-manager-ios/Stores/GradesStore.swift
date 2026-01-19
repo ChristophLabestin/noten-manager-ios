@@ -296,6 +296,7 @@ final class GradesStore: ObservableObject {
     @Published var groupBranchNames: [String: String] = [:] // gid -> migratedBranchName
     @Published var groupMigratedToClassIds: [String: String] = [:] // gid -> classId
     @Published var groupOwners: [String: String] = [:] // gid -> ownerId
+    @Published var groupTypes: [String: String] = [:] // gid -> "social" | nil (legacy)
     @Published var groupMemberIds: [String: Set<String>] = [:] // gid -> userIds
     @Published var groupSubjectsByGroup: [String: [GroupSubject]] = [:] // gid -> subjects
     @Published var groupSubjectMappings: [String: [String: String]] = [:] // gid -> subjectKey -> local name
@@ -350,6 +351,7 @@ final class GradesStore: ObservableObject {
     @Published var userName: String? = nil
     @Published var hasSeenMigrationInfo: Bool = false
     @Published var isPrivacyModeActive: Bool = false
+    @Published var alwaysEnablePrivacyOnStart: Bool = false
 
     var preferredColorScheme: ColorScheme? {
         switch darkModeMode {
@@ -660,6 +662,7 @@ final class GradesStore: ObservableObject {
         groupIds = []
         groupNames = [:]
         groupOwners = [:]
+        groupTypes = [:]
         groupSubjectsByGroup = [:]
         groupSubjectMappings = [:]
         groupExamsByGroup = [:]
@@ -777,6 +780,7 @@ final class GradesStore: ObservableObject {
         groupIds = []
         groupNames = [:]
         groupOwners = [:]
+        groupTypes = [:]
         examGroupId = nil
         homeworkGroupId = nil
         examGroupIds = []
@@ -2974,6 +2978,11 @@ final class GradesStore: ObservableObject {
         UserDefaults.standard.set(active, forKey: "grades_isPrivacyModeActive")
     }
 
+    func updateAlwaysEnablePrivacyOnStart(_ enabled: Bool) {
+        self.alwaysEnablePrivacyOnStart = enabled
+        UserDefaults.standard.set(enabled, forKey: "grades_alwaysEnablePrivacyOnStart")
+    }
+
     private func loadLocalPreferences() {
         let defaults = UserDefaults.standard
 
@@ -3030,7 +3039,13 @@ final class GradesStore: ObservableObject {
             showHolidayHints = true
         }
 
-        isPrivacyModeActive = defaults.bool(forKey: "grades_isPrivacyModeActive")
+        // Privacy Mode settings
+        alwaysEnablePrivacyOnStart = defaults.bool(forKey: "grades_alwaysEnablePrivacyOnStart")
+        if alwaysEnablePrivacyOnStart {
+            isPrivacyModeActive = true
+        } else {
+            isPrivacyModeActive = defaults.bool(forKey: "grades_isPrivacyModeActive")
+        }
         Task { await self.applyAppIconSelectionIfNeeded() }
     }
 
@@ -3654,6 +3669,47 @@ final class GradesStore: ObservableObject {
         groupSubjectsByGroup[code] = seededSubjects
         groupSubjectMappings[code] = mapping
         try await yearRef.collection("groupMappings").document(code).setData(["map": mapping], merge: true)
+
+        updateGroupObservers(uid: uid, schoolYearId: yearRef.documentID)
+
+        return code
+    }
+
+    func createSocialGroup(name: String) async throws -> String {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
+        }
+
+        let code = generateExamGroupCode()
+        let yearRef = try await requireYearRef(uid: uid)
+        let activeYearId = activeSchoolYearId
+
+        // Gruppe anlegen
+        let groupRef = db.collection("groups").document(code)
+        try await groupRef.setData([
+            "ownerId": uid,
+            "createdAt": Date(),
+            "name": name,
+            "type": "social",
+            "schoolYearId": activeYearId as Any
+        ], merge: true)
+
+        try await groupRef.collection("members").document(uid).setData([
+            "joinedAt": Date()
+        ])
+
+        try await yearRef.setData([
+            "groupIds": FieldValue.arrayUnion([code])
+        ], merge: true)
+
+        await MainActor.run {
+            if !groupIds.contains(code) {
+                groupIds.append(code)
+                groupNames[code] = name
+                groupOwners[code] = uid
+                groupTypes[code] = "social"
+            }
+        }
 
         updateGroupObservers(uid: uid, schoolYearId: yearRef.documentID)
 
@@ -5109,7 +5165,11 @@ final class GradesStore: ObservableObject {
         do {
             let snap = try await db.collection("groups").document(gid).getDocument()
             if let name = snap.data()?["name"] as? String {
-                await MainActor.run { groupNames[gid] = name }
+                let type = snap.data()?["type"] as? String
+                await MainActor.run { 
+                    groupNames[gid] = name 
+                    groupTypes[gid] = type
+                }
             }
         } catch {
             ErrorLoggingService.logErrorIfEnabled(error)
@@ -6196,6 +6256,7 @@ final class GradesStore: ObservableObject {
                 hasTime: exam.hasTime,
                 weight: exam.weight,
                 customWeight: exam.customWeight,
+                assessmentType: exam.assessmentType,
                 reminderAt: nil, // Reset reminder
                 isCompleted: false, // Ensure it's open
                 requiresGrade: exam.requiresGrade
@@ -7929,6 +7990,13 @@ final class GradesStore: ObservableObject {
                     } else {
                         self.groupNames.removeValue(forKey: gid)
                     }
+
+                    if let type = data["type"] as? String {
+                        self.groupTypes[gid] = type
+                    } else {
+                        self.groupTypes.removeValue(forKey: gid)
+                    }
+
                     if let branchName = data["migratedToBranchName"] as? String {
                         self.groupBranchNames[gid] = branchName
                     } else {

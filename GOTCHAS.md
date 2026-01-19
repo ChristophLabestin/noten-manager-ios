@@ -15,6 +15,7 @@ This file documents non-obvious details, workarounds, and "gotchas" in the codeb
 ## UI Components
 *   **Theme**: The app supports a "Feminine" theme (Pink) and "Default" (Indigo/Blue). Use `AppStyleComponents` or `store.theme` checks to respect this.
 *   **Privacy Mode**: Use `PrivacyBlurModifier` for sensitive data (grades) when `store.privacyMode` is active.
+*   **Horizontal Layout Issues**: `HelpCenterLink` or other complex components inside `SettingsSectionBox` / `SettingsCard` can sometimes trigger unexpected horizontal scrolling on larger iPhone screens (e.g. iPhone 16 Pro). If this happens, try moving the component outside of the nested `VStack` or using `.fixedSize(horizontal: false, vertical: true)`.
 
 ## Navigation
 *   **Tab Bar**: The custom tab bar implementation requires careful handling of bottom safe area padding in child views.

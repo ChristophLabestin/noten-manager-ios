@@ -30,6 +30,11 @@ struct EditHomeworkView: View {
     @State private var isShared: Bool = false
     @State private var sharedId: String? = nil
     @State private var selectedGroupIds: Set<String> = []
+    @State private var selectedClassIds: Set<String> = []
+    @State private var selectedCourseIds: Set<String> = []
+    @State private var autoSelectedGroupIds: Set<String> = []
+    @State private var autoSelectedCourseIds: Set<String> = []
+    @State private var shareWithGroup: Bool = false
     @FocusState private var focusedField: Field?
 
     private enum Field: Hashable {
@@ -247,103 +252,25 @@ struct EditHomeworkView: View {
                         }
                     }
 
-                    if !homework.isShared && !store.groupIds.isEmpty {
-                        SettingsCard(
-                            title: "Mit Gruppe teilen",
-                            subtitle: "Aufgabe nachträglich veröffentlichen",
-                            systemImage: "person.3.fill",
-                            accent: .blue
-                        ) {
-                                if !store.classIds.isEmpty || !store.groupIds.isEmpty {
-                                    VStack(alignment: .leading, spacing: 16) {
-                                        // Classes Section
-                                        if !store.classIds.isEmpty {
-                                            VStack(alignment: .leading, spacing: 8) {
-                                                Label("Klassen", systemImage: "rectangle.stack.fill")
-                                                    .font(.footnote.weight(.semibold))
-                                                    .foregroundStyle(.secondary)
-                                                
-                                                FlowLayout(spacing: 8) {
-                                                    ForEach(store.classIds, id: \.self) { cid in
-                                                        let name = store.classNames[cid] ?? "Klasse"
-                                                        let classGroups = Set(store.classDetails[cid]?.groupIds ?? [])
-                                                        let isFullySelected = !classGroups.isEmpty && classGroups.isSubset(of: selectedGroupIds)
-                                                        
-                                                        Button {
-                                                            withAnimation(.snappy) {
-                                                                if isFullySelected {
-                                                                    selectedGroupIds.subtract(classGroups)
-                                                                } else {
-                                                                    selectedGroupIds.formUnion(classGroups)
-                                                                }
-                                                            }
-                                                        } label: {
-                                                            HStack(spacing: 6) {
-                                                                Text(name)
-                                                                if isFullySelected {
-                                                                    Image(systemName: "checkmark")
-                                                                        .font(.caption.bold())
-                                                                }
-                                                            }
-                                                            .font(.subheadline.weight(.medium))
-                                                            .padding(.horizontal, 12)
-                                                            .padding(.vertical, 8)
-                                                            .background(isFullySelected ? Color.indigo : Color.indigo.opacity(0.1))
-                                                            .foregroundStyle(isFullySelected ? .white : .indigo)
-                                                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                                        }
-                                                        .buttonStyle(.plain)
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        // Groups Section
-                                        if !store.groupIds.isEmpty {
-                                            VStack(alignment: .leading, spacing: 8) {
-                                                Label("Einzelne Gruppen", systemImage: "person.3.fill")
-                                                    .font(.footnote.weight(.semibold))
-                                                    .foregroundStyle(.secondary)
-                                                
-                                                FlowLayout(spacing: 8) {
-                                                    ForEach(store.groupIds, id: \.self) { gid in
-                                                        let name = store.groupNames[gid] ?? gid
-                                                        let isSelected = selectedGroupIds.contains(gid)
-                                                        
-                                                        Button {
-                                                            withAnimation(.snappy) {
-                                                                if isSelected {
-                                                                    selectedGroupIds.remove(gid)
-                                                                } else {
-                                                                    selectedGroupIds.insert(gid)
-                                                                }
-                                                            }
-                                                        } label: {
-                                                            HStack(spacing: 6) {
-                                                                Text(name)
-                                                                if isSelected {
-                                                                    Image(systemName: "checkmark")
-                                                                        .font(.caption.bold())
-                                                                }
-                                                            }
-                                                            .font(.subheadline.weight(.medium))
-                                                            .padding(.horizontal, 12)
-                                                            .padding(.vertical, 8)
-                                                            .background(isSelected ? Color.orange : Color.orange.opacity(0.1))
-                                                            .foregroundStyle(isSelected ? .white : .orange)
-                                                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                                        }
-                                                        .buttonStyle(.plain)
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    .padding(16)
-                                    .background(Color.secondary.opacity(0.05))
-                                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                                }
-
+                    if !homework.isShared && (!store.groupIds.isEmpty || !store.classIds.isEmpty || !store.courses.isEmpty) {
+                        let availableCourses: [Course] = {
+                            let targetIds = Set(store.targetCourseIds(forLocalSubject: subjectName))
+                            let matches = store.courses.filter { targetIds.contains($0.id) }
+                            return Array(Dictionary(grouping: matches, by: { $0.id }).values.compactMap(\.first))
+                        }()
+                        
+                        ShareTargetSelector(
+                            shareWithGroup: $shareWithGroup,
+                            selectedGroupIds: $selectedGroupIds,
+                            selectedClassIds: $selectedClassIds,
+                            selectedCourseIds: $selectedCourseIds,
+                            availableCourses: availableCourses,
+                            autoSelectedGroupIds: autoSelectedGroupIds,
+                            autoSelectedCourseIds: autoSelectedCourseIds
+                        )
+                        
+                        if shareWithGroup {
+                            SettingsSectionBox {
                                 Button {
                                     Task { await shareToGroups() }
                                 } label: {
@@ -355,18 +282,22 @@ struct EditHomeworkView: View {
                                     }
                                 }
                                 .buttonStyle(SoftTintButtonStyle(accent: .blue))
-                                .disabled(isSharing || selectedGroupIds.isEmpty)
+                                .disabled(isSharing || (selectedGroupIds.isEmpty && selectedClassIds.isEmpty && selectedCourseIds.isEmpty))
+                            }
+                            .padding(.top, -8)
+                        }
 
-                                if let shareInfo {
-                                    Text(shareInfo)
-                                        .font(.footnote)
-                                        .foregroundStyle(.green)
-                                }
-                                if let shareError {
-                                    Text(shareError)
-                                        .font(.footnote)
-                                        .foregroundStyle(.red)
-                                }
+                        if let shareInfo {
+                            Text(shareInfo)
+                                .font(.footnote)
+                                .foregroundStyle(.green)
+                                .padding(.horizontal, 16)
+                        }
+                        if let shareError {
+                            Text(shareError)
+                                .font(.footnote)
+                                .foregroundStyle(.red)
+                                .padding(.horizontal, 16)
                         }
                     }
 
@@ -469,9 +400,11 @@ struct EditHomeworkView: View {
                     personalNote = store.userNoteForHomework(homework) ?? ""
                     loadedNote = true
                 }
-                if selectedGroupIds.isEmpty, let first = store.groupIds.first {
-                    selectedGroupIds = [first]
-                }
+                updateSelectedGroupsForSubject(subjectName)
+                shareWithGroup = !selectedGroupIds.isEmpty && !homework.isShared
+            }
+            .onChange(of: subjectName) { _, newSubject in
+                updateSelectedGroupsForSubject(newSubject)
             }
             .alert(
                 "Hausaufgabe löschen?",
@@ -535,17 +468,41 @@ struct EditHomeworkView: View {
         shareError = nil
         shareInfo = nil
         isSharing = true
-        let success = await store.shareHomeworkToGroups(
-            homeworkId: homework.id,
-            targetGroupIds: Array(selectedGroupIds)
-        )
+        
+        var createdAny = false
+        
+        // 1. Share to Courses
+        for courseId in selectedCourseIds {
+            do {
+                _ = try await store.addHomeworkToCourse(
+                    courseId: courseId,
+                    title: title,
+                    dueDate: hasDueDate ? dueDate : nil,
+                    reminderAt: hasReminder ? reminderDate : nil
+                )
+                createdAny = true
+            } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
+            }
+        }
+        
+        // 2. Share to Groups (Legacy + Social)
+        let targetGroups = Array(selectedGroupIds.union(selectedClassIds.flatMap { store.classDetails[$0]?.groupIds ?? [] }))
+        if !targetGroups.isEmpty {
+            let success = await store.shareHomeworkToGroups(
+                homeworkId: homework.id,
+                targetGroupIds: targetGroups
+            )
+            if success { createdAny = true }
+        }
+        
         await MainActor.run {
             isSharing = false
-            if success {
-                shareInfo = "In Gruppe geteilt."
+            if createdAny {
+                shareInfo = "Geteilt."
                 dismiss()
             } else {
-                shareError = "Teilen fehlgeschlagen. Prüfe Gruppen und versuche es erneut."
+                shareError = "Teilen fehlgeschlagen."
             }
         }
     }
@@ -582,5 +539,28 @@ struct EditHomeworkView: View {
             }
         }
         isDeleting = false
+    }
+
+    private func updateSelectedGroupsForSubject(_ subject: String) {
+        // 1. Remove previously auto-selected groups & courses
+        selectedGroupIds.subtract(autoSelectedGroupIds)
+        autoSelectedGroupIds.removeAll()
+        selectedCourseIds.subtract(autoSelectedCourseIds)
+        autoSelectedCourseIds.removeAll()
+        
+        // 2. If subject is valid, find new matches
+        if subject != noSubjectLabel && !subject.isEmpty {
+            let matchedGroups = Set(store.targetGroupIds(forLocalSubject: subject))
+            if !matchedGroups.isEmpty {
+                selectedGroupIds.formUnion(matchedGroups)
+                autoSelectedGroupIds = matchedGroups
+            }
+            
+            let matchedCourses = Set(store.targetCourseIds(forLocalSubject: subject))
+            if !matchedCourses.isEmpty {
+                selectedCourseIds.formUnion(matchedCourses)
+                autoSelectedCourseIds = matchedCourses
+            }
+        }
     }
 }

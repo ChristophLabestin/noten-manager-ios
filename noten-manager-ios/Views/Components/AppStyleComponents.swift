@@ -136,6 +136,7 @@ struct SettingsCard<Content: View, Trailing: View>: View {
     let subtitle: String?
     let systemImage: String?
     let accent: Color
+    var isExpanded: Binding<Bool>?
     @ViewBuilder let content: Content
     @ViewBuilder let trailing: Trailing
 
@@ -144,6 +145,7 @@ struct SettingsCard<Content: View, Trailing: View>: View {
         subtitle: String?,
         systemImage: String? = nil,
         accent: Color = .accentColor,
+        isExpanded: Binding<Bool>? = nil,
         @ViewBuilder trailing: () -> Trailing,
         @ViewBuilder content: () -> Content
     ) {
@@ -151,40 +153,17 @@ struct SettingsCard<Content: View, Trailing: View>: View {
         self.subtitle = subtitle
         self.systemImage = systemImage
         self.accent = accent
+        self.isExpanded = isExpanded
         self.trailing = trailing()
         self.content = content()
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .center, spacing: 12) {
-                if let systemImage {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(iconBackground)
-                            .frame(width: 46, height: 46)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .stroke(accent.opacity(colorScheme == .dark ? 0.30 : 0.20), lineWidth: 1)
-                            )
-                        Image(systemName: systemImage)
-                            .font(.headline.weight(.bold))
-                            .foregroundStyle(accent)
-                    }
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(.title3.weight(.bold))
-                    if let subtitle, !subtitle.isEmpty {
-                        Text(subtitle)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Spacer()
-                trailing
+            headerView
+            if isExpanded?.wrappedValue ?? true {
+                content
             }
-            content
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -196,6 +175,64 @@ struct SettingsCard<Content: View, Trailing: View>: View {
             x: 0,
             y: 4
         )
+    }
+
+    @ViewBuilder
+    private var headerView: some View {
+        if let isExpanded = isExpanded {
+            Button {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isExpanded.wrappedValue.toggle()
+                }
+            } label: {
+                headerContent(expanded: isExpanded.wrappedValue)
+            }
+            .buttonStyle(.plain)
+        } else {
+            headerContent(expanded: true)
+        }
+    }
+
+    private func headerContent(expanded: Bool) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            if let systemImage {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(iconBackground)
+                        .frame(width: 46, height: 46)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(accent.opacity(colorScheme == .dark ? 0.30 : 0.20), lineWidth: 1)
+                        )
+                    Image(systemName: systemImage)
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(accent)
+                }
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.title3.weight(.bold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                if let subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
+            Spacer()
+            trailing
+            if isExpanded != nil {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
+                    .padding(.leading, 4)
+            }
+        }
+        .contentShape(Rectangle())
     }
 
     private var baseTop: Color {
@@ -252,6 +289,7 @@ extension SettingsCard where Trailing == EmptyView {
         subtitle: String?,
         systemImage: String? = nil,
         accent: Color = .accentColor,
+        isExpanded: Binding<Bool>? = nil,
         @ViewBuilder content: () -> Content
     ) {
         self.init(
@@ -259,6 +297,7 @@ extension SettingsCard where Trailing == EmptyView {
             subtitle: subtitle,
             systemImage: systemImage,
             accent: accent,
+            isExpanded: isExpanded,
             trailing: { EmptyView() },
             content: content
         )
@@ -417,12 +456,12 @@ struct StatChip: View {
                 .font(.system(size: 22, weight: .bold, design: .rounded))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
-                .minimumScaleFactor(0.8)
+                .minimumScaleFactor(0.5)
                 .monospacedDigit()
                 .privacyBlur()
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         .background(chipSurface)
         .overlay(chipBorder)
         .opacity(isGreyedOut ? 0.5 : 1.0)

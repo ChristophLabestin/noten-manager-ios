@@ -110,6 +110,7 @@ struct ExamReminderView: View {
                     hasTime: exam.hasTime,
                     weight: exam.weight,
                     customWeight: exam.customWeight,
+                    assessmentType: exam.assessmentType,
                     reminderAt: reminderAt,
                     isCompleted: exam.isCompleted
                 )

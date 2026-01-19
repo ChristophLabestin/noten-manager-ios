@@ -20,6 +20,8 @@ struct CalendarPageView: View {
     @State private var shareError: String?
     @State private var showLegend = false
     @State private var examToDelete: Exam?
+    @State private var editingExam: Exam?
+    @State private var editingHomework: Homework?
     @State private var holidays: [HolidayPeriod] = []
     @AppStorage("showNextExamCard") private var showNextExamCard: Bool = true
 
@@ -222,11 +224,19 @@ struct CalendarPageView: View {
                 .environmentObject(store)
         }
         .sheet(item: $detailExam) { exam in
-            ExamDetailSheet(exam: exam, onEdit: { _ in })
+            ExamDetailSheet(exam: exam, onEdit: { editingExam = $0 })
                 .environmentObject(store)
         }
         .sheet(item: $detailHomework) { homework in
-           HomeworkDetailSheet(homework: homework, onEdit: { _ in })
+           HomeworkDetailSheet(homework: homework, onEdit: { editingHomework = $0 })
+                .environmentObject(store)
+        }
+        .sheet(item: $editingExam) { exam in
+            EditExamView(exam: exam)
+                .environmentObject(store)
+        }
+        .sheet(item: $editingHomework) { homework in
+            EditHomeworkView(homework: homework)
                 .environmentObject(store)
         }
         .sheet(item: $examForNewGrade) { exam in

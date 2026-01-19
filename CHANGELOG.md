@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased] - 2026-01-19
+
+### Added
+- **Social Groups**: Introduced subject-independent groups for sharing homework and appointments without fixed course lists.
+- **Social Group Management**: Added `SocialGroupCreationView` and `SocialGroupDetailView` for seamless group handling.
+- **Smart Half-Year Drops**: Implemented intelligent suggestion logic in `FinalGradeView` to help users identify the best half-years to drop according to FOBOSO rules.
+
+### Changed
+- **Help Center UX**: Implemented collapsible sections in `HelpCenterView` to reduce visual clutter and improved navigation with automated scrolling.
+- **What If Entry**: Optimized `WhatIfModeView` with a high-density point grid (0-15) for faster grade simulation.
+- **Target Selection**: Categorized sharing targets into "Soziale Gruppen" and "Themengruppen" for better organization.
+- **Compact UI**: Redesigned `HelpCenterLink` for a more minimal, space-efficient appearance.
+
+### Fixed
+- **Privacy Mode Polish**: Extended grade obscuration to `SubjectDetailView` and refined color handling when privacy mode is active.
+- **Toolbar Consistency**: Restored standard toolbar colors and icons in `SubjectDetailView` edit sheets.
+- **Documentation**: Updated `GOTCHAS.md` with layout tips and iOS 17 transition notes.
+
 ## [Unreleased] - 2026-01-18
 
 ### Added

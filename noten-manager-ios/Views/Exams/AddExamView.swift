@@ -364,7 +364,12 @@ struct AddExamView: View {
                     // Visibility & Sharing
                     if !store.groupIds.isEmpty || !store.classIds.isEmpty || !store.courses.isEmpty {
                         // Filter courses relevant to the current subject
+                        // For General Events, show ALL courses since there's no subject to filter by
                         let availableCourses: [Course] = {
+                            if isGeneralEvent {
+                                // Show all courses for general events
+                                return Array(Dictionary(grouping: store.courses, by: { $0.id }).values.compactMap(\.first))
+                            }
                             let targetIds = Set(store.targetCourseIds(forLocalSubject: subjectName))
                             let matches = store.courses.filter { targetIds.contains($0.id) }
                             return Array(Dictionary(grouping: matches, by: { $0.id }).values.compactMap(\.first))
@@ -545,7 +550,7 @@ struct AddExamView: View {
             let storedNotes = trimmedNotes.isEmpty ? nil : trimmedNotes
             let reminder: Date? = hasReminder ? reminderDate : nil
             let requiresGrade = isGeneralEvent ? false : true
-            let effectiveSubject = isFachreferatEvent ? "Fachreferat" : subjectName
+            let effectiveSubject = isFachreferatEvent ? "Fachreferat" : (isGeneralEvent ? "Termin" : subjectName)
             let relatedSubjectRaw = isFachreferatEvent ? fachreferatSubjectName.trimmingCharacters(in: .whitespacesAndNewlines) : nil
             let relatedSubject = (relatedSubjectRaw?.isEmpty == false) ? relatedSubjectRaw : nil
             let weightToStore: Int? = allowWeights && !useCustomWeight ? examWeight : nil
@@ -554,7 +559,7 @@ struct AddExamView: View {
             if shareWithGroup {
                 var createdAny = false
                 
-                // 1. Share to Courses
+                // 1. Share to selected Courses
                 for courseId in selectedCourseIds {
                     _ = try await store.addExamToCourse(
                         courseId: courseId,
@@ -571,7 +576,27 @@ struct AddExamView: View {
                     createdAny = true
                 }
                 
-                // 2. Share to Groups (Legacy)
+                // 2. For selected classes: share to courses belonging to those classes
+                for classId in selectedClassIds {
+                    let classCourseIds = store.courses.filter { $0.classId == classId }.map { $0.id }
+                    for courseId in classCourseIds where !selectedCourseIds.contains(courseId) {
+                        _ = try await store.addExamToCourse(
+                            courseId: courseId,
+                            title: trimmedTitle,
+                            notes: storedNotes,
+                            date: examDate,
+                            hasTime: hasTime,
+                            weight: weightToStore,
+                            customWeight: customWeight,
+                            assessmentType: allowWeights && !useCustomWeight ? examAssessmentType : nil,
+                            reminderAt: reminder,
+                            requiresGrade: requiresGrade
+                        )
+                        createdAny = true
+                    }
+                }
+                
+                // 3. Share to Legacy Groups (from selected groups + classes with groupIds)
                 let targetGroups = Array(selectedGroupIds.union(selectedClassIds.flatMap { store.classDetails[$0]?.groupIds ?? [] }))
                 if !targetGroups.isEmpty {
                     let sharedIds = try await store.addExamToGroups(

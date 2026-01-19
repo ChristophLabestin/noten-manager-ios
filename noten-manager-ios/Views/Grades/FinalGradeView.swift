@@ -23,6 +23,7 @@ private enum HalfYearDropOption: Equatable {
 
 struct FinalGradeView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var scheme
     @EnvironmentObject var store: GradesStore
     @EnvironmentObject var biometricManager: BiometricAuthManager
 
@@ -44,6 +45,12 @@ struct FinalGradeView: View {
     @AppStorage("launchOfferPurchased") private var launchOfferPurchased = false
     @ObservedObject private var notificationInbox = NotificationInboxStore.shared
     var onOpenCreationMenu: () -> Void = {}
+
+    // Interaction State
+    @State private var showSwapOptions: Bool = false
+    @State private var swapCandidate: (handle: SubjectHandle, halfYear: Int)? = nil
+    @State private var showManageDrops: Bool = false
+    @State private var scrollOffset: CGFloat = 0
 
     private struct SubjectHandle: Identifiable, Hashable {
         let id: String
@@ -78,6 +85,14 @@ struct FinalGradeView: View {
         func hash(into hasher: inout Hasher) {
             hasher.combine(id)
         }
+    }
+
+    private struct SuggestionCandidate: Identifiable {
+        let handle: SubjectHandle
+        let halfYear: Int
+        let average: Double
+        
+        var id: String { "\(handle.id)-\(halfYear)" }
     }
 
     private var currentSchoolYearId: String? {
@@ -259,8 +274,28 @@ struct FinalGradeView: View {
     private var animationsOn: Bool { store.animationsEnabled }
 
     var body: some View {
-        ScrollView {
-            contentStack
+        ZStack(alignment: .top) {
+            ScrollView {
+                VStack(spacing: 0) {
+                    GeometryReader { geo in
+                        Color.clear
+                            .preference(key: ScrollOffsetKey.self, value: geo.frame(in: .global).minY)
+                    }
+                    .frame(height: 0)
+
+                    contentStack
+                        .padding(.top, 8)
+                }
+            }
+            .onPreferenceChange(ScrollOffsetKey.self) { value in
+                self.scrollOffset = value
+            }
+
+            if scrollOffset < -100 {
+                miniHero
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(10)
+            }
         }
         .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
         .navigationBarTitleDisplayMode(.inline)
@@ -310,9 +345,44 @@ struct FinalGradeView: View {
         .sheet(isPresented: $showStatusDetails) {
             statusDetailSheet
         }
+        .sheet(isPresented: $showManageDrops) {
+            manageDropsSheet
+        }
         .sheet(isPresented: $showPDFSheet) {
             ReportCardSheet()
                 .environmentObject(store)
+        }
+        .confirmationDialog(
+            "Welchen Drop möchtest du ersetzen?",
+            isPresented: $showSwapOptions,
+            titleVisibility: .visible
+        ) {
+            let currentDropped = droppedHalfYears
+            ForEach(currentDropped, id: \.handle.id) { entry in
+                Button("\(entry.handle.subject.name) (\(entry.halfYear). HJ)") {
+                    if let candidate = swapCandidate {
+                        Task {
+                            // 1. Undrop currently selected
+                            await store.updateDroppedHalfYear(
+                                subjectName: entry.handle.subject.name,
+                                value: nil,
+                                inSchoolYear: entry.handle.isCurrentYear ? nil : entry.handle.schoolYearId
+                            )
+                            // 2. Drop new candidate
+                            await store.updateDroppedHalfYear(
+                                subjectName: candidate.handle.subject.name,
+                                value: candidate.halfYear,
+                                inSchoolYear: candidate.handle.isCurrentYear ? nil : candidate.handle.schoolYearId
+                            )
+                            syncDropSelectionsFromData()
+                            recomputeMaxDroppedHalfYears()
+                        }
+                    }
+                }
+            }
+            Button("Abbrechen", role: .cancel) {
+                swapCandidate = nil
+            }
         }
         .onAppear {
             syncDropSelectionsFromData()
@@ -351,7 +421,7 @@ struct FinalGradeView: View {
         }
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                HStack(spacing: 8) {
+                HStack(spacing: 0) {
                     Button {
                         showNotifications = true
                     } label: {
@@ -371,13 +441,6 @@ struct FinalGradeView: View {
                         )
                     }
                     .accessibilityLabel(store.isPrivacyModeActive ? "Privatsphäre-Modus deaktivieren" : "Privatsphäre-Modus aktivieren")
-                    
-                    Button {
-                        showPDFSheet = true
-                    } label: {
-                        ToolbarIcon(symbol: "doc.text", showDot: false)
-                    }
-                    .accessibilityLabel("Zeugnis als PDF exportieren")
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
@@ -399,6 +462,35 @@ struct FinalGradeView: View {
     }
 
     // MARK: - UI Pieces
+
+    private var miniHero: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(finalGradeText)
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .privacyBlur()
+                Text("\(formatAverage(fobosoSummary.averageAfterDrops)) MSS • \(selectedDropCount)/\(maxDroppedHalfYears) gestrichen")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .privacyBlur()
+            }
+            
+            Spacer()
+            
+            GradeProgressBar(value: simulatedFinalGradeValue ?? 4.0)
+                .frame(width: 100, height: 8)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial)
+        .clipShape(Capsule())
+        .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: 5)
+        .padding(.top, 8)
+        .padding(.horizontal, 16)
+    }
 
     @ViewBuilder
     private var contentStack: some View {
@@ -424,6 +516,11 @@ struct FinalGradeView: View {
             )
             .padding(.horizontal, 16)
             .softFadeIn(enabled: animationsOn, delay: 0.12, offset: 12)
+
+            exportButton
+                .padding(.horizontal, 16)
+                .softFadeIn(enabled: animationsOn, delay: 0.13, offset: 12)
+            
             abiturOverviewCard
                 .padding(.horizontal, 16)
                 .softFadeIn(enabled: animationsOn, delay: 0.14, offset: 12)
@@ -448,9 +545,6 @@ struct FinalGradeView: View {
             droppedHalfYearsCard
                 .padding(.horizontal, 16)
                 .softFadeIn(enabled: animationsOn, delay: 0.27, offset: 12)
-            subjectListSection
-                .padding(.horizontal)
-                .softFadeIn(enabled: animationsOn, delay: 0.30, offset: 12)
             if maxDroppedHalfYears > 0 && limitReached {
                 Text("Du hast bereits die maximal erlaubte Anzahl an gestrichenen Halbjahren ausgewählt. Entferne zuerst eine Auswahl, um ein weiteres Halbjahr zu streichen.")
                     .font(.footnote)
@@ -463,7 +557,6 @@ struct FinalGradeView: View {
                 .padding(.horizontal)
                 .padding(.bottom, 16)
         }
-        .padding(.vertical, 8)
     }
 
     @ViewBuilder
@@ -513,55 +606,75 @@ struct FinalGradeView: View {
 
     @ViewBuilder
     private var heroChips: some View {
-        VStack(spacing: 16) {
-            // Prominent centered grade display
-            VStack(spacing: 6) {
-                Text(finalGradeText)
-                    .font(.system(size: 48, weight: .bold, design: .rounded))
-                    .foregroundStyle(finalGradeColor(finalGradeValueForColor))
-                    .privacyBlur()
-                    .contentTransition(.numericText())
-                    .onTapGesture { toggleFinalGradeToFixed() }
+        HStack(spacing: 0) {
+            // Left: Valid Grade (Schnitt)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Schnitt")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
                 
-                if let gradeValue = finalGradeValueForColor {
-                    Text(finalGradeDescriptor(gradeValue))
-                        .font(.subheadline)
+                ZStack {
+                     Text(finalGradeText)
+                        .font(.system(size: 42, weight: .bold, design: .rounded))
+                        .foregroundStyle(store.isPrivacyModeActive ? .primary : finalGradeColor(finalGradeValueForColor))
+                        .contentTransition(.numericText())
+                        .privacyBlur()
+                        .monospacedDigit()
+                    
+                    if hasExamSimulation {
+                        Image(systemName: "wand.and.stars")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.pink)
+                            .offset(x: 40, y: -12)
+                    }
+                }
+                .onTapGesture { toggleFinalGradeToFixed() }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            
+            Divider()
+                .frame(height: 44)
+                .padding(.horizontal, 20)
+            
+            // Right: Rating and MSS
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Bewertung")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+                
+                if let val = finalGradeValueForColor {
+                    Text(finalGradeDescriptor(val))
+                        .font(.headline) // Make this prominent but smaller than the grade
+                        .lineLimit(1)
+                        .privacyBlur()
+                    
+                    // MSS in smaller text below
+                    Text("\(heroMSSValue) Notenpunkte")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .privacyBlur()
+                } else {
+                    Text("-")
+                        .font(.headline)
                         .foregroundStyle(.secondary)
                 }
-                
-                if hasExamSimulation {
-                    PillBadge(
-                        text: "Simulation aktiv",
-                        systemImage: "wand.and.stars",
-                        foreground: .pink,
-                        background: Color.pink.opacity(0.16)
-                    )
-                    .padding(.top, 4)
-                }
             }
-            .frame(maxWidth: .infinity)
-            
-            // Simple stat chips row matching InsightsView
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                StatChip(
-                    title: "MSS",
-                    value: heroMSSValue,
-                    accent: .indigo
-                )
-                
-                StatChip(
-                    title: "Punkte",
-                    value: "\(Int(round(fobosoSummary.totalPoints)))/\(fobosoSummary.maxPoints)",
-                    accent: .orange
-                )
-                
-                StatChip(
-                    title: "Fächer",
-                    value: "\(store.subjects.count)",
-                    accent: .cyan
-                )
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(.vertical, 14)
+        .padding(.horizontal, 20)
+        .background(GradeCardStyle.surface(colorScheme: scheme, theme: store.theme, accent: .indigo))
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(GradeCardStyle.border(colorScheme: scheme, accent: .indigo))
+        .shadow(
+            color: Color.black.opacity(scheme == .dark ? 0.45 : 0.08),
+            radius: 8,
+            x: 0,
+            y: 4
+        )
+        // Add padding to container so the shadow isn't clipped by scrollview if tight
+        .padding(.horizontal, 4)
+        .padding(.vertical, 8)
     }
 
 
@@ -646,11 +759,13 @@ struct FinalGradeView: View {
     @ViewBuilder
     private var statusCard: some View {
         let status = statusDisplay
+        let statusColor = store.isPrivacyModeActive ? .primary : status.color
+        
         SettingsCard(
             title: "Prüfungsstatus",
             subtitle: nil,
             systemImage: "checkmark.seal.fill",
-            accent: status.color
+            accent: statusColor
         ) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
@@ -660,8 +775,8 @@ struct FinalGradeView: View {
                     Text(status.text == "Bestanden" ? "✔︎" : status.text == "Nicht bestanden" ? "✖︎" : "…")
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
-                        .background(status.color.opacity(0.18))
-                        .foregroundStyle(status.color == .secondary ? Color.primary : status.color)
+                        .background(statusColor.opacity(0.18))
+                        .foregroundStyle(store.isPrivacyModeActive ? .primary : (status.color == .secondary ? Color.primary : status.color))
                         .clipShape(Capsule())
                 }
 
@@ -721,6 +836,55 @@ struct FinalGradeView: View {
     }
 
     @ViewBuilder
+    private var exportButton: some View {
+        Button {
+            showPDFSheet = true
+        } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.blue.opacity(scheme == .dark ? 0.22 : 0.14))
+                        .frame(width: 36, height: 36)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(Color.blue.opacity(scheme == .dark ? 0.30 : 0.20), lineWidth: 1)
+                        )
+                    Image(systemName: "doc.text.fill")
+                        .font(.body.weight(.bold))
+                        .foregroundStyle(.blue)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Zeugnis exportieren")
+                        .font(.body.weight(.bold))
+                        .foregroundStyle(.primary)
+                    Text("Dein Notenblatt als PDF speichern oder teilen")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .opacity(0.5)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(GradeCardStyle.surface(colorScheme: scheme, theme: store.theme, accent: .blue))
+            .overlay(GradeCardStyle.border(colorScheme: scheme, accent: .blue))
+            .shadow(
+                color: Color.black.opacity(scheme == .dark ? 0.40 : 0.06),
+                radius: 4,
+                x: 0,
+                y: 2
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
     private var abiturOverviewCard: some View {
         SettingsCard(
             title: "Abiturnoten",
@@ -739,11 +903,12 @@ struct FinalGradeView: View {
                             HStack {
                                 Text(entry.handle.subject.name)
                                 Spacer()
+                                let color = store.isPrivacyModeActive ? .primary : gradeColor(entry.final)
                                 Text(formatAverage(entry.final))
                                     .padding(.horizontal, 10)
                                     .padding(.vertical, 6)
-                                    .background(gradeColor(entry.final).opacity(0.15))
-                                    .foregroundStyle(gradeColor(entry.final))
+                                    .background(color.opacity(0.15))
+                                    .foregroundStyle(color)
                                     .clipShape(Capsule())
                                     .privacyBlur()
                             }
@@ -755,11 +920,12 @@ struct FinalGradeView: View {
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                                 Spacer()
+                                let color = store.isPrivacyModeActive ? .primary : gradeColor(avg)
                                 Text(formatAverage(avg))
                                     .padding(.horizontal, 10)
                                     .padding(.vertical, 6)
-                                    .background(gradeColor(avg).opacity(0.15))
-                                    .foregroundStyle(gradeColor(avg))
+                                    .background(color.opacity(0.15))
+                                    .foregroundStyle(color)
                                     .clipShape(Capsule())
                                     .privacyBlur()
                             }
@@ -853,27 +1019,33 @@ struct FinalGradeView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("\(Int(round(fobosoSummary.totalPoints))) / \(fobosoSummary.maxPoints)")
                         .font(.title3).bold()
+                        .privacyBlur()
                     Text("Prüfungen (\(Int(examWeightFactor))× Gewichtung): \(Int(round(fobosoSummary.examPointsDouble))) Punkte")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .privacyBlur()
                     Text("Halbjahresergebnisse: \(Int(round(fobosoSummary.halfYearPoints))) Punkte (\(halfYearSummary.count) HJE).")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .privacyBlur()
                     if practicalYearSummary.count > 0 {
                         Text("Praktikum 11.: \(Int(round(practicalYearSummary.totalPoints))) Punkte (\(practicalYearSummary.count) HJL).")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .privacyBlur()
                     }
                     if hasSeminarRequirement {
                         let pointsText = seminarFinalPoints != nil ? "\(Int(round(seminarPointsDouble))) Punkte" : "noch offen"
                         Text("Seminarfach (2×): \(pointsText).")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .privacyBlur()
                     }
                     if fachreferatHalfYearSummary.count > 0 {
                         Text("Fachreferat: \(Int(round(fachreferatHalfYearSummary.totalPoints))) Punkte (\(fachreferatHalfYearSummary.count) HJE).")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .privacyBlur()
                     }
                 }
             }
@@ -899,179 +1071,198 @@ struct FinalGradeView: View {
     @ViewBuilder
     private var droppedHalfYearsCard: some View {
         SettingsCard(
-            title: "Gestrichene Halbjahre",
+            title: "Streichungen Optimieren",
             subtitle: nil,
             systemImage: "scissors",
             accent: .indigo
         ) {
-            SettingsSectionBox {
-                Text(
-                    maxDroppedHalfYears > 0
-                    ? "Du kannst insgesamt bis zu \(maxDroppedHalfYears) Halbjahre streichen."
-                    : "Das Streichen von Halbjahren ist derzeit deaktiviert."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-                if droppedHalfYears.isEmpty {
-                    Text("Du hast noch kein Halbjahr gestrichen.")
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 4)
+            VStack(spacing: 16) {
+                // Section: Limit & Status
+                if maxDroppedHalfYears > 0 {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Verfügbare Streichungen")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("\(selectedDropCount) von \(maxDroppedHalfYears) genutzt")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(limitReached ? .orange : .primary)
+                        }
+                        Spacer()
+                        if limitReached {
+                            Text("Limit erreicht")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.orange)
+                                .clipShape(Capsule())
+                        }
+                    }
                 } else {
-                    VStack(spacing: 8) {
-                        ForEach(droppedHalfYears, id: \.handle.id) { entry in
-                            let droppedAverage = calculateHalfYearAverageForSubject(entry.handle.subject, grades: entry.handle.grades, halfYear: entry.halfYear)
-                            HStack {
-                                VStack(alignment: .leading) {
-                                    Text(entry.handle.subject.name)
-                                    HStack(spacing: 6) {
-                                        Text(entry.halfYear == 1 ? "1. Halbjahr" : "2. Halbjahr")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                        if let yearLabel = entry.handle.yearLabel {
-                                            Text("\(yearLabel) Jahrgang")
-                                                .font(.caption2)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                    }
-                                }
-                                Spacer()
-                                Text(formatAverage(droppedAverage))
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .background(gradeColor(droppedAverage).opacity(0.15))
-                                    .foregroundStyle(gradeColor(droppedAverage))
-                                    .clipShape(Capsule())
+                    Text("In dieser Ausbildungsrichtung/Jahrgangsstufe sind keine Streichungen vorgesehen.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if maxDroppedHalfYears > 0 {
+                    Divider()
+                    
+                    // Section: Active Drops
+                    if !droppedHalfYears.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Aktuell gestrichen")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.secondary)
+                                .textCase(.uppercase)
+                            
+                            ForEach(droppedHalfYears, id: \.handle.id) { entry in
+                                activeDropRow(handle: entry.handle, halfYear: entry.halfYear)
                             }
                         }
+                        Divider()
+                    }
+
+                    // Section: Recommendations
+                    if !limitReached {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Text("Vorschläge")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(.secondary)
+                                    .textCase(.uppercase)
+                                Spacer()
+                                Image(systemName: "sparkles")
+                                    .font(.caption)
+                                    .foregroundStyle(.indigo)
+                            }
+                            
+                            if smartCandidates.isEmpty {
+                                Text("Keine sinnvollen Streichungen verfügbar.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                // Show top 3 candidates
+                                ForEach(smartCandidates.prefix(3)) { candidate in
+                                    recommendationRow(candidate: candidate)
+                                }
+                            }
+                        }
+                        Divider()
+                    }
+
+                    // Footer Action
+                    Button {
+                        showManageDrops = true
+                    } label: {
+                        HStack {
+                            Text("Manuelle Auswahl")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                        }
+                        .font(.subheadline)
+                        .foregroundStyle(Color.primary)
                     }
                 }
             }
+            .padding(.vertical, 4)
         }
     }
 
-    @ViewBuilder
-    private var subjectListSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Fächer").font(.headline)
-            Text("Streiche die Noten des gewählten Halbjahres.")
-                .font(.caption)
+    private func activeDropRow(handle: SubjectHandle, halfYear: Int) -> some View {
+        HStack {
+            Image(systemName: subjectIcon(for: handle.subject.name))
                 .foregroundStyle(.secondary)
-
-            if canUsePreviousYearSnapshot {
-                Text("Halbjahre aus dem 11. und 12. Jahrgang werden gemeinsam angezeigt und können gemeinsam gestrichen werden.")
+                .frame(width: 20)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(handle.subject.name)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text("\(halfYear). Halbjahr")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
-
-            if eligibleSubjectHandles.isEmpty {
-                Text("Lege zuerst Fächer und Noten an, um deine Abschlussnote zu berechnen.")
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 8)
-            } else {
-                VStack(spacing: 12) {
-                    ForEach(Array(sortedSubjectHandles.enumerated()), id: \.element.id) { entry in
-                        let handle = entry.element
-                        let delay = 0.30 + Double(entry.offset) * 0.05
-                        subjectCard(handle)
-                            .softFadeIn(enabled: animationsOn, delay: delay, offset: 12)
-                    }
-                }
+            
+            Spacer()
+            
+            let avg = calculateHalfYearAverageForSubject(handle.subject, grades: handle.grades, halfYear: halfYear)
+            Text(formatAverage(avg))
+                .font(.subheadline.weight(.medium))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .privacyBlur()
+                .strikethrough()
+            
+            Button {
+                toggleSmartDrop(handle: handle, halfYear: halfYear)
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary.opacity(0.8))
+                    .font(.title3)
             }
+            .buttonStyle(.plain)
+            .padding(.leading, 8)
         }
+        .padding(8)
+        .background(Color.primary.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
-    @ViewBuilder
-    private func subjectCard(_ handle: SubjectHandle) -> some View {
-        let dropOption = dropSelections[handle.id] ?? .none
-        let isHalfYear1Dropped = dropOption == .one
-        let isHalfYear2Dropped = dropOption == .two
-        let canSelectHalfYear1 = !((limitReached || maxDroppedHalfYears <= 0) && !isHalfYear1Dropped)
-        let canSelectHalfYear2 = !((limitReached || maxDroppedHalfYears <= 0) && !isHalfYear2Dropped)
-
-        let subjectGrades = handle.grades
-        let firstHalfYearAverage = calculateHalfYearAverageForSubject(handle.subject, grades: subjectGrades, halfYear: 1)
-        let secondHalfYearAverage = calculateHalfYearAverageForSubject(handle.subject, grades: subjectGrades, halfYear: 2)
-        let subjectAverage = subjectAverageFor(handle: handle)
-
-        // Create binding for segmented picker
-        let dropBinding = Binding<Int>(
-            get: {
-                switch dropOption {
-                case .none: return 0
-                case .one: return 1
-                case .two: return 2
-                }
-            },
-            set: { newValue in
-                switch newValue {
-                case 1:
-                    if canSelectHalfYear1 || isHalfYear1Dropped {
-                        handleToggleHalfYear(handle: handle, halfYear: 1)
-                    }
-                case 2:
-                    if canSelectHalfYear2 || isHalfYear2Dropped {
-                        handleToggleHalfYear(handle: handle, halfYear: 2)
-                    }
-                default:
-                    // Selecting "Keines" - deselect current
-                    if isHalfYear1Dropped {
-                        handleToggleHalfYear(handle: handle, halfYear: 1)
-                    } else if isHalfYear2Dropped {
-                        handleToggleHalfYear(handle: handle, halfYear: 2)
-                    }
-                }
+    private func recommendationRow(candidate: SuggestionCandidate) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(candidate.handle.subject.name)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text("\(candidate.halfYear). Halbjahr")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
-        )
-
-        SettingsCard(
-            title: handle.subject.name,
-            subtitle: handle.yearLabel.map { "\($0) Jahrgang" },
-            systemImage: subjectIcon(for: handle.subject.name),
-            accent: .indigo
-        ) {
-            // Subject average badge
-            Text(formatAverage(subjectAverage))
+            
+            Spacer()
+            
+            // Impact badge
+            if let imp = calculateImpact(for: candidate.handle, halfYear: candidate.halfYear), imp > 0.005 {
+                let badgeColor = store.isPrivacyModeActive ? .primary : Color.green
+                Text("+\(String(format: "%.2f", imp))")
+                   .font(.caption2.weight(.bold))
+                   .foregroundStyle(badgeColor)
+                   .padding(.horizontal, 6)
+                   .padding(.vertical, 2)
+                   .background(badgeColor.opacity(0.1))
+                   .clipShape(Capsule())
+                   .privacyBlur()
+            }
+            
+            let gradeColorVal = store.isPrivacyModeActive ? .primary : gradeColor(candidate.average)
+            Text(formatAverage(candidate.average))
                 .font(.subheadline.weight(.bold))
                 .monospacedDigit()
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(gradeColor(subjectAverage).opacity(0.15))
-                .foregroundStyle(gradeColor(subjectAverage))
-                .clipShape(Capsule())
+                .foregroundStyle(gradeColorVal)
                 .privacyBlur()
-        } content: {
-            VStack(alignment: .leading, spacing: 14) {
-                // Segmented picker for drop selection
-                SegmentedPicker(
-                    selection: dropBinding,
-                    options: [
-                        SegmentedPickerOption(title: "Keines", value: 0),
-                        SegmentedPickerOption(title: "1. HJ", value: 1),
-                        SegmentedPickerOption(title: "2. HJ", value: 2)
-                    ],
-                    accent: .indigo
-                )
-
-                // Side-by-side half-year grades
-                HStack(spacing: 10) {
-                    StatChip(
-                        title: "1. Halbjahr",
-                        value: formatAverage(firstHalfYearAverage),
-                        accent: gradeColor(firstHalfYearAverage),
-                        isGreyedOut: isHalfYear1Dropped
-                    )
-
-                    StatChip(
-                        title: "2. Halbjahr",
-                        value: formatAverage(secondHalfYearAverage),
-                        accent: gradeColor(secondHalfYearAverage),
-                        isGreyedOut: isHalfYear2Dropped
-                    )
-                }
+                .frame(minWidth: 40, alignment: .trailing)
+            
+            Button {
+                toggleSmartDrop(handle: candidate.handle, halfYear: candidate.halfYear)
+            } label: {
+                Image(systemName: "arrow.down.to.line.circle.fill") // Icon for "Drop"
+                    .foregroundStyle(.indigo)
+                    .font(.title2)
             }
+            .buttonStyle(.plain)
+            .padding(.leading, 8)
         }
+        .padding(8)
+        .background(Color.indigo.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
+
+
+
 
     /// Returns an appropriate SF Symbol for a subject name
     private func subjectIcon(for subjectName: String) -> String {
@@ -1123,12 +1314,14 @@ struct FinalGradeView: View {
                             Text("Durchschnitt")
                                 .font(.headline)
                             Spacer()
+                            let color = store.isPrivacyModeActive ? .primary : gradeColor(avg)
                             Text(formatAverage(avg))
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
-                                .background(gradeColor(avg).opacity(0.15))
-                                .foregroundStyle(gradeColor(avg))
+                                .background(color.opacity(0.15))
+                                .foregroundStyle(color)
                                 .clipShape(Capsule())
+                                .privacyBlur()
                         }
                     }
 
@@ -1156,12 +1349,14 @@ struct FinalGradeView: View {
                                         }
                                     }
                                     Spacer()
+                                    let color = store.isPrivacyModeActive ? .primary : gradeColor(entry.grade)
                                     Text(formatAverage(entry.grade))
                                         .padding(.horizontal, 10)
                                         .padding(.vertical, 6)
-                                        .background(gradeColor(entry.grade).opacity(0.15))
-                                        .foregroundStyle(gradeColor(entry.grade))
+                                        .background(color.opacity(0.15))
+                                        .foregroundStyle(color)
                                         .clipShape(Capsule())
+                                        .privacyBlur()
                                 }
                             }
                         }
@@ -1173,14 +1368,15 @@ struct FinalGradeView: View {
 
     @ViewBuilder
     private func failureReasonRow(_ text: String) -> some View {
+        let color = store.isPrivacyModeActive ? .primary : Color(hex: "#f87171")
         HStack(alignment: .top, spacing: 6) {
             Text("x")
                 .font(.caption)
-                .foregroundStyle(Color(hex: "#f87171"))
+                .foregroundStyle(color)
                 .padding(.top, 1)
             Text(text)
                 .font(.caption)
-                .foregroundStyle(Color(hex: "#f87171"))
+                .foregroundStyle(color)
         }
     }
 
@@ -1239,12 +1435,14 @@ struct FinalGradeView: View {
             Text(title)
                 .font(.subheadline)
             Spacer()
+            let color = store.isPrivacyModeActive ? .primary : gradeColor(value)
             Text(value != nil ? "\(Int(value!)) Punkte" : "fehlt")
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .background(gradeColor(value).opacity(0.15))
-                .foregroundStyle(gradeColor(value))
+                .background(color.opacity(0.15))
+                .foregroundStyle(color)
                 .clipShape(Capsule())
+                .privacyBlur()
         }
     }
 
@@ -1328,7 +1526,7 @@ struct FinalGradeView: View {
     }
 
     private func finalGradeText(for points: [String: Double?]) -> String {
-        let decimals = max(1, min(3, finalGradeToFixed))
+        let decimals = 2 // Always use 2 decimals as requested
         let summary = makeFobosoSummary(examPoints: points)
         if summary.maxPoints > 0 {
             if let g = summary.grade {
@@ -1387,8 +1585,9 @@ struct FinalGradeView: View {
     private var sortedSubjectHandles: [SubjectHandle] {
         if eligibleSubjectHandles.isEmpty { return [] }
 
-        func getSubjectAverageForSort(_ handle: SubjectHandle) -> Double? {
-            let grades = filteredGradesByHandle[handle.id] ?? []
+        // Use base average (unfiltered by drops) for stable sorting
+        func getSubjectBaseAverageForSort(_ handle: SubjectHandle) -> Double? {
+            let grades = handle.grades
             guard !grades.isEmpty else { return nil }
             var total = 0.0, totalWeight = 0.0
             for g in grades {
@@ -1417,8 +1616,8 @@ struct FinalGradeView: View {
             }
         case .average:
             return eligibleSubjectHandles.sorted { a, b in
-                let a1 = getSubjectAverageForSort(a)
-                let b1 = getSubjectAverageForSort(b)
+                let a1 = getSubjectBaseAverageForSort(a)
+                let b1 = getSubjectBaseAverageForSort(b)
                 switch (a1, b1) {
                 case (nil, nil):
                     if a.subject.name.caseInsensitiveCompare(b.subject.name) == .orderedSame {
@@ -1441,8 +1640,8 @@ struct FinalGradeView: View {
             }
         case .average_worst:
             return eligibleSubjectHandles.sorted { a, b in
-                let a1 = getSubjectAverageForSort(a)
-                let b1 = getSubjectAverageForSort(b)
+                let a1 = getSubjectBaseAverageForSort(a)
+                let b1 = getSubjectBaseAverageForSort(b)
                 switch (a1, b1) {
                 case (nil, nil):
                     if a.subject.name.caseInsensitiveCompare(b.subject.name) == .orderedSame {
@@ -1679,7 +1878,8 @@ struct FinalGradeView: View {
                                                                               totalPoints: Double,
                                                                               maxPoints: Int,
                                                                               grade: Double?,
-                                                                              gradeRaw: Double?) {
+                                                                              gradeRaw: Double?,
+                                                                              averageAfterDrops: Double?) {
         let subjects = eligibleSubjectHandles.map {
             GradeCalculationService.SubjectData(id: $0.id, subject: $0.subject, grades: $0.grades, isEligible: $0.isEligible)
         }
@@ -1701,7 +1901,8 @@ struct FinalGradeView: View {
             effectiveGradeWeight: { type, weight in store.effectiveGradeWeight(subjectType: type, rawWeight: weight) }
         )
         
-        return (res.examCount, res.halfYearCount, res.examPointsDouble, res.halfYearPoints, res.seminarPointsDouble, res.totalPoints, res.maxPoints, res.grade, res.gradeRaw)
+        let avgAfterDrops = res.maxPoints > 0 ? (res.totalPoints * 15.0) / Double(res.maxPoints) : nil
+        return (res.examCount, res.halfYearCount, res.examPointsDouble, res.halfYearPoints, res.seminarPointsDouble, res.totalPoints, res.maxPoints, res.grade, res.gradeRaw, avgAfterDrops)
     }
 
 
@@ -1713,7 +1914,8 @@ struct FinalGradeView: View {
                                 totalPoints: Double,
                                 maxPoints: Int,
                                 grade: Double?,
-                                gradeRaw: Double?) {
+                                gradeRaw: Double?,
+                                averageAfterDrops: Double?) {
         makeFobosoSummary(examPoints: nil)
     }
 
@@ -1725,8 +1927,90 @@ struct FinalGradeView: View {
                                         totalPoints: Double,
                                         maxPoints: Int,
                                         grade: Double?,
-                                        gradeRaw: Double?) {
+                                        gradeRaw: Double?,
+                                        averageAfterDrops: Double?) {
         makeFobosoSummary(examPoints: store.examPoints)
+    }
+
+    private func calculateImpact(for handle: SubjectHandle, halfYear: Int) -> Double? {
+        let key = handle.id
+        let currentDrop = dropSelections[key] ?? .none
+        
+        // If already dropped, we simulate UNDROPPING it
+        if (currentDrop == .one && halfYear == 1) || (currentDrop == .two && halfYear == 2) {
+             // Logic for un-dropping
+             var simulatedDrops = dropSelections
+             simulatedDrops[key] = nil // or .none, but dictionary removal is cleaner
+             
+             // Recalculate average
+             let simulatedAvg = calculateSimulatedAverage(with: simulatedDrops)
+             guard let sim = simulatedAvg, let base = fobosoSummary.averageAfterDrops else { return nil }
+             return sim - base
+        }
+        
+        // If NOT dropped, we simulate DROPPING it
+        var simulatedDrops = dropSelections
+        let baselineAvg = fobosoSummary.averageAfterDrops ?? 0
+        
+        if maxDroppedHalfYears > 0 && selectedDropCount >= maxDroppedHalfYears {
+            // Limit reached: We must simulate a SWAP.
+            // Find the active drop with the HIGHEST points (the "weakest" drop to keep).
+            var bestDropToRemove: (handle: SubjectHandle, halfYear: Int, points: Double)? = nil
+            
+            for drop in droppedHalfYears {
+                let points = calculateHalfYearAverageForSubject(drop.handle.subject, grades: drop.handle.grades, halfYear: drop.halfYear) ?? 15.0
+                if bestDropToRemove == nil || points > bestDropToRemove!.points {
+                    bestDropToRemove = (drop.handle, drop.halfYear, points)
+                }
+            }
+            
+            if let toRemove = bestDropToRemove {
+                // remove the old one
+                simulatedDrops[toRemove.handle.id] = nil 
+                // add the new one
+                simulatedDrops[key] = (halfYear == 1 ? .one : .two)
+            } else {
+                // Should not happen if count >= max > 0, but fallback: just add high
+                 simulatedDrops[key] = (halfYear == 1 ? .one : .two)
+            }
+        } else {
+            // Limit not reached, just add
+            simulatedDrops[key] = (halfYear == 1 ? .one : .two)
+        }
+        
+        let simulatedAvg = calculateSimulatedAverage(with: simulatedDrops)
+        guard let sim = simulatedAvg else { return nil }
+        return sim - baselineAvg
+    }
+    
+    private func calculateSimulatedAverage(with drops: [String: HalfYearDropOption]) -> Double? {
+        // 1. Prepare subjects
+        let subjects = eligibleSubjectHandles.map {
+             GradeCalculationService.SubjectData(id: $0.id, subject: $0.subject, grades: $0.grades, isEligible: $0.isEligible)
+        }
+
+        // 2. Prepare drop map from the SIMULATED drops
+        var dropMap: [String: Int?] = [:]
+        for h in allSubjectHandles {
+            dropMap[h.id] = drops[h.id]?.persistedValue
+        }
+
+        // 3. Run full calculation
+        let res = GradeCalculationService.makeFobosoSummary(
+            schoolType: schoolType,
+            gradeYear: gradeYear,
+            subjects: subjects,
+            examPoints: store.examPoints, // Assume exam points stay constant for drop impact
+            dropSelections: dropMap,
+            fachreferat: store.fachreferat,
+            practicalPerformance: practicalPerformanceForDisplay,
+            seminarPerformance: seminarPerformanceForDisplay,
+            effectiveGradeWeight: { type, weight in store.effectiveGradeWeight(subjectType: type, rawWeight: weight) }
+        )
+
+        // 4. Extract Average
+        guard res.maxPoints > 0 else { return nil }
+        return (res.totalPoints * 15.0) / Double(res.maxPoints)
     }
 
     private func hasAllExamPoints(using points: [String: Double?]? = nil) -> Bool {
@@ -1984,31 +2268,75 @@ struct FinalGradeView: View {
 
     // MARK: - Actions
 
-    private func handleToggleHalfYear(handle: SubjectHandle, halfYear: Int) {
+    private func toggleSmartDrop(handle: SubjectHandle, halfYear: Int) {
         let key = handle.id
-        let current = dropSelections[key] ?? .none
-        var next: HalfYearDropOption = current
-
-        if (current == .one && halfYear == 1) || (current == .two && halfYear == 2) {
-            next = .none
-        } else {
-            let currentSelectedCount = dropSelections.values.filter { $0 == .one || $0 == .two }.count
-            let currentlyHasDrop = (current == .one || current == .two)
-            let willAddNewDrop = !currentlyHasDrop
-
-            if willAddNewDrop && maxDroppedHalfYears > 0 && currentSelectedCount >= maxDroppedHalfYears {
-                return
+        let currentOption = dropSelections[key] ?? .none
+        
+        // Is this specific half-year currently dropped?
+        let isCurrentlyDropped = (currentOption == .one && halfYear == 1) || (currentOption == .two && halfYear == 2)
+        
+        if isCurrentlyDropped {
+            // Un-drop it
+            Task {
+                await store.updateDroppedHalfYear(
+                    subjectName: handle.subject.name,
+                    value: nil,
+                    inSchoolYear: handle.isCurrentYear ? nil : handle.schoolYearId
+                )
+                syncDropSelectionsFromData()
+                recomputeMaxDroppedHalfYears()
             }
-            next = (halfYear == 1 ? .one : .two)
-        }
-
-        dropSelections[key] = next
-        Task {
-            await store.updateDroppedHalfYear(
-                subjectName: handle.subject.name,
-                value: next.persistedValue,
-                inSchoolYear: handle.isCurrentYear ? nil : handle.schoolYearId
-            )
+        } else {
+            // Try to drop it
+            if maxDroppedHalfYears > 0 && selectedDropCount >= maxDroppedHalfYears {
+                // Limit reached: We need to swap!
+                // We want to remove the currently dropped half-year that has the HIGHEST points (since dropping high points is inefficient).
+                // Or more simply: replace the "weakest" drop.
+                // A "weak" drop is one where we are dropping a high grade (e.g. 10 points), instead of a low grade (0 points).
+                // So we find the drop with the MAX points and un-drop it.
+                
+                var bestDropToRemove: (handle: SubjectHandle, halfYear: Int, points: Double)? = nil
+                
+                for drop in droppedHalfYears {
+                    let points = calculateHalfYearAverageForSubject(drop.handle.subject, grades: drop.handle.grades, halfYear: drop.halfYear) ?? 15.0
+                    if bestDropToRemove == nil || points > bestDropToRemove!.points {
+                        bestDropToRemove = (drop.handle, drop.halfYear, points)
+                    }
+                }
+                
+                if let toRemove = bestDropToRemove {
+                    Task {
+                        // 1. Un-drop the inefficient one
+                        await store.updateDroppedHalfYear(
+                            subjectName: toRemove.handle.subject.name,
+                            value: nil,
+                            inSchoolYear: toRemove.handle.isCurrentYear ? nil : toRemove.handle.schoolYearId
+                        )
+                        // 2. Drop the new target
+                        await store.updateDroppedHalfYear(
+                            subjectName: handle.subject.name,
+                            value: halfYear,
+                            inSchoolYear: handle.isCurrentYear ? nil : handle.schoolYearId
+                        )
+                        syncDropSelectionsFromData()
+                        recomputeMaxDroppedHalfYears()
+                    }
+                }
+            } else {
+                // Limit not reached, just add it
+                Task {
+                    await store.updateDroppedHalfYear(
+                        subjectName: handle.subject.name,
+                        value: halfYear, // We assume if it wasn't dropped, we drop just this half-year. Logic needs to respect existing .one/.two state if we supported dropping BOTH, but here we can only drop max 1 per subject usually? 
+                        // Wait, dropSelections stores .one OR .two. Can a subject have BOTH dropped? 
+                        // The enum is `case one, two, none`. So a subject can only have ONE half-year dropped at a time in this data model?
+                        // If so, `value: halfYear` works perfectly.
+                        inSchoolYear: handle.isCurrentYear ? nil : handle.schoolYearId
+                    )
+                    syncDropSelectionsFromData()
+                    recomputeMaxDroppedHalfYears()
+                }
+            }
         }
     }
 
@@ -2045,9 +2373,10 @@ struct FinalGradeView: View {
                                     ForEach(statusDetailReasons, id: \.self) { reason in
                                         HStack(alignment: .top, spacing: 8) {
                                             Image(systemName: "xmark.circle.fill")
-                                                .foregroundStyle(.red)
+                                                .foregroundStyle(store.isPrivacyModeActive ? Color.primary : Color.red)
                                             Text(reason)
                                                 .frame(maxWidth: .infinity, alignment: .leading)
+                                                .privacyBlur()
                                         }
                                     }
                                 }
@@ -2100,6 +2429,195 @@ struct FinalGradeView: View {
             }
         }
     }
+
+    private var manageDropsSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 20) {
+                    // Active Drops Section
+                    if !droppedHalfYears.isEmpty {
+                        SettingsCard(
+                            title: "Aktuell gestrichen",
+                            subtitle: "\(selectedDropCount) von \(maxDroppedHalfYears) ausgewählt",
+                            systemImage: "scissors",
+                            accent: .indigo
+                        ) {
+                            enableDropLimitWarningIfNeeded
+                            
+                            VStack(spacing: 12) {
+                                ForEach(droppedHalfYears, id: \.handle.id) { entry in
+                                    dropCandidateRow(handle: entry.handle, halfYear: entry.halfYear, isSelected: true)
+                                }
+                            }
+                        }
+                    } else {
+                         SettingsCard(
+                            title: "Aktuell gestrichen",
+                            subtitle: "0 von \(maxDroppedHalfYears) ausgewählt",
+                            systemImage: "scissors",
+                            accent: .indigo
+                        ) {
+                            Text("Du hast noch keine Halbjahre gestrichen.")
+                                .foregroundStyle(.secondary)
+                                .font(.subheadline)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+
+                    // Available Section
+                    SettingsCard(
+                        title: "Verfügbare Halbjahre",
+                        subtitle: "Tippe zum Streichen",
+                        systemImage: "list.bullet.clipboard",
+                        accent: .secondary
+                    ) {
+                        if smartCandidates.isEmpty {
+                            Text("Keine streichbaren Halbjahre gefunden.")
+                                .foregroundStyle(.secondary)
+                                .font(.subheadline)
+                                .padding(.vertical, 8)
+                        } else {
+                            VStack(spacing: 12) {
+                                ForEach(smartCandidates) { candidate in
+                                    dropCandidateRow(handle: candidate.handle, halfYear: candidate.halfYear, isSelected: false)
+                                }
+                            }
+                        }
+                    }
+                    
+                    Text("Es werden nur Halbjahre mit eingetragenen Noten angezeigt.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.top, 8)
+                }
+                .padding(16)
+            }
+            .background(
+                ThemedBackground(
+                    isDark: store.darkMode,
+                    isFeminine: store.theme == "feminine",
+                    intensity: store.themeBackgroundIntensity
+                )
+            )
+            .navigationTitle("Halbjahre streichen")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button {
+                        showManageDrops = false
+                    } label: {
+                        Image(systemName: "xmark")
+                            .imageScale(.medium)
+                            .foregroundStyle(Color.primary)
+                    }
+                    .accessibilityLabel("Schließen")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var enableDropLimitWarningIfNeeded: some View {
+        if selectedDropCount >= maxDroppedHalfYears {
+            HStack(spacing: 12) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text("Limit erreicht. Wenn du ein weiteres Halbjahr wählst, wird automatisch der schlechteste Drop ersetzt.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(12)
+            .background(Color.orange.opacity(0.1))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(.bottom, 8)
+        }
+    }
+    
+    @ViewBuilder
+    private func dropCandidateRow(handle: SubjectHandle, halfYear: Int, isSelected: Bool) -> some View {
+        let average = calculateHalfYearAverageForSubject(handle.subject, grades: handle.grades, halfYear: halfYear) ?? 0
+        Button {
+            toggleSmartDrop(handle: handle, halfYear: halfYear)
+        } label: {
+            HStack {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(gradeColor(average).opacity(0.12))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: subjectIcon(for: handle.subject.name))
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(gradeColor(average))
+                }
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(handle.subject.name)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text("\(halfYear). Halbjahr")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                
+                Spacer()
+                
+                if !isSelected {
+                    if let imp = calculateImpact(for: handle, halfYear: halfYear), abs(imp) > 0.005 {
+                        let isPositive = imp > 0
+                        Text((isPositive ? "+" : "") + String(format: "%.2f", imp))
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(isPositive ? .green : .red)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background((isPositive ? Color.green : Color.red).opacity(0.1))
+                            .clipShape(Capsule())
+                            .privacyBlur()
+                    }
+                }
+                
+                Text(formatAverage(average))
+                    .font(.subheadline.weight(.bold))
+                    .monospacedDigit()
+                    .foregroundStyle(gradeColor(average))
+                    .privacyBlur()
+                
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.blue)
+                        .font(.title3)
+                } else {
+                    Image(systemName: "circle")
+                        .foregroundStyle(.tertiary)
+                        .font(.title3)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var smartCandidates: [SuggestionCandidate] {
+        let all = eligibleSubjectHandles.flatMap { handle -> [SuggestionCandidate] in
+            var candidates: [SuggestionCandidate] = []
+            if let h1 = calculateHalfYearAverageForSubject(handle.subject, grades: handle.grades, halfYear: 1) {
+                candidates.append(SuggestionCandidate(handle: handle, halfYear: 1, average: h1))
+            }
+            if let h2 = calculateHalfYearAverageForSubject(handle.subject, grades: handle.grades, halfYear: 2) {
+                candidates.append(SuggestionCandidate(handle: handle, halfYear: 2, average: h2))
+            }
+            return candidates
+        }
+        
+        let filtered = all.filter { candidate in
+            let key = candidate.handle.id
+            let drop = dropSelections[key] ?? .none
+            // Exclude already dropped ones from "Available" list
+            return !(drop == .one && candidate.halfYear == 1) && !(drop == .two && candidate.halfYear == 2)
+        }
+        
+        // Sort by points ascending (worst grades first) to help user find what to drop
+        return Array(filtered.sorted { $0.average < $1.average })
+    }
+
     private func handlePrivacyToggle() {
         if store.isPrivacyModeActive {
             if biometricManager.isEnabledForActiveUser {
@@ -2125,5 +2643,12 @@ struct FinalGradeView: View {
         } else if item.kind == .daily {
             showHomeworkSheet = true
         }
+    }
+}
+
+struct ScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }

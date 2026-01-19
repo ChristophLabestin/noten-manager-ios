@@ -3,25 +3,26 @@ import CoreImage.CIFilterBuiltins
 
 enum ShareCodeType {
     case group
+    case socialGroup
     case schoolClass
     
     var title: String {
         switch self {
-        case .group: return "Gruppe teilen"
+        case .group, .socialGroup: return "Gruppe teilen"
         case .schoolClass: return "Klasse teilen"
         }
     }
     
     var subtitle: String {
         switch self {
-        case .group: return "Teile diesen Code, damit andere der Gruppe beitreten können."
+        case .group, .socialGroup: return "Teile diesen Code, damit andere der Gruppe beitreten können."
         case .schoolClass: return "Teile diesen Code, damit andere der Klasse beitreten können."
         }
     }
     
     var deepLinkPath: String {
         switch self {
-        case .group: return "group"
+        case .group, .socialGroup: return "group"
         case .schoolClass: return "class"
         }
     }

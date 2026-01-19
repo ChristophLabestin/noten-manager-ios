@@ -126,6 +126,7 @@ struct InsightsView: View {
     }
 
     private func gradeColor(_ value: Double?) -> Color {
+        if store.isPrivacyModeActive { return .primary }
         guard let v = value else { return .secondary }
         if v >= 7 { return .green }
         if v >= 4 { return .orange }

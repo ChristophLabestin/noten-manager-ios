@@ -74,7 +74,7 @@ struct ExamListView: View {
             // Immer anzeigen, wenn es ein Gruppen-Termin ist
             if exam.isShared { return true }
             let trimmed = exam.subjectName.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty || trimmed.lowercased() == "fachreferat" {
+            if trimmed.isEmpty || trimmed.lowercased() == "fachreferat" || trimmed.lowercased() == "termin" {
                 return true
             }
             if let resolved = store.resolveLocalSubjectNameForExam(exam),
@@ -568,6 +568,7 @@ struct ExamListView: View {
                     hasTime: exam.hasTime,
                     weight: exam.weight,
                     customWeight: exam.customWeight,
+                    assessmentType: exam.assessmentType,
                     reminderAt: newValue,
                     isCompleted: exam.isCompleted
                 )

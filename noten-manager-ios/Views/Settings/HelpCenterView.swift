@@ -64,6 +64,7 @@ struct HelpCenterView: View {
     @State private var didScrollToInitialSection: Bool = false
     @State private var showScrollToTop: Bool = false
     @State private var showSupportAccessSheet: Bool = false
+    @State private var expandedSections: Set<HelpCenterSection> = []
 
     private let searchIndex: [HelpSearchEntry] = [
         HelpSearchEntry(
@@ -249,12 +250,15 @@ struct HelpCenterView: View {
             .coordinateSpace(name: "help_scroll")
             .scrollDismissesKeyboard(.interactively)
             .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
-            .onAppear {
-                if contactEmail.isEmpty {
-                    contactEmail = Auth.auth().currentUser?.email ?? ""
+                .onAppear {
+                    if contactEmail.isEmpty {
+                        contactEmail = Auth.auth().currentUser?.email ?? ""
+                    }
+                    if let initialSection {
+                        expandedSections.insert(initialSection)
+                    }
+                    scrollToInitialSection(using: proxy)
                 }
-                scrollToInitialSection(using: proxy)
-            }
             .onPreferenceChange(ScrollOffsetPreferenceKey.self) { minY in
                 // minY moves negative when scrolling down
                 showScrollToTop = minY < -40
@@ -339,7 +343,8 @@ struct HelpCenterView: View {
             title: "Erste Schritte",
             subtitle: "So nutzt du den Noten Manager",
             systemImage: "hands.clap.fill",
-            accent: .teal
+            accent: .teal,
+            isExpanded: expandedBinding(for: .steps)
         ) {
             SettingsSectionBox {
                 VStack(alignment: .leading, spacing: 12) {
@@ -371,7 +376,8 @@ struct HelpCenterView: View {
             title: "Berechnungen",
             subtitle: "So werden Noten und Durchschnitte ermittelt",
             systemImage: "function",
-            accent: .cyan
+            accent: .cyan,
+            isExpanded: expandedBinding(for: .calc)
         ) {
             SettingsSectionBox {
                 VStack(alignment: .leading, spacing: 12) {
@@ -446,7 +452,8 @@ struct HelpCenterView: View {
             title: "Abschluss & Prüfungen",
             subtitle: "Berechnung für Abschlussnote und Prüfungen",
             systemImage: "graduationcap.fill",
-            accent: .mint
+            accent: .mint,
+            isExpanded: expandedBinding(for: .exams)
         ) {
             SettingsSectionBox {
                 VStack(alignment: .leading, spacing: 12) {
@@ -525,7 +532,8 @@ struct HelpCenterView: View {
             title: "Bestehen nach FOBOSO",
             subtitle: "Wesentliche Kriterien",
             systemImage: "checkmark.seal.fill",
-            accent: .green
+            accent: .green,
+            isExpanded: expandedBinding(for: .pass)
         ) {
             SettingsSectionBox {
                 VStack(alignment: .leading, spacing: 12) {
@@ -557,7 +565,8 @@ struct HelpCenterView: View {
             title: "Spezielle Funktionen",
             subtitle: "Offline, Ferien-Hinweis, Insights & mehr",
             systemImage: "sparkles.rectangle.stack",
-            accent: .blue
+            accent: .blue,
+            isExpanded: expandedBinding(for: .special)
         ) {
             SettingsSectionBox {
                 VStack(alignment: .leading, spacing: 12) {
@@ -597,7 +606,8 @@ struct HelpCenterView: View {
             title: "Klassen & Gruppen",
             subtitle: "Features für Zusammenarbeit und Organisation",
             systemImage: "person.3.fill",
-            accent: .pink
+            accent: .pink,
+            isExpanded: expandedBinding(for: .classesGroups)
         ) {
             SettingsSectionBox {
                 VStack(alignment: .leading, spacing: 12) {
@@ -647,7 +657,8 @@ struct HelpCenterView: View {
             title: "FAQ & Tipps",
             subtitle: "Schnelle Antworten",
             systemImage: "lightbulb.fill",
-            accent: .orange
+            accent: .orange,
+            isExpanded: expandedBinding(for: .faq)
         ) {
             SettingsSectionBox {
                 VStack(alignment: .leading, spacing: 12) {
@@ -687,7 +698,8 @@ struct HelpCenterView: View {
             title: "Kontakt & Support",
             subtitle: "Ticket direkt aus der App erstellen",
             systemImage: "envelope.fill",
-            accent: .indigo
+            accent: .indigo,
+            isExpanded: expandedBinding(for: .contact)
         ) {
             SettingsSectionBox {
                 VStack(alignment: .leading, spacing: 10) {
@@ -1010,11 +1022,29 @@ struct HelpCenterView: View {
     private func scrollToSection(_ section: HelpCenterSection, using proxy: ScrollViewProxy) {
         hideKeyboard()
         withAnimation(.easeInOut(duration: 0.25)) {
-            proxy.scrollTo(section.scrollId, anchor: .top)
+            expandedSections.insert(section)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                proxy.scrollTo(section.scrollId, anchor: .top)
+            }
         }
     }
 
     // MARK: - Helpers
+
+    private func expandedBinding(for section: HelpCenterSection) -> Binding<Bool> {
+        Binding(
+            get: { expandedSections.contains(section) },
+            set: { isExpanded in
+                if isExpanded {
+                    expandedSections.insert(section)
+                } else {
+                    expandedSections.remove(section)
+                }
+            }
+        )
+    }
 
     @ViewBuilder
     private func infoRow(title: String, text: String) -> some View {

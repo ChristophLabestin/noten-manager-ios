@@ -233,18 +233,9 @@ struct AppSettingsView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Einstellungen")
                 .font(.title2.weight(.bold))
-            HStack(spacing: 6) {
-                Text("Profil, Design & Benachrichtigungen")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                
-                PillBadge(
-                    text: store.schoolType == .fos ? "FOS" : "BOS",
-                    systemImage: "seal.fill",
-                    foreground: Color.indigo,
-                    background: Color.indigo.opacity(0.14)
-                )
-            }
+            Text("Profil, Design & Benachrichtigungen")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -281,7 +272,7 @@ struct AppSettingsView: View {
     var body: some View {
         NavigationStack {
             ScrollViewReader { proxy in
-                ScrollView(showsIndicators: false) {
+                ScrollView(.vertical, showsIndicators: false) {
                     VStack(spacing: 18) {
                         heroHeader
                             .softFadeIn(enabled: animationsOn, delay: 0.03, offset: 10)
@@ -310,7 +301,8 @@ struct AppSettingsView: View {
 
                     }
                     .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
+                    .padding(.vertical, 8)
+                    .clipped()
                 }
                 .onAppear {
                     maybeScrollToAccount(proxy: proxy)
@@ -318,6 +310,7 @@ struct AppSettingsView: View {
                 .onChange(of: scrollToAccount) { _, _ in
                     maybeScrollToAccount(proxy: proxy)
                 }
+                .contentMargins(.horizontal, 0, for: .scrollContent)
             }
             .background(
                 ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity).onTapGesture { hideKeyboard() }
@@ -779,7 +772,7 @@ struct AppSettingsView: View {
                                     .background(Circle().fill(Color.cyan.opacity(0.15)))
                                 
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text("Speedometer Cover")
+                                    Text("Cover")
                                         .font(.subheadline.weight(.semibold))
                                     Text("Startanimation beim Öffnen der App")
                                         .font(.caption)
@@ -843,6 +836,36 @@ struct AppSettingsView: View {
                                     isOn: Binding(
                                         get: { store.showHolidayHints },
                                         set: { val in Task { await store.updatePreferences(holidayHintsEnabled: val) } }
+                                    )
+                                )
+                                .labelsHidden()
+                            }
+                            
+                            // Privacy Mode on Start
+                            HStack(spacing: 16) {
+                                Image(systemName: "eye.slash.fill")
+                                    .font(.title2)
+                                    .foregroundStyle(.indigo)
+                                    .frame(width: 32, height: 32)
+                                    .background(Circle().fill(Color.indigo.opacity(0.15)))
+                                
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Privatsphäre")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                    Text("Immer beim Start aktivieren")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
+                                
+                                Spacer()
+                                
+                                Toggle(
+                                    "",
+                                    isOn: Binding(
+                                        get: { store.alwaysEnablePrivacyOnStart },
+                                        set: { val in store.updateAlwaysEnablePrivacyOnStart(val) }
                                     )
                                 )
                                 .labelsHidden()
@@ -1469,16 +1492,16 @@ struct AppSettingsView: View {
                             .lineLimit(1)
                             .minimumScaleFactor(0.9)
                         Spacer()
-                        Capsule()
-                            .fill(offlineManager.isOfflineModeActive ? Color.orange.opacity(0.18) : Color.green.opacity(0.18))
-                            .overlay(
-                                Text(offlineManager.isOfflineModeActive ? "Offline" : "Online")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(offlineManager.isOfflineModeActive ? .orange : .green)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 4)
+                        Text(offlineManager.isOfflineModeActive ? "Offline" : "Online")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(offlineManager.isOfflineModeActive ? .orange : .green)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule()
+                                    .fill(offlineManager.isOfflineModeActive ? Color.orange.opacity(0.18) : Color.green.opacity(0.18))
                             )
-                            .frame(height: 28)
+                            .fixedSize()
                     }
 
                     HStack {
@@ -1539,12 +1562,6 @@ struct AppSettingsView: View {
                         .disabled(!offlineManager.isOfflineModeActive)
                     }
 
-                    HelpCenterLink(
-                        title: "Hilfe zum Offline-Modus",
-                        subtitle: "Cache, Grenzen & Sync-Verhalten im Help Center",
-                        section: .special,
-                        accent: .purple
-                    )
 
                     if let message = offlineStatusMessage, !message.isEmpty {
                         Text(message)
@@ -1553,6 +1570,12 @@ struct AppSettingsView: View {
                     }
                 }
             }
+                    HelpCenterLink(
+                        title: "Hilfe zum Offline-Modus",
+                        subtitle: "Cache, Grenzen & Sync-Verhalten im Help Center",
+                        section: .special,
+                        accent: .purple
+                    )
         }
     }
 

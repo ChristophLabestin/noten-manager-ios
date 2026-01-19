@@ -1353,7 +1353,7 @@ struct LaunchMessageSheetView: View {
     }
 
     var body: some View {
-        GeometryReader { proxy in
+        ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 heroSection
                 priceSpotlight
@@ -1362,7 +1362,7 @@ struct LaunchMessageSheetView: View {
                 ctaSection
                 finePrint
             }
-            .frame(maxWidth: .infinity, minHeight: proxy.size.height, alignment: .top)
+            .frame(maxWidth: .infinity, alignment: .top)
             .padding(.horizontal, 20)
             .padding(.vertical, 20)
         }
