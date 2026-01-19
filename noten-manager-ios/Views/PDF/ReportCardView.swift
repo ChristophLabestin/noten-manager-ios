@@ -1,32 +1,10 @@
 import SwiftUI
 
 struct ReportCardView: View {
-    let schoolYear: String
-    let subjects: [(name: String, average: Double?, gradingMode: GradingMode?, isAdvanced: Bool, grades: [GradeDetail])]
-    let seminarGrade: Double?
-    let seminarTopic: String?
-    let fachreferatGrade: Double?
-    let practicalGrade: Double?
-    let abiturGrades: [(name: String, points: Double?)]
-    let studentName: String
-    let averageBeforeDrops: Double?
-    let averageAfterDrops: Double?
-    let finalGrade: Double?
-    let totalPoints: Double?
-    let maxPoints: Int?
-    let creationDate: Date
-    let appIcon: UIImage?
-    let title: String
-    let showAbiturExams: Bool
-    let showPoints: Bool
-    let showGrades: Bool
-    let showIndividualGrades: Bool
+    let page: ReportCardPage
     
-    struct GradeDetail {
-        let value: Double
-        let type: AssessmentType?
-        let weight: Double
-    }
+    // Shortcuts to data
+    private var data: ReportCardData { page.data }
     
     // A4 Dimensions
     private let pageWidth: CGFloat = 595
@@ -36,209 +14,215 @@ struct ReportCardView: View {
         VStack(spacing: 0) {
             
             // --- HEADER SECTION ---
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(title)
-                        .font(.custom("HelveticaNeue-Medium", size: 12))
-                        .foregroundStyle(.gray)
-                        .textCase(.uppercase)
-                        .tracking(1.5)
+            if page.isFirstPage {
+                // Large Header for First Page
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(data.title)
+                            .font(.custom("HelveticaNeue-Medium", size: 12))
+                            .foregroundStyle(.gray)
+                            .textCase(.uppercase)
+                            .tracking(1.5)
+                        
+                        Text(data.studentName)
+                            .font(.system(size: 32, weight: .bold))
+                            .foregroundStyle(.primary)
+                    }
                     
-                    Text(studentName)
-                        .font(.system(size: 32, weight: .bold))
-                        .foregroundStyle(.primary)
-                }
-                
-                Spacer()
-                
-                // Final Grade Circles
-                HStack(spacing: 12) {
-                    // Points Circle
-                    if showPoints {
-                        ZStack {
-                            Circle()
-                                .strokeBorder(Color.indigo.opacity(0.3), lineWidth: 2)
-                            
-                            VStack(spacing: 0) {
-                                Text(formatPoints(averageAfterDrops))
-                                    .font(.system(size: 20, weight: .bold, design: .rounded))
-                                    .foregroundStyle(.primary)
-                                Text("Punkte")
-                                    .font(.system(size: 7, weight: .bold))
-                                    .foregroundStyle(.secondary)
-                                    .textCase(.uppercase)
+                    Spacer()
+                    
+                    // Final Grade Circles
+                    HStack(spacing: 12) {
+                        // Points Circle
+                        if data.showPoints {
+                            ZStack {
+                                Circle()
+                                    .strokeBorder(Color.indigo.opacity(0.3), lineWidth: 2)
+                                
+                                VStack(spacing: 0) {
+                                    Text(formatPoints(data.averageAfterDrops))
+                                        .font(.system(size: 20, weight: .bold, design: .rounded))
+                                        .foregroundStyle(.primary)
+                                    Text("Punkte")
+                                        .font(.system(size: 7, weight: .bold))
+                                        .foregroundStyle(.secondary)
+                                        .textCase(.uppercase)
+                                }
                             }
+                            .frame(width: 60, height: 60)
                         }
-                        .frame(width: 60, height: 60)
-                    }
 
-                    // Grade Circle
-                    if showGrades {
-                        ZStack {
-                            Circle()
-                                .strokeBorder(Color.indigo, lineWidth: 3)
-                                .background(Circle().fill(Color.indigo.opacity(0.05)))
-                            
-                            VStack(spacing: 0) {
-                                Text(formatGrade(finalGrade))
-                                    .font(.system(size: 26, weight: .black, design: .rounded))
-                                    .foregroundStyle(.indigo)
-                                Text("Schnitt")
-                                    .font(.system(size: 8, weight: .bold))
-                                    .foregroundStyle(.secondary)
-                                    .textCase(.uppercase)
+                        // Grade Circle
+                        if data.showGrades {
+                            ZStack {
+                                Circle()
+                                    .strokeBorder(Color.indigo, lineWidth: 3)
+                                    .background(Circle().fill(Color.indigo.opacity(0.05)))
+                                
+                                VStack(spacing: 0) {
+                                    Text(formatGrade(data.finalGrade))
+                                        .font(.system(size: 26, weight: .black, design: .rounded))
+                                        .foregroundStyle(.indigo)
+                                    Text("Schnitt")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundStyle(.secondary)
+                                        .textCase(.uppercase)
+                                }
                             }
+                            .frame(width: 80, height: 80)
                         }
-                        .frame(width: 80, height: 80)
                     }
                 }
-            }
-            .padding(.horizontal, 40)
-            .padding(.top, 50)
-            .padding(.bottom, 30)
-            
-            // --- INFO STRIP ---
-            HStack(spacing: 40) {
-                infoItem(label: "Schuljahr", value: schoolYear)
-                infoItem(label: "Stand", value: formatDate(creationDate))
-                if let total = totalPoints, let max = maxPoints {
-                    infoItem(label: "Gesamtpunkte", value: "\(Int(total.rounded())) / \(max)")
-                }
-                Spacer()
-                HStack(spacing: 6) {
-                    if let icon = appIcon {
-                        Image(uiImage: icon)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 16, height: 16)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                .padding(.horizontal, 40)
+                .padding(.top, 50)
+                .padding(.bottom, 30)
+                
+                // --- INFO STRIP ---
+                HStack(spacing: 40) {
+                    infoItem(label: "Schuljahr", value: data.schoolYear)
+                    infoItem(label: "Stand", value: formatDate(data.creationDate))
+                    if let total = data.totalPoints, let max = data.maxPoints {
+                        infoItem(label: "Gesamtpunkte", value: "\(Int(total.rounded())) / \(max)")
                     }
-                    Text("Noten Manager")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                    Spacer()
+                    HStack(spacing: 6) {
+                        if let icon = data.appIcon {
+                            Image(uiImage: icon)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 16, height: 16)
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                        }
+                        Text("Noten Manager")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
                 }
-            }
-            .padding(.horizontal, 40)
-            .padding(.bottom, 20)
-            
-            Divider()
                 .padding(.horizontal, 40)
                 .padding(.bottom, 20)
+                
+                Divider()
+                    .padding(.horizontal, 40)
+                    .padding(.bottom, 20)
+                
+            } else {
+                // Compressed Header for subsequent pages
+                HStack {
+                    Text("\(data.studentName) • \(data.title)")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("Seite \(page.pageIndex + 1) von \(page.totalPages)")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 40)
+                .padding(.top, 30)
+                .padding(.bottom, 20)
+                
+                Divider()
+                    .padding(.horizontal, 40)
+                    .padding(.bottom, 20)
+            }
             
             // --- SUBJECTS COLUMNS ---
             HStack(alignment: .top, spacing: 30) {
                 // Column 1: With Schulaufgaben
-                let withSA = subjects.filter { $0.gradingMode == .withSchulaufgaben || $0.gradingMode == nil }
                 VStack(alignment: .leading, spacing: 0) {
-                    sectionHeader("MIT SCHULAUFGABEN")
-                    
-                    ForEach(withSA, id: \.name) { subject in
-                        subjectRow(name: subject.name, average: subject.average, grades: subject.grades)
+                    if !page.subjectsWithSA.isEmpty {
+                        sectionHeader("MIT SCHULAUFGABEN")
+                        
+                        ForEach(page.subjectsWithSA) { subject in
+                            subjectRow(subject: subject)
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity)
                 
                 // Column 2: Without Schulaufgaben
-                let withoutSA = subjects.filter { $0.gradingMode == .withoutSchulaufgaben }
                 VStack(alignment: .leading, spacing: 0) {
-                    sectionHeader("OHNE SCHULAUFGABEN")
-                    
-                    ForEach(withoutSA, id: \.name) { subject in
-                        subjectRow(name: subject.name, average: subject.average, grades: subject.grades)
+                    if !page.subjectsWithoutSA.isEmpty {
+                        sectionHeader("OHNE SCHULAUFGABEN")
+                        
+                        ForEach(page.subjectsWithoutSA) { subject in
+                            subjectRow(subject: subject)
+                        }
                     }
-                    
-                    // Extras in right column if space allows, or below
-                    // Let's keep them below for consistency with user request
                 }
                 .frame(maxWidth: .infinity)
             }
             .padding(.horizontal, 40)
             
             // --- EXTRAS ---
-            if seminarGrade != nil || practicalGrade != nil || fachreferatGrade != nil {
+            if !page.specialItems.isEmpty {
                 Spacer().frame(height: 20)
                 VStack(spacing: 0) {
                     sectionHeader("WEITERE LEISTUNGEN")
                     
-                    if let fr = fachreferatGrade {
-                        subjectRow(name: "Fachreferat", average: fr)
-                    }
-                    
-                    if let seminar = seminarGrade {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Seminarfach")
-                                    .font(.system(size: 13, weight: .semibold))
-                                if let topic = seminarTopic {
-                                    Text(topic)
-                                        .font(.system(size: 10))
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            Spacer()
-                            Text(formatPoints(seminar))
-                                .font(.system(size: 14, weight: .bold, design: .rounded))
-                        }
-                        .padding(.vertical, 8)
-                        Divider().opacity(0.3)
-                    }
-                    
-                    if let practical = practicalGrade {
-                        subjectRow(name: "Fachpraktische Ausbildung", average: practical)
+                    ForEach(page.specialItems) { item in
+                        specialItemRow(item: item)
                     }
                 }
                 .padding(.horizontal, 40)
             }
             
             // Abitur Exams
-            if showAbiturExams && !abiturGrades.isEmpty {
+            if !page.abiturExams.isEmpty {
                 Spacer().frame(height: 20)
-                HStack {
-                    Text("ABITUR / ABSCHLUSSPRÜFUNG")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.gray)
-                        .tracking(1)
-                    Spacer()
+                VStack(spacing: 0) {
+                    HStack {
+                        Text("ABITUR / ABSCHLUSSPRÜFUNG")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.gray)
+                            .tracking(1)
+                        Spacer()
+                    }
+                    .padding(.bottom, 10)
+                    
+                    ForEach(page.abiturExams) { exam in
+                        HStack {
+                            Text(exam.name.uppercased())
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            if let p = exam.points {
+                                Text(formatPoints(p))
+                                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                                    .foregroundStyle(colorForGrade(p))
+                            } else {
+                                Text("-")
+                                    .foregroundStyle(.secondary.opacity(0.5))
+                            }
+                        }
+                        .padding(.vertical, 8)
+                        
+                        Divider().opacity(0.3)
+                    }
                 }
                 .padding(.horizontal, 40)
-                .padding(.bottom, 10)
-                
-                ForEach(abiturGrades, id: \.name) { exam in
-                    HStack {
-                        Text(exam.name.uppercased())
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.primary)
-                        Spacer()
-                        if let p = exam.points {
-                            Text(formatPoints(p))
-                                .font(.system(size: 15, weight: .bold, design: .rounded))
-                                .foregroundStyle(colorForGrade(p))
-                        } else {
-                            Text("-")
-                                .foregroundStyle(.secondary.opacity(0.5))
-                        }
-                    }
-                    .padding(.horizontal, 40)
-                    .padding(.vertical, 8)
-                    
-                    Divider()
-                        .opacity(0.3)
-                        .padding(.horizontal, 40)
-                }
             }
             
             Spacer()
             
             // --- FOOTER ---
-            Text("Inoffizieller Auszug • Alle Angaben ohne Gewähr")
-                .font(.system(size: 9))
-                .foregroundStyle(.gray.opacity(0.6))
-                .padding(.bottom, 40)
+            if page.isLastPage {
+                Text("Inoffizieller Auszug • Alle Angaben ohne Gewähr")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.gray.opacity(0.6))
+                    .padding(.bottom, 40)
+            } else {
+                Text("Fortsetzung auf nächster Seite …")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 40)
+            }
         }
         .frame(width: pageWidth, height: pageHeight)
         .background(Color.white)
         .environment(\.colorScheme, .light)
     }
+    
+    // MARK: - Subviews & Helpers
     
     private func infoItem(label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -296,19 +280,19 @@ struct ReportCardView: View {
         .padding(.bottom, 8)
     }
     
-    private func subjectRow(name: String, average: Double?, grades: [GradeDetail] = []) -> some View {
+    private func subjectRow(subject: ReportCardSubject) -> some View {
         VStack(spacing: 0) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(name)
+                    Text(subject.name)
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(.primary)
                     
-                    if showIndividualGrades && !grades.isEmpty {
+                    if data.showIndividualGrades && !subject.grades.isEmpty {
                         // Compact list of individual grades
                         FlowLayout(spacing: 4) {
-                            ForEach(0..<grades.count, id: \.self) { index in
-                                let g = grades[index]
+                            ForEach(0..<subject.grades.count, id: \.self) { index in
+                                let g = subject.grades[index]
                                 Text("\(formatGradeValue(g.value))\(assessmentTypeSuffix(g.type))")
                                     .font(.system(size: 9, weight: .medium, design: .rounded))
                                     .padding(.horizontal, 4)
@@ -322,14 +306,37 @@ struct ReportCardView: View {
                 
                 Spacer()
                 
-                Text(formatPoints(average))
+                Text(formatPoints(subject.average))
                     .font(.system(size: 14, weight: .bold, design: .rounded))
-                    .foregroundStyle(colorForGrade(average))
+                    .foregroundStyle(colorForGrade(subject.average))
             }
             .padding(.vertical, 8)
             
             Divider()
                 .opacity(0.3)
+        }
+    }
+    
+    private func specialItemRow(item: ReportCardSpecialItem) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.title)
+                        .font(.system(size: 13, weight: .semibold))
+                    if let d = item.detail {
+                        Text(d)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                if let v = item.value {
+                    Text(formatPoints(v))
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                }
+            }
+            .padding(.vertical, 8)
+            Divider().opacity(0.3)
         }
     }
     
@@ -351,5 +358,12 @@ struct ReportCardView: View {
         case .praktisch: return " (PR)"
         case .projekt: return " (PJ)"
         }
+    }
+    
+    // Legacy struct kept for compatibility if needed elsewhere, though now we use ReportCardView.GradeDetail from wrapper usually
+    struct GradeDetail {
+        let value: Double
+        let type: AssessmentType?
+        let weight: Double
     }
 }

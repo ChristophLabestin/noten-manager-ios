@@ -37,62 +37,31 @@ struct ReportCardSheet: View {
                 
                 if isLoading {
                     ProgressView("Vorschau wird geladen …")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    ScrollView {
-                        VStack(spacing: 32) {
-                            settingsSection
-                                .padding(.horizontal, 16)
-                                .padding(.top, 16)
-                            
-                            // Real-time SwiftUI Preview
-                            if let result = calculatorResult {
-                                let containerWidth = UIScreen.main.bounds.width - 32
-                                let scale = containerWidth / 595.0
-                                
-                                VStack {
-                                    Text("ZEUGNIS-VORSCHAU")
-                                        .font(.caption2.weight(.bold))
-                                        .foregroundStyle(.secondary)
-                                        .tracking(1)
-                                        .padding(.bottom, 8)
-                                    
-                                    VStack {
-                                        ReportCardView(
-                                            schoolYear: store.activeSchoolYearId ?? "Unbekannt",
-                                            subjects: subjectsForReportCard(result: result),
-                                            seminarGrade: result.seminarGrade,
-                                            seminarTopic: store.seminarPerformance?.topic,
-                                            fachreferatGrade: result.fachreferatGrade,
-                                            practicalGrade: result.practicalGrade,
-                                            abiturGrades: result.abiturResults.map { ($0.subjectName, $0.points) },
-                                            studentName: userName ?? "Schüler/in",
-                                            averageBeforeDrops: result.averageBeforeDrops,
-                                            averageAfterDrops: result.averageAfterDrops,
-                                            finalGrade: result.finalGrade,
-                                            totalPoints: result.totalPoints,
-                                            maxPoints: result.maxPoints,
-                                            creationDate: creationDate,
-                                            appIcon: appIcon,
-                                            title: documentTitle,
-                                            showAbiturExams: showAbiturExams,
-                                            showPoints: showPoints,
-                                            showGrades: showGrades,
-                                            showIndividualGrades: showIndividualGrades
-                                        )
-                                        .background(Color.white)
-                                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                                        .shadow(color: .black.opacity(0.12), radius: 15, x: 0, y: 8)
-                                        .scaleEffect(scale, anchor: .top)
-                                    }
-                                    .frame(width: containerWidth, height: 842 * scale, alignment: .top)
-                                    .padding(.top, 12)
-                                    .padding(.bottom, 80)
+
+                    VStack(spacing: 0) {
+                        // 1. Settings Section (Pinned)
+                        settingsSection
+                            .padding(.horizontal, 16)
+                            .padding(.top, 16)
+                            .padding(.bottom, 16)
+                            .zIndex(10)
+                        
+                        Divider()
+                        
+                        ScrollView {
+                            VStack(spacing: 32) {
+                                // 2. Preview Section
+                                if let result = calculatorResult {
+                                    previewSection(result: result)
+                                } else {
+                                    ContentUnavailableView("Daten fehlen", systemImage: "exclamationmark.triangle")
+                                        .padding(.top, 40)
                                 }
-                            } else {
-                                ContentUnavailableView("Daten fehlen", systemImage: "exclamationmark.triangle")
                             }
+                            .padding(.top, 24)
                         }
+                        .clipped()
                     }
                 }
             }
@@ -117,34 +86,84 @@ struct ReportCardSheet: View {
                             Image(systemName: "square.and.arrow.up")
                                 .font(.body.weight(.semibold))
                                 .foregroundStyle(store.darkMode ? .white : .black)
+                                .frame(width: 30, height: 30)
+                                .contentShape(Rectangle())
                         }
                     } else if isLoading {
                         ProgressView().scaleEffect(0.6)
                     }
                 }
             }
-            .onChange(of: showAbiturExams) { _ in
-                updatePDFAsync()
-            }
-            .onChange(of: showPoints) { _ in
-                updatePDFAsync()
-            }
-            .onChange(of: showGrades) { _ in
-                updatePDFAsync()
-            }
-            .onChange(of: showIndividualGrades) { _ in
-                updatePDFAsync()
-            }
-            .onChange(of: includeDroppedHalfYears) { _ in
-                updatePDFAsync()
-            }
+            .onChange(of: showAbiturExams) { _, _ in updatePDFAsync() }
+            .onChange(of: showPoints) { _, _ in updatePDFAsync() }
+            .onChange(of: showGrades) { _, _ in updatePDFAsync() }
+            .onChange(of: showIndividualGrades) { _, _ in updatePDFAsync() }
+            .onChange(of: includeDroppedHalfYears) { _, _ in updatePDFAsync() }
             .task {
                 await initialSetup()
             }
         }
     }
     
-    private func subjectsForReportCard(result: GradeCalculator.CalculationResult) -> [(name: String, average: Double?, gradingMode: GradingMode?, isAdvanced: Bool, grades: [ReportCardView.GradeDetail])] {
+    // Extracted Preview Section for cleaner body
+    @ViewBuilder
+    private func previewSection(result: GradeCalculator.CalculationResult) -> some View {
+        let containerWidth = UIScreen.main.bounds.width - 32
+        let scale = containerWidth / 595.0
+        
+        VStack {
+            Text("ZEUGNIS-VORSCHAU")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.secondary)
+                .tracking(1)
+                .padding(.bottom, 8)
+            
+            VStack {
+                // Create Preview Data
+                let reportData = ReportCardData(
+                    studentName: userName ?? "Schüler/in",
+                    schoolYear: store.activeSchoolYearId ?? "Unbekannt",
+                    creationDate: creationDate,
+                    appIcon: appIcon,
+                    title: documentTitle,
+                    averageBeforeDrops: result.averageBeforeDrops,
+                    averageAfterDrops: result.averageAfterDrops,
+                    finalGrade: result.finalGrade,
+                    totalPoints: result.totalPoints,
+                    maxPoints: result.maxPoints,
+                    subjects: subjectsForReportCard(result: result),
+                    specialItems: [
+                        result.fachreferatGrade.map { ReportCardSpecialItem(id: "fr", title: "Fachreferat", value: $0, detail: nil) },
+                        result.seminarGrade.map { ReportCardSpecialItem(id: "sem", title: "Seminarfach", value: $0, detail: store.seminarPerformance?.topic) },
+                        result.practicalGrade.map { ReportCardSpecialItem(id: "prac", title: "Fachpraktische Ausbildung", value: $0, detail: nil) }
+                    ].compactMap { $0 },
+                    abiturExams: result.abiturResults.map { ReportCardAbiturExam(name: $0.subjectName, points: $0.points) },
+                    showAbiturExams: showAbiturExams,
+                    showPoints: showPoints,
+                    showGrades: showGrades,
+                    showIndividualGrades: showIndividualGrades
+                )
+                
+                let pages = ReportCardPaginator().paginate(data: reportData)
+                
+                // Render Pages
+                ForEach(pages, id: \.pageIndex) { page in
+                    ReportCardView(page: page)
+                        .frame(width: 595, height: 842)
+                        .background(Color.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .shadow(color: .black.opacity(0.12), radius: 15, x: 0, y: 8)
+                        .scaleEffect(scale) // Default anchor is center
+                        .frame(width: 595 * scale, height: 842 * scale) // Wrap closely around the scaled visual
+                        .padding(.bottom, 20)
+                }
+            }
+            .padding(.top, 12)
+            .padding(.bottom, 80)
+        }
+    }
+    
+    private func subjectsForReportCard(result: GradeCalculator.CalculationResult) -> [ReportCardSubject] {
         return store.subjects.sorted(by: { $0.order ?? 0 < $1.order ?? 0 }).map { subject in
             let calc = result.subjects.first(where: { $0.subjectName == subject.name })
             
@@ -157,7 +176,13 @@ struct ReportCardSheet: View {
             let grades = rawGrades.map { grade in
                 ReportCardView.GradeDetail(value: grade.grade, type: grade.assessmentType, weight: grade.weight)
             }
-            return (subject.name, calc?.average, subject.gradingMode, subject.isElective, grades)
+            return ReportCardSubject(
+                name: subject.name,
+                average: calc?.average,
+                gradingMode: subject.gradingMode,
+                isAdvanced: subject.isElective,
+                grades: grades
+            )
         }
     }
     
@@ -237,62 +262,87 @@ struct ReportCardSheet: View {
     private func preparePDF() async {
         guard let result = calculatorResult else { return }
         
-        // Prepare display data
-        let subjects = subjectsForReportCard(result: result)
+        // 1. Prepare Data
+        let subjects: [ReportCardSubject] = subjectsForReportCard(result: result)
         
-        let abiturGrades: [(name: String, points: Double?)] = result.abiturResults.map { ($0.subjectName, $0.points) }
-
-        let reportCard = ReportCardView(
-            schoolYear: store.activeSchoolYearId ?? "Unbekannt",
-            subjects: subjects,
-            seminarGrade: result.seminarGrade,
-            seminarTopic: store.seminarPerformance?.topic,
-            fachreferatGrade: result.fachreferatGrade,
-            practicalGrade: result.practicalGrade,
-            abiturGrades: abiturGrades,
+        var specialItems: [ReportCardSpecialItem] = []
+        if let fr = result.fachreferatGrade {
+            specialItems.append(ReportCardSpecialItem(id: "fr", title: "Fachreferat", value: fr, detail: nil))
+        }
+        if let seminar = result.seminarGrade {
+            specialItems.append(ReportCardSpecialItem(id: "sem", title: "Seminarfach", value: seminar, detail: store.seminarPerformance?.topic))
+        }
+        if let practical = result.practicalGrade {
+            specialItems.append(ReportCardSpecialItem(id: "prac", title: "Fachpraktische Ausbildung", value: practical, detail: nil))
+        }
+        
+        let abiturExams: [ReportCardAbiturExam] = result.abiturResults.map {
+            ReportCardAbiturExam(name: $0.subjectName, points: $0.points)
+        }
+        
+        let reportData = ReportCardData(
             studentName: userName ?? "Schüler/in",
+            schoolYear: store.activeSchoolYearId ?? "Unbekannt",
+            creationDate: creationDate,
+            appIcon: appIcon,
+            title: documentTitle,
             averageBeforeDrops: result.averageBeforeDrops,
             averageAfterDrops: result.averageAfterDrops,
             finalGrade: result.finalGrade,
             totalPoints: result.totalPoints,
             maxPoints: result.maxPoints,
-            creationDate: creationDate,
-            appIcon: appIcon,
-            title: documentTitle,
+            subjects: subjects,
+            specialItems: specialItems,
+            abiturExams: abiturExams,
             showAbiturExams: showAbiturExams,
             showPoints: showPoints,
             showGrades: showGrades,
             showIndividualGrades: showIndividualGrades
         )
         
+        // 2. Paginate
+        let paginator = ReportCardPaginator()
+        let pages = paginator.paginate(data: reportData)
+        
+        // 3. Render
         // Construct meaningful filename
         let safeName = (userName ?? "Schüler").replacingOccurrences(of: " ", with: "")
         let safeTitle = documentTitle.replacingOccurrences(of: " ", with: "")
         let dateString = formatDateForFile(Date())
         let filename = "Noten_\(safeTitle)_\(safeName)_\(dateString).pdf"
         
-        // Render
-        if let url = renderPDF(view: reportCard, filename: filename) {
+        if let url = renderPDF(pages: pages, filename: filename) {
             self.pdfURL = url
         }
     }
     
     @MainActor
-    private func renderPDF(view: some View, filename: String) -> URL? {
-        let renderer = ImageRenderer(content: view)
+    private func renderPDF(pages: [ReportCardPage], filename: String) -> URL? {
         let paperSize = CGSize(width: 595, height: 842)
-        renderer.scale = 1.0
-        
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
         
-        renderer.render { size, context in
-            var box = CGRect(origin: .zero, size: paperSize)
-            guard let pdfContext = CGContext(tempURL as CFURL, mediaBox: &box, nil) else { return }
+        // Use a renderer for the dimensions (content doesn't matter yet)
+        // We will misuse ImageRenderer here slightly by creating new ones per page or drawing inside the callback manually.
+        // Actually, ImageRenderer handles one view. We need to create a PDFContext and draw into it multiple times.
+        guard let consumer = CGDataConsumer(url: tempURL as CFURL) else { return nil }
+        var box = CGRect(origin: .zero, size: paperSize)
+        
+        guard let pdfContext = CGContext(consumer: consumer, mediaBox: &box, nil) else { return nil }
+        
+        for page in pages {
+            let view = ReportCardView(page: page)
+            let renderer = ImageRenderer(content: view)
+            renderer.scale = 1.0 // MainActor safe
+            
             pdfContext.beginPDFPage(nil)
-            context(pdfContext)
+            renderer.render { size, context in
+                // Draw the view into the PDF context
+                context(pdfContext)
+            }
             pdfContext.endPDFPage()
-            pdfContext.closePDF()
         }
+        
+        pdfContext.closePDF()
         
         return tempURL
     }

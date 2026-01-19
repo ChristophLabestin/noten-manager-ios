@@ -12,6 +12,9 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - **Help Center UX**: Implemented collapsible sections in `HelpCenterView` to reduce visual clutter and improved navigation with automated scrolling.
+- **Report Card Upgrade**: Added multi-page support with intelligent content overflow handling (subjects, special items, abitur exams).
+- **Report Card Filtering**: Added option to exclude grades from dropped half-years ("Gestrichene Halbjahre").
+- **Report Card Layout**: Fixed persistent layout issues including preview overlap and scaling offsets.
 - **What If Entry**: Optimized `WhatIfModeView` with a high-density point grid (0-15) for faster grade simulation.
 - **Target Selection**: Categorized sharing targets into "Soziale Gruppen" and "Themengruppen" for better organization.
 - **Compact UI**: Redesigned `HelpCenterLink` for a more minimal, space-efficient appearance.
