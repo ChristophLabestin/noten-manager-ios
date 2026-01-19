@@ -69,3 +69,8 @@ node_modules/
 .dataconnect
 .DS_Store
 noten-manager-ios.xcodeproj/project.xcworkspace/xcuserdata/christophlabestin.xcuserdatad/UserInterfaceState.xcuserstate
+
+# Xcode and SwiftPM
+SourcePackages/
+xcuserdata/
+*.xcuserstate

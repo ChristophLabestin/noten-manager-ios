@@ -18,6 +18,7 @@ struct ClassesListView: View {
     @State private var showScanErrorAlert = false
     @State private var showGroupMergeSheet = false
     @State private var showSocialCreateSheet = false
+    @State private var showClassesOnboarding = false
     
     private var animationsOn: Bool { store.animationsEnabled }
     
@@ -34,7 +35,7 @@ struct ClassesListView: View {
                 
                 
 
-                if store.classIds.isEmpty && independentGroups.isEmpty {
+                if store.classIds.isEmpty && socialGroups.isEmpty && legacyGroups.isEmpty {
                     emptyState
                         .softFadeIn(enabled: animationsOn, delay: 0.15, offset: 12)
                 } else {
@@ -42,8 +43,13 @@ struct ClassesListView: View {
                         classesSection
                     }
                     
-                    if !independentGroups.isEmpty {
-                        independentGroupsSection
+                    if !socialGroups.isEmpty {
+                        socialGroupsSection
+                            .softFadeIn(enabled: animationsOn, delay: 0.2, offset: 14)
+                    }
+                    
+                    if !legacyGroups.isEmpty {
+                        legacyGroupsSection
                             .softFadeIn(enabled: animationsOn, delay: 0.25, offset: 16)
                     }
                 }
@@ -154,6 +160,15 @@ struct ClassesListView: View {
         } message: {
             Text("Es wird eine neue Klasse basierend auf dieser Gruppe erstellt. Die alte Gruppe bleibt für Nutzer älterer Versionen erhalten.")
         }
+        .sheet(isPresented: $showClassesOnboarding) {
+            ClassesFeatureOnboardingSheet()
+                .environmentObject(store)
+        }
+        .onAppear {
+            if !store.hasSeenClassesOnboarding {
+                showClassesOnboarding = true
+            }
+        }
     }
 
     
@@ -163,6 +178,14 @@ struct ClassesListView: View {
         return store.groupIds.filter { 
             !allClassGroups.contains($0) && !store.migratedGroupIds.contains($0)
         }
+    }
+    
+    private var socialGroups: [String] {
+        independentGroups.filter { store.groupTypes[$0] == "social" }
+    }
+    
+    private var legacyGroups: [String] {
+        independentGroups.filter { store.groupTypes[$0] != "social" }
     }
     
     private var headerSection: some View {
@@ -177,10 +200,11 @@ struct ClassesListView: View {
     }
     
     private var statsSection: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing:10) {
             StatChip(title: "Klassen", value: "\(store.classIds.count)", accent: .indigo)
-            StatChip(title: "Gruppen", value: "\(independentGroups.count)", accent: .cyan)
-            StatChip(title: "Kurse", value: "\(store.courses.count)", accent: .orange)
+            StatChip(title: "Soziale Gruppen", value: "\(socialGroups.count)", accent: .purple)
+            StatChip(title: "Legacy-Gruppen", value: "\(legacyGroups.count)", accent: .cyan)
+            StatChip(title: "Meine Kurse", value: "\(store.courses.count)", accent: .orange)
         }
     }
     
@@ -227,30 +251,39 @@ struct ClassesListView: View {
         }
     }
     
-    private var independentGroupsSection: some View {
+    private var socialGroupsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Andere Gruppen")
+            Text("Soziale Gruppen")
                 .font(.headline)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
             
-            ForEach(independentGroups, id: \.self) { gid in
-                if store.groupTypes[gid] == "social" {
-                    SocialGroupCardView(
-                        groupId: gid,
-                        isOwner: store.groupOwners[gid] == Auth.auth().currentUser?.uid,
-                        memberCount: store.groupMemberIds[gid]?.count ?? 0,
-                        onLeave: { groupPendingLeave = gid }
-                    )
-                } else {
-                    IndependentGroupCardView(
-                        groupId: gid,
-                        isOwner: store.groupOwners[gid] == Auth.auth().currentUser?.uid,
-                        memberCount: store.groupMemberIds[gid]?.count ?? 0,
-                        onLeave: { groupPendingLeave = gid },
-                        onMigrate: { groupPendingMigration = gid }
-                    )
-                }
+            ForEach(socialGroups, id: \.self) { gid in
+                SocialGroupCardView(
+                    groupId: gid,
+                    isOwner: store.groupOwners[gid] == Auth.auth().currentUser?.uid,
+                    memberCount: store.groupMemberIds[gid]?.count ?? 0,
+                    onLeave: { groupPendingLeave = gid }
+                )
+            }
+        }
+    }
+    
+    private var legacyGroupsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Weitere Gruppen")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+            
+            ForEach(legacyGroups, id: \.self) { gid in
+                IndependentGroupCardView(
+                    groupId: gid,
+                    isOwner: store.groupOwners[gid] == Auth.auth().currentUser?.uid,
+                    memberCount: store.groupMemberIds[gid]?.count ?? 0,
+                    onLeave: { groupPendingLeave = gid },
+                    onMigrate: { groupPendingMigration = gid }
+                )
             }
         }
     }
@@ -297,8 +330,8 @@ struct ClassesListView: View {
                 Divider()
                     .padding(.vertical, 4)
                 
-                // Section: Gruppen
-                Text("Lerngruppen")
+                // Section: Gruppen & Soziales
+                Text("Gruppen & Soziales")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -307,10 +340,18 @@ struct ClassesListView: View {
                 Button {
                     showSocialCreateSheet = true
                 } label: {
-                    Label("Neue soziale Gruppe", systemImage: "person.2.fill")
+                    Label("Neue soziale Gruppe", systemImage: "person.2.badge.plus.fill")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(SoftTintButtonStyle(accent: .indigo))
+                .buttonStyle(SoftTintButtonStyle(accent: .purple))
+
+                Button {
+                    showCreateGroupSheet = true
+                } label: {
+                    Label("Neue Legacy-Gruppe", systemImage: "person.3.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(SoftTintButtonStyle(accent: .orange))
 
                 Button {
                     showScannerSheet = true
@@ -328,14 +369,14 @@ struct ClassesListView: View {
                 }
                 .buttonStyle(SoftTintButtonStyle(accent: .gray))
                 
-                if !independentGroups.isEmpty {
+                if !legacyGroups.isEmpty {
                     Button {
                         showGroupMergeSheet = true
                     } label: {
                         Label("Gruppen zusammenführen", systemImage: "arrow.triangle.merge")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(SoftTintButtonStyle(accent: .purple))
+                    .buttonStyle(SoftTintButtonStyle(accent: .indigo))
                 }
             }
         }
@@ -594,6 +635,15 @@ private struct SocialGroupCardView: View {
                             .foregroundStyle(.secondary)
                         Text("\(memberCount) Mitglieder")
                             .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    
+                    HStack(spacing: 6) {
+                        Image(systemName: "number")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(groupId)
+                            .font(.caption.monospaced().weight(.medium))
                             .foregroundStyle(.secondary)
                     }
                 }

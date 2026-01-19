@@ -27,6 +27,7 @@ struct HomeView: View {
     @State private var navigateToFinalGrade: Bool = false
     @State private var showMigrationInfoSheet: Bool = false
     @State private var showDebugSheet: Bool = false
+    @State private var showWhatsNewSheet: Bool = false
 
 
     @State private var greeting: String = ""
@@ -1101,9 +1102,19 @@ struct HomeView: View {
             if store.shouldShowMigrationInfo {
                 showMigrationInfoSheet = true
             }
+
+            // What's New Sheet logic
+            let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+            if !currentVersion.isEmpty && store.lastSeenVersion != currentVersion && !showMigrationInfoSheet {
+                showWhatsNewSheet = true
+            }
         }
         .sheet(isPresented: $showMigrationInfoSheet) {
             MigrationInfoSheet()
+                .environmentObject(store)
+        }
+        .sheet(isPresented: $showWhatsNewSheet) {
+            WhatsNewSheet()
                 .environmentObject(store)
         }
         .onChange(of: store.shouldShowMigrationInfo) { _, show in

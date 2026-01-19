@@ -19,6 +19,35 @@ enum SchoolType: String, Codable, CaseIterable {
     }
 }
 
+struct SimulatedGradeEntry: Codable, Identifiable, Equatable, GradeProtocol {
+    let id: UUID
+    let subjectName: String
+    let grade: Double
+    let weight: Double
+    let assessmentType: AssessmentType?
+    let isCustomWeight: Bool
+    let halfYear: Int?
+    let createdAt: Date
+
+    init(id: UUID = UUID(),
+         subjectName: String,
+         grade: Double,
+         weight: Double,
+         assessmentType: AssessmentType?,
+         isCustomWeight: Bool,
+         halfYear: Int?,
+         createdAt: Date = Date()) {
+        self.id = id
+        self.subjectName = subjectName
+        self.grade = grade
+        self.weight = weight
+        self.assessmentType = assessmentType
+        self.isCustomWeight = isCustomWeight
+        self.halfYear = halfYear
+        self.createdAt = createdAt
+    }
+}
+
 struct Subject: Codable, Identifiable, Hashable {
     // In Firestore ist die documentID der Name; wir spiegeln das
     var id: String { name }

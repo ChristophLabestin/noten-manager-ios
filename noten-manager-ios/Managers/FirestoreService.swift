@@ -1,6 +1,6 @@
-// FirestoreService.swift
 import Foundation
 @preconcurrency import FirebaseFirestore
+import FirebaseAuth
 
 final class FirestoreService {
     static let shared = FirestoreService()
@@ -122,5 +122,22 @@ final class FirestoreService {
                 "lastTokenUpdate": Timestamp(date: Date())
             ], merge: true)
         }
+    }
+
+    // MARK: - Feature Tracking
+    
+    /// Logs that a user has seen a specific feature onboarding/info sheet
+    func logFeatureOnboardingSeen(featureId: String) async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        let logData: [String: Any] = [
+            "userId": uid,
+            "featureId": featureId,
+            "seenAt": Timestamp(date: Date()),
+            "platform": "ios"
+        ]
+        
+        // Preparation: In the future, this could go into a dedicated analytics collection
+        // For now, we log it to a debug collection as requested
+        _ = try? await db.collection("featureOnboardingLogs").addDocument(data: logData)
     }
 }

@@ -1,16 +1,5 @@
 import SwiftUI
 
-struct SimulatedGradeEntry: Identifiable, Equatable {
-    let id = UUID()
-    let subjectName: String
-    let grade: Double
-    let weight: Double
-    let assessmentType: AssessmentType?
-    let isCustomWeight: Bool
-    let halfYear: Int?
-    let createdAt: Date
-}
-
 extension AssessmentType {
     var shortName: String {
         switch self {
@@ -28,9 +17,6 @@ struct WhatIfModeView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var store: GradesStore
 
-    @State private var simulatedGrades: [SimulatedGradeEntry] = []
-    @State private var excludedRealGradeIds: Set<String> = []
-    @State private var includeDroppedGrades: Bool = false
     @State private var activeSubjectForAdd: SubjectIdentifier? = nil
     @State private var expandedSubjects: Set<String> = []
     
@@ -52,6 +38,10 @@ struct WhatIfModeView: View {
         return sim - curr
     }
 
+    private var filteredSubjects: [Subject] {
+        store.subjects.filter { $0.name != "Fachreferat" }
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -63,44 +53,16 @@ struct WhatIfModeView: View {
                             currentAverage: currentAverage,
                             simulatedAverage: simulatedAverage ?? currentAverage,
                             deltaAverage: deltaAverage,
-                            includeDroppedGrades: $includeDroppedGrades,
+                            includeDroppedGrades: $store.includeDroppedGrades,
                             animationsEnabled: store.animationsEnabled
                         )
 
-                        let filteredSubjects = store.subjects.filter { $0.name != "Fachreferat" }
-                        let realGradesDict = realGradesAsGradeDict()
-                        let simGradesDict = combinedGrades()
+                        let realDict = realGradesAsGradeDict()
+                        let simDict = combinedGrades()
 
                         VStack(spacing: 12) {
                             ForEach(Array(filteredSubjects.enumerated()), id: \.element.name) { index, subject in
-                                SubjectWhatIfRow(
-                                    subject: subject,
-                                    currentAvg: subjectAverage(subject, using: realGradesDict),
-                                    simulatedAvg: subjectAverage(subject, using: simGradesDict),
-                                    simulatedGrades: simulatedGrades.filter { $0.subjectName == subject.name },
-                                    realGrades: store.gradesBySubject[subject.name] ?? [] ,
-                                    excludedIds: excludedRealGradeIds,
-                                    isExpanded: expandedSubjects.contains(subject.name),
-                                    onToggleExpand: {
-                                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                                            if expandedSubjects.contains(subject.name) {
-                                                expandedSubjects.remove(subject.name)
-                                            } else {
-                                                expandedSubjects.insert(subject.name)
-                                            }
-                                        }
-                                    },
-                                    onAddGhost: { activeSubjectForAdd = SubjectIdentifier(id: subject.name) },
-                                    onRemoveGhost: { id in simulatedGrades.removeAll { $0.id == id } },
-                                    onToggleReal: { id in
-                                        if excludedRealGradeIds.contains(id) {
-                                            excludedRealGradeIds.remove(id)
-                                        } else {
-                                            excludedRealGradeIds.insert(id)
-                                        }
-                                    }
-                                )
-                                .softFadeIn(enabled: store.animationsEnabled, delay: 0.1 + Double(index) * 0.03)
+                                makeSubjectRow(index: index, subject: subject, realDict: realDict, simDict: simDict)
                             }
                         }
                     }
@@ -121,9 +83,7 @@ struct WhatIfModeView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
                         withAnimation {
-                            simulatedGrades.removeAll()
-                            excludedRealGradeIds.removeAll()
-                            includeDroppedGrades = false
+                            store.clearGradeSimulations()
                         }
                     } label: {
                         Image(systemName: "arrow.counterclockwise")
@@ -144,10 +104,9 @@ struct WhatIfModeView: View {
                             weight: weight,
                             assessmentType: type,
                             isCustomWeight: isCustom,
-                            halfYear: halfYear,
-                            createdAt: Date()
+                            halfYear: halfYear
                         )
-                        simulatedGrades.append(entry)
+                        store.simulatedGrades.append(entry)
                     }
                 )
                 .presentationDetents([.medium, .large])
@@ -181,9 +140,9 @@ struct WhatIfModeView: View {
         
         for subject in store.subjects {
             let real = store.gradesBySubject[subject.name] ?? []
-            let filteredReal = real.filter { !excludedRealGradeIds.contains($0.id) }
+            let filteredReal = real.filter { !store.excludedRealGradeIds.contains($0.id) }
             
-            let ghostEntries = simulatedGrades.filter { $0.subjectName == subject.name }
+            let ghostEntries = store.simulatedGrades.filter { $0.subjectName == subject.name }
             let ghostGrades = ghostEntries.map { entry in
                 Grade(
                     grade: entry.grade,
@@ -217,7 +176,7 @@ struct WhatIfModeView: View {
         return GradeCalculationService.calculateSubjectAverage(
             subject: subject,
             grades: list,
-            dropValue: includeDroppedGrades ? nil : subject.droppedHalfYear,
+            dropValue: store.includeDroppedGrades ? nil : subject.droppedHalfYear,
             effectiveGradeWeight: { self.store.effectiveGradeWeight(subjectType: $0, rawWeight: $1) }
         )
     }
@@ -235,7 +194,7 @@ struct WhatIfModeView: View {
                 )
             },
             droppedHalfYearProvider: { subject in
-                includeDroppedGrades ? nil : subject.droppedHalfYear
+                store.includeDroppedGrades ? nil : subject.droppedHalfYear
             },
             halfYearFilter: nil,
             fachreferat: store.fachreferat,
@@ -245,6 +204,37 @@ struct WhatIfModeView: View {
             schoolType: store.schoolType,
             gradeYear: store.gradeYear ?? 12
         )
+    }
+
+    private func makeSubjectRow(index: Int, subject: Subject, realDict: [String: [Grade]], simDict: [String: [Grade]]) -> some View {
+        SubjectWhatIfRow(
+            subject: subject,
+            currentAvg: subjectAverage(subject, using: realDict),
+            simulatedAvg: subjectAverage(subject, using: simDict),
+            simulatedGrades: store.simulatedGrades.filter { $0.subjectName == subject.name },
+            realGrades: store.gradesBySubject[subject.name] ?? [] ,
+            excludedIds: store.excludedRealGradeIds,
+            isExpanded: expandedSubjects.contains(subject.name),
+            onToggleExpand: {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                    if expandedSubjects.contains(subject.name) {
+                        expandedSubjects.remove(subject.name)
+                    } else {
+                        expandedSubjects.insert(subject.name)
+                    }
+                }
+            },
+            onAddGhost: { activeSubjectForAdd = SubjectIdentifier(id: subject.name) },
+            onRemoveGhost: { id in store.simulatedGrades.removeAll { $0.id == id } },
+            onToggleReal: { id in
+                if store.excludedRealGradeIds.contains(id) {
+                    store.excludedRealGradeIds.remove(id)
+                } else {
+                    store.excludedRealGradeIds.insert(id)
+                }
+            }
+        )
+        .softFadeIn(enabled: store.animationsEnabled, delay: 0.1 + Double(index) * 0.03)
     }
 }
 

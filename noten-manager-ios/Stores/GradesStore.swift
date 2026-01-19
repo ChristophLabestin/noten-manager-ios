@@ -350,7 +350,9 @@ final class GradesStore: ObservableObject {
     @Published var showHolidayHints: Bool = true
     @Published var userName: String? = nil
     @Published var hasSeenMigrationInfo: Bool = false
+    @Published var hasSeenClassesOnboarding: Bool = false
     @Published var isPrivacyModeActive: Bool = false
+    @Published var lastSeenVersion: String? = nil
     @Published var alwaysEnablePrivacyOnStart: Bool = false
 
     var preferredColorScheme: ColorScheme? {
@@ -384,6 +386,12 @@ final class GradesStore: ObservableObject {
     @Published var subscribedCourseIds: [String] = []
     @Published var courses: [Course] = []
     @Published var migratedGroupIds: Set<String> = [] // Groups that have been upgraded to Classes
+
+    // MARK: - Simulations (Session-only, not local to views)
+    @Published var simulatedGrades: [SimulatedGradeEntry] = []
+    @Published var excludedRealGradeIds: Set<String> = []
+    @Published var includeDroppedGrades: Bool = false
+    @Published var simulatedExamPointsDict: [String: Double] = [:]
 
 
 
@@ -2752,6 +2760,7 @@ final class GradesStore: ObservableObject {
         } else {
             standardRemindersEnabled = true
         }
+        lastSeenVersion = data["lastSeenVersion"] as? String
         UserDefaults.standard.set(standardRemindersEnabled, forKey: "grades_standardRemindersEnabled")
         if let mode = data["darkModeMode"] as? String, ["system","light","dark"].contains(mode) {
             darkModeMode = mode
@@ -2809,7 +2818,12 @@ final class GradesStore: ObservableObject {
             adminAccessExpiresAt = nil
         }
         
-        hasSeenMigrationInfo = (data["hasSeenMigrationInfo"] as? Bool) ?? false
+        if let seenMigration = data["hasSeenMigrationInfo"] as? Bool {
+            self.hasSeenMigrationInfo = seenMigration
+        }
+        if let seenClassesOnboarding = data["hasSeenClassesOnboarding"] as? Bool {
+            self.hasSeenClassesOnboarding = seenClassesOnboarding
+        }
 
         persistOfflineSnapshotIfPossible()
     }
@@ -2974,8 +2988,15 @@ final class GradesStore: ObservableObject {
     }
 
     func updatePrivacyMode(active: Bool) {
-        self.isPrivacyModeActive = active
+        isPrivacyModeActive = active
+        db.collection("users").document(Auth.auth().currentUser?.uid ?? "").setData(["isPrivacyModeActive": active], merge: true)
         UserDefaults.standard.set(active, forKey: "grades_isPrivacyModeActive")
+    }
+
+    func updateLastSeenVersion(to version: String) {
+        lastSeenVersion = version
+        db.collection("users").document(Auth.auth().currentUser?.uid ?? "").setData(["lastSeenVersion": version], merge: true)
+        UserDefaults.standard.set(version, forKey: "grades_lastSeenVersion")
     }
 
     func updateAlwaysEnablePrivacyOnStart(_ enabled: Bool) {
@@ -3021,6 +3042,7 @@ final class GradesStore: ObservableObject {
             darkModeMode = "system"
         }
         darkMode = effectiveDarkMode(for: darkModeMode)
+        lastSeenVersion = defaults.string(forKey: "grades_lastSeenVersion")
         if defaults.object(forKey: "grades_standardRemindersEnabled") != nil {
             standardRemindersEnabled = defaults.bool(forKey: "grades_standardRemindersEnabled")
         }
@@ -3033,21 +3055,33 @@ final class GradesStore: ObservableObject {
         if let stored = defaults.array(forKey: pfingstferienPromptedKey) as? [String] {
             pfingstferienPromptedYearIds = Set(stored)
         }
+        
         if defaults.object(forKey: "grades_showHolidayHints") != nil {
             showHolidayHints = defaults.bool(forKey: "grades_showHolidayHints")
         } else {
             showHolidayHints = true
         }
 
+        hasSeenClassesOnboarding = defaults.bool(forKey: "grades_hasSeenClassesOnboarding")
+
         // Privacy Mode settings
         alwaysEnablePrivacyOnStart = defaults.bool(forKey: "grades_alwaysEnablePrivacyOnStart")
         if alwaysEnablePrivacyOnStart {
             isPrivacyModeActive = true
-        } else {
-            isPrivacyModeActive = defaults.bool(forKey: "grades_isPrivacyModeActive")
         }
         Task { await self.applyAppIconSelectionIfNeeded() }
     }
+
+    func clearGradeSimulations() {
+        simulatedGrades = []
+        excludedRealGradeIds = []
+        includeDroppedGrades = false
+    }
+
+    func clearExamSimulations() {
+        simulatedExamPointsDict = [:]
+    }
+        
 
     @MainActor
     private func applyAppIconSelectionIfNeeded() async {
@@ -7590,6 +7624,16 @@ final class GradesStore: ObservableObject {
         }
     }
 
+    func swapHalfYear(subject: Subject, from halfYear: Int) async {
+        let newValue: Int? = (halfYear == 1) ? 1 : (halfYear == 2 ? 2 : nil)
+        // If they want to "swap" it means if 1 was active, we now drop 1. If 2 was active, we drop 2.
+        // Wait, the logic in FinalGradeView confirmationDialog says:
+        // "Das \(candidate.halfYear). Halbjahr von \(candidate.subject.name) wird gegen das gestrichene Halbjahr getauscht."
+        // This implies if they click on a row that is NOT dropped, they want to drop THIS one instead of the current one.
+        // If current dropped is 1 and they click swap on 2, then new dropped should be 2.
+        await updateDroppedHalfYear(subjectName: subject.name, value: newValue)
+    }
+
     func deleteHomeworkFromFirestore(id: String) async {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         guard let yearRef = try? await requireYearRef(uid: uid) else { return }
@@ -8392,5 +8436,23 @@ final class GradesStore: ObservableObject {
         let localSeen = UserDefaults.standard.bool(forKey: "hasSeenMigrationInfoSheet")
         
         return migrationOccurred && !alreadySeen && !localSeen
+    }
+    
+    // MARK: - Classes Onboarding
+    
+    func markClassesOnboardingSeen() {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        
+        // Update local
+        hasSeenClassesOnboarding = true
+        UserDefaults.standard.set(true, forKey: "grades_hasSeenClassesOnboarding")
+        
+        // Update remote
+        db.collection("users").document(uid).updateData(["hasSeenClassesOnboarding": true])
+        
+        // Log feature seen (prepared for debugging/future analytics)
+        Task {
+            await FirestoreService.shared.logFeatureOnboardingSeen(featureId: "classes_v1")
+        }
     }
 }

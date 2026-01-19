@@ -96,15 +96,15 @@ struct HelpCenterView: View {
             section: .calc,
             title: "Gewichtungen & Durchschnitte",
             summary: "Berechnung von Fach- und Gesamtschnitt, Wahlfächer und Halbjahresfilter.",
-            keywords: ["gewichtung", "durchschnitt", "wahlfach", "kurzarbeit", "schulaufgabe", "halbjahr", "filter", "gesamtschnitt", "insights", "abschlussnote", "fos", "bos", "bayfoboso"],
+            keywords: ["gewichtung", "durchschnitt", "wahlfach", "kurzarbeit", "schulaufgabe", "halbjahr", "filter", "gesamtschnitt", "insights", "abschlussnote", "fos", "bos", "bayfoboso", "fpa", "praktikum"],
             icon: "function"
         ),
         HelpSearchEntry(
             id: "foboso_halfyear",
             section: .calc,
             title: "FOBOSO-Halbjahre: Final, Zwischenstand, Spannweite",
-            summary: "Wie Halbjahresergebnisse berechnet werden, wenn Schulaufgaben fehlen oder noch Noten offen sind.",
-            keywords: ["foboso", "halbjahr", "schulaufgabe", "zwischenstand", "range", "spannweite", "gewichten", "15 punkte", "punkte"],
+            summary: "Wie Halbjahresergebnisse mit Block-Gewichtung berechnet werden.",
+            keywords: ["foboso", "halbjahr", "schulaufgabe", "zwischenstand", "range", "spannweite", "gewichten", "15 punkte", "punkte", "block", "gewichtung"],
             icon: "text.badge.checkmark"
         ),
 
@@ -152,8 +152,8 @@ struct HelpCenterView: View {
             id: "groups",
             section: .classesGroups,
             title: "Klassen & Gruppen",
-            summary: "Unterschied zwischen Klassen und Gruppen und Teilen von Inhalten.",
-            keywords: ["gruppen", "teilen", "code", "einladen", "synchronisation", "hausaufgaben", "prüfungen", "erinnerungen", "klassen", "fos", "bos"],
+            summary: "Zusammenarbeit in Klassenverbänden und sozialen Gruppen.",
+            keywords: ["gruppen", "teilen", "code", "einladen", "synchronisation", "hausaufgaben", "prüfungen", "erinnerungen", "klassen", "sozial", "zweig", "abo", "fos", "bos"],
             icon: "person.3.fill"
         ),
         HelpSearchEntry(
@@ -350,19 +350,19 @@ struct HelpCenterView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     infoRow(
                         title: "Schulart, Jahrgang und Fächer festlegen",
-                        text: "Nutze das Onboarding oder Einstellungen ▸ Schuljahr. Dort stellst du Schulart, Jahrgangsstufe und deine Fächer ein. Prüfungsfächer wählst du im Abschnitt „Prüfungsfächer“."
+                        text: "Verwalte deine Basis-Daten unter Einstellungen ▸ Schuljahr. Dort stellst du Schulart, Jahrgangsstufe und deine persönlichen Fächer ein."
                     )
                     infoRow(
                         title: "Noten erfassen",
                         text: "Füge Noten in der Fachansicht oder im Fach-Detail hinzu. Wähle Art der Leistung, Halbjahr sowie optional eine Verknüpfung zu einer Prüfung."
                     )
                     infoRow(
-                        title: "Hausaufgaben und Prüfungen verwalten",
-                        text: "Listen für Aufgaben und Klausuren erreichst du über die Buttons in der Toolbar. Erinnerungen und Uhrzeit stellst du unter Einstellungen ▸ Hausaufgaben-Erinnerung ein."
+                        title: "Klassen & Gruppen beitreten",
+                        text: "Im Tab „Gruppen“ kannst du Klassenverbänden beitreten (über QR-Code oder Link) oder eine eigene soziale Gruppe für den Austausch erstellen."
                     )
                     infoRow(
-                        title: "Darstellung und Sortierung",
-                        text: "In der Übersicht kannst du nach Notendurchschnitt, Name oder eigener Reihenfolge sortieren. Kompakte Tabellen-Ansicht und Animationen lassen sich unter „Darstellung & Animationen“ anpassen."
+                        title: "Hausaufgaben und Termine",
+                        text: "Einträge für Aufgaben und Klausuren teilst du in deinen Gruppen. Erinnerungen und Uhrzeit stellst du unter Einstellungen ▸ Hausaufgaben-Erinnerung ein."
                     )
                 }
             }
@@ -381,64 +381,48 @@ struct HelpCenterView: View {
         ) {
             SettingsSectionBox {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(highlighted("Fach-Durchschnitt"))
+                    Text(highlighted("Fach-Durchschnitt (Block-System)"))
                         .font(.headline)
                     infoRow(
-                        title: "Hauptfach",
-                        text: "Schulaufgaben werden doppelt gezählt. Kurzarbeiten und mündliche Leistungen gehen einfach ein."
+                        title: "Schulaufgaben-Blöcke",
+                        text: "Jede Schulaufgabe zählt als eigener Block (1:1). In Hauptfächern bilden alle sonstigen Leistungen (Ex, mündlich, Kurzarbeit) zusammen den letzten Block."
                     )
                     infoRow(
-                        title: "Nebenfach",
-                        text: "Kurzarbeiten werden doppelt gezählt. Mündliche Leistungen bzw. Extemporale zählen einfach."
-                    )
-                    infoRow(
-                        title: "Wahlfach",
-                        text: "Wahlfächer erscheinen im Fach-Detail, fließen aber nicht in den Gesamt-Durchschnitt ein."
+                        title: "Sonstige Leistungen",
+                        text: "In Nebenfächern ohne Schulaufgaben werden alle Leistungen gewichtet gemittelt. Kurzarbeiten zählen dabei meist doppelt."
                     )
                 }
             }
             SettingsSectionBox {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(highlighted("FOBOSO-Halbjahr: Final, Zwischenstand, Spannweite"))
+                    Text(highlighted("Halbjahresergebnis (HJE)"))
                         .font(.headline)
                     infoRow(
-                        title: "Final nur bei vollständigen Bausteinen",
-                        text: "Mit Schulaufgaben: mindestens eine Schulaufgabe und eine sonstige Leistung. Ohne Schulaufgaben: mindestens eine sonstige Leistung."
+                        title: "Finales Ergebnis",
+                        text: "Ein HJE ist erst final, wenn alle geforderten Blöcke (z. B. Schulaufgabe + sonstiges) vorhanden sind. Erst dann wird auf ganze Punkte gerundet."
                     )
                     infoRow(
-                        title: "Zwischenstand",
-                        text: "Wenn etwas fehlt, zeigt die App Ø sonstige Leistungen und vorhandene Schulaufgaben separat und kennzeichnet es als Zwischenstand, nicht als Halbjahresergebnis."
-                    )
-                    infoRow(
-                        title: "Spannweite (Range)",
-                        text: "Fehlen Schulaufgaben oder sonstige Leistungen, siehst du den möglichen Endbereich (min–max) auf Basis 0–15 Punkten für offene Leistungen."
-                    )
-                    infoRow(
-                        title: "Gewichtung & Rundung",
-                        text: "Sonstige Leistungen bilden einen Block (gewichteter Ø), jede Schulaufgabe einen Block. Der Halbjahreswert ist der Durchschnitt aller Blöcke; erst am Ende wird auf ganze Punkte gerundet."
+                        title: "Zwischenstand & Spannweite",
+                        text: "Fehlen Noten, zeigt die App einen vorläufigen Schnitt sowie eine Spannweite (Range) – also was am Ende noch möglich ist (0–15 Punkte)."
                     )
                 }
             }
             .id("help_calc_foboso")
             SettingsSectionBox {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(highlighted("Gesamtdurchschnitt in Übersicht & Insights"))
+                    Text(highlighted("Gesamtdurchschnitt & Abschluss"))
                         .font(.headline)
                     infoRow(
-                        title: "Grundlage",
-                        text: "Alle Noten eines Fachs werden mit der oben beschriebenen Gewichtung zusammengeführt."
-                    )
-                    infoRow(
                         title: "Fachreferat",
-                        text: "Zählt als eigenes Fach und geht einfach in die Durchschnittsberechnung ein."
+                        text: "Zählt als eigenes Fach (Gewichtung 1) und fließt direkt in die Gesamtsumme ein."
                     )
                     infoRow(
-                        title: "Praktikum (nur FOS)",
-                        text: "Erscheint als eigenes Fach für FOS (Jahrgangsstufe 11/12). Praktikumsleistungen gehen einfach in den Schnitt ein."
+                        title: "fpA (Praktische Ausbildung)",
+                        text: "In der FOS (11./12.) ersetzt die fpA-Note zusätzliche Fächer. Die App berücksichtigt Teilergebnisse der fachpraktischen Ausbildung."
                     )
                     infoRow(
-                        title: "Halbjahres-Filter",
-                        text: "Wenn du in der Übersicht ein Halbjahr filterst, berücksichtigt der Durchschnitt ausschließlich die Noten des gewählten Halbjahres."
+                        title: "Seminarfach (Klasse 13)",
+                        text: "Die Seminarleistung (Arbeit + Präsentation) wird doppelt gewertet und fließt in die Abitur-Prognose ein."
                     )
                 }
             }
@@ -460,16 +444,16 @@ struct HelpCenterView: View {
                     Text(highlighted("Prüfungen nach BayFOBOSO"))
                         .font(.headline)
                     infoRow(
-                        title: "Gewichtung",
-                        text: "FOS 12: Deutsch, Englisch, Mathe und dein Profilfach zählen je dreifach. BOS 12 sowie FOS/BOS 13: vier Prüfungen zählen je zweifach. Schriftliche Teile zählen doppelt so stark wie mündliche."
+                        title: "Gewichtung der Prüfungen",
+                        text: "In allen Jahrgangsstufen (12/13) zählen die vier (oder fünf) Abschlussprüfungen jeweils doppelt in der Punktesumme."
                     )
                     infoRow(
                         title: "Schwache Prüfungen",
-                        text: "FOS/BOS 12: Es dürfen höchstens zwei Prüfungen unter 4 Punkten sein. Wenn eine Prüfung 0 Punkte hat, wird sie doppelt als „schwach“ gezählt. FOS/BOS 13: Keine Prüfung darf 0 Punkte haben; höchstens zwei Prüfungen dürfen 1–3 Punkte haben."
+                        text: "Es dürfen höchstens zwei Prüfungen unter 4 Punkten sein (0 Punkte zählen doppelt). In der 13. Klasse darf keine Prüfung mit 0 Punkten abgeschlossen werden."
                     )
                     infoRow(
-                        title: "In der App",
-                        text: "Die App zeigt deinen Prüfungsdurchschnitt (muss mindestens 4,0 sein) und markiert mündliche Prüfungen. Entscheidend für Bestehen/Zulassung sind die Grenzen oben."
+                        title: "Mündliche Zusatzprüfungen",
+                        text: "Zur Notenverbesserung oder zum Bestehen können mündliche Prüfungen abgelegt werden. Das Verhältnis schriftlich zu mündlich beträgt dann 2:1."
                     )
                 }
             }
@@ -478,16 +462,12 @@ struct HelpCenterView: View {
                     Text(highlighted("Abschlussnote nach BayFOBOSO"))
                         .font(.headline)
                     infoRow(
-                        title: "Was einfließt",
-                        text: "FOS 12: 25 Halbjahresergebnisse (inkl. 11. Klasse), Fachreferat und zwei Praxisnoten. BOS 12: 17 Halbjahresergebnisse plus Fachreferat. FOS/BOS 13: 16 Halbjahresergebnisse plus Seminarfach (doppelt gewertet). Aus jedem Fach darf höchstens ein Halbjahr gestrichen werden."
+                        title: "Einbringung (HJE)",
+                        text: "FOS 12: 25 Halbjahrsergebnisse (inkl. 11. Klasse), Fachreferat und fpA. BOS 12: 17 Ergebnisse + Fachreferat. 13. Klasse: 16 Ergebnisse + Seminarfach (doppelt)."
                     )
                     infoRow(
-                        title: "Punkte & Note",
-                        text: "Du kannst maximal 600 Punkte (FOS 12) bzw. 390 Punkte (BOS 12/13) erreichen. Die App rechnet daraus automatisch deine Abschlussnote und zeigt sie mit einer Nachkommastelle an."
-                    )
-                    infoRow(
-                        title: "Zweite Fremdsprache",
-                        text: "Für die allgemeine Hochschulreife (13.) müssen beide Halbjahresergebnisse der zweiten Fremdsprache eingebracht werden; Zusatzpunkte aus der Ergänzungsprüfung erhöhen die Maximal- und Mindestpunkte."
+                        title: "Streichungen",
+                        text: "Du kannst überflüssige Halbjahre streichen, um deinen Schnitt zu verbessern. Die App unterstützt dich mit smarten Vorschlägen in der Abschluss-Ansicht."
                     )
                     infoRow(
                         title: "Noch nicht automatisiert",
@@ -571,28 +551,20 @@ struct HelpCenterView: View {
             SettingsSectionBox {
                 VStack(alignment: .leading, spacing: 12) {
                     infoRow(
+                        title: "Privacy Mode",
+                        text: "Aktivierbar über das Icon in der Toolbar. Blurrt alle Notenwerte in den Hauptansichten, um neugierige Blicke (z. B. im Bus) zu verhindern. Deaktivierung kann per FaceID/TouchID abgesichert werden."
+                    )
+                    infoRow(
+                        title: "Erinnerungen & Mitteilungen",
+                        text: "Die App erinnert dich standardmäßig am Vorabend an Hausaufgaben und Klausuren. In den Mitteilungen kannst du Aufgaben direkt als erledigt markieren."
+                    )
+                    infoRow(
                         title: "Offline-Modus",
-                        text: "Wenn du zuletzt vor max. 3 Tagen online warst, kannst du mit dem letzten Stand weiterarbeiten. Aktivieren über Einstellungen ▸ Offline-Modus oder den Hinweis bei fehlender Verbindung. Änderungen werden beim nächsten Online-Start synchronisiert."
+                        text: "Wenn du zuletzt vor max. 3 Tagen online warst, kannst du offline weiterarbeiten. Änderungen werden beim nächsten Online-Start automatisch synchronisiert."
                     )
                     infoRow(
-                        title: "Erinnerungen",
-                        text: "Standard-Erinnerung: Ein Tag vor Fälligkeit zur Uhrzeit in Einstellungen ▸ Erinnerung (abschaltbar). Eigene Erinnerungen pro Hausaufgabe/Klausur bleiben aktiv. In den Mitteilungen kannst du snoozen oder Hausaufgaben direkt als erledigt markieren."
-                    )
-                    infoRow(
-                        title: "Ferien-Hinweis",
-                        text: "Auf der Startseite erscheint eine Karte, wenn in Bayern binnen 7 Tagen Ferien starten. Du kannst sie unter Einstellungen ▸ Darstellung & Animationen mit „Ferien-Hinweis“ ein- oder ausblenden."
-                    )
-                    infoRow(
-                        title: "Schuljahres-Wechsel",
-                        text: "Ab Pfingstferien (Jahrgang 12) fragt die App, ob das nächste Schuljahr angelegt werden soll. Du kannst Schuljahre auch jederzeit unter Einstellungen ▸ Schuljahr wechseln oder neu erstellen."
-                    )
-                    infoRow(
-                        title: "Insights",
-                        text: "Im Tab „Insights“ siehst du Trends, Schnittentwicklung und Fächer-Hotspots. Filtere dort nach Halbjahr oder Fachtypen, um gezielt Schwachstellen zu finden."
-                    )
-                    infoRow(
-                        title: "Animationen & Darstellung",
-                        text: "Unter Einstellungen ▸ Darstellung & Animationen kannst du Animationen deaktivieren, den Ferien-Hinweis umschalten und das Design-Thema wählen."
+                        title: "Ferien & Hinweise",
+                        text: "Die App zeigt anstehende Ferien in Bayern und gibt Tipps zum Schuljahreswechsel (ab Pfingsten)."
                     )
                 }
             }
@@ -611,39 +583,39 @@ struct HelpCenterView: View {
         ) {
             SettingsSectionBox {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(highlighted("Klassen"))
+                    Text(highlighted("Klassen (Geführt)"))
                         .font(.headline)
                     infoRow(
-                        title: "Wofür sind Klassen?",
-                        text: "Klassen bündeln mehrere Gruppen. Das ist praktisch, um den gesamten Klassenverbund zu organisieren und schnell zwischen Gruppen zu wechseln."
+                        title: "QR-Code & Link",
+                        text: "Einem Klassenverband trittst du per Scan oder Link bei. Dort sind Fächer und Gruppen bereits für dich vorkonfiguriert."
+                    )
+                    infoRow(
+                        title: "Zweige & Abonnements",
+                        text: "In der Klasse wählst du deinen Zweig (z. B. Wirtschaft). Über „Abonnements“ entscheidest du, welche Fächer in deiner Übersicht erscheinen sollen."
                     )
                 }
             }
             SettingsSectionBox {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(highlighted("Gruppen"))
+                    Text(highlighted("Soziale Gruppen (Privat)"))
                         .font(.headline)
                     infoRow(
-                        title: "Einfaches Teilen",
-                        text: "Gruppen sind ideal für Zweige (z. B. Sozial/Wirtschaft) oder Lerngruppen. Hier teilst du gezielt Prüfungen und Hausaufgaben."
+                        title: "Flexibel teilen",
+                        text: "Mit sozialen Gruppen teilst du Hausaufgaben und Termine ganz ohne feste Fächerliste. Ideal für Lerngruppen oder Projekte."
                     )
                     infoRow(
-                        title: "Synchronisation",
-                        text: "Alle Mitglieder einer Gruppe sehen die gleichen Einträge. Wenn jemand eine Prüfung oder Hausaufgabe hinzufügt, erscheint sie automatisch bei allen anderen. Erinnerungen und der „Erledigt“-Status bleiben dabei aber privat für dich."
+                        title: "Einfache Einladung",
+                        text: "Teile einfach den 6-stelligen Gruppencode mit deinen Mitschülerinnen und Mitschülern, um sie einzuladen."
                     )
                 }
             }
             SettingsSectionBox {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(highlighted("Zweige & Abonnements"))
+                    Text(highlighted("Synchronisation"))
                         .font(.headline)
                     infoRow(
-                        title: "Was sind Zweige?",
-                        text: "In einer Klasse können Fächer in Zweige (z. B. Sozial, Technik) unterteilt sein. Du wählst beim Beitreten deinen Zweig, kannst ihn aber jederzeit ändern."
-                    )
-                    infoRow(
-                        title: "Fächer abonnieren",
-                        text: "Du siehst nur Fächer, die du abonniert hast. Tippe im Klassen-Detail auf einen Zweig, um einzelne Fächer ein- oder auszublenden."
+                        title: "Was geteilt wird",
+                        text: "Hausaufgaben und Termine (Prüfungen) sind für alle Mitglieder synchron. Noten, Erledigt-Status und Erinnerungen bleiben immer privat."
                     )
                 }
             }
@@ -663,24 +635,24 @@ struct HelpCenterView: View {
             SettingsSectionBox {
                 VStack(alignment: .leading, spacing: 12) {
                     faqRow(
-                        question: "Warum sehe ich keinen Durchschnitt?",
-                        answer: "Stelle sicher, dass Noten erfasst sind und das Fach kein Wahlfach ist. Wahlfächer erscheinen im Fach-Detail, fließen aber nicht in den Gesamt-Durchschnitt ein."
+                        question: "Wie erstelle ich eine eigene (soziale) Gruppe?",
+                        answer: "Gehe zum Tab „Gruppen“ und tippe unten auf „Verwaltung“ ▸ „Neue soziale Gruppe“. Du erhältst einen Code, den du mit anderen teilen kannst."
                     )
                     faqRow(
-                        question: "Wie nutze ich den Offline-Modus?",
-                        answer: "Warst du in den letzten 3 Tagen online, kannst du mit dem letzten Stand offline weiterarbeiten. Aktivieren unter Einstellungen ▸ Offline-Modus oder über den Hinweis, wenn keine Verbindung besteht. Änderungen werden beim nächsten Online-Start synchronisiert."
+                        question: "Kann ich Fächer aus einer Klasse ausblenden?",
+                        answer: "Ja, im Tab „Gruppen“ kannst du bei jeder Klasse auf „Abonnements“ tippen. Dort entscheidest du, welche Fächer in deiner Übersicht erscheinen."
                     )
                     faqRow(
-                        question: "Kann ich Halbjahre neu sortieren oder streichen?",
-                        answer: "Streichen funktioniert in der Ansicht „Abschlussnote“. Die Sortierung der Fächer änderst du in der Übersicht über „Sortieren“ oder per Drag & Drop im eigenen Sortiermodus."
+                        question: "Wie funktioniert das Streichen von Halbjahren?",
+                        answer: "In der Abschluss-Ansicht (Pokal-Icon) findest du den Bereich „Einbringung & Streichungen“. Die App schlägt dir automatisch die schwächsten Ergebnisse zur Streichung vor."
                     )
                     faqRow(
-                        question: "Wie ändere ich die Erinnerung für Hausaufgaben?",
-                        answer: "Unter Einstellungen ▸ Hausaufgaben-Erinnerung stellst du die Uhrzeit ein. Es werden nur offene Aufgaben mit Datum erinnert."
+                        question: "Warum ist mein Schnitt ein „Zwischenstand“?",
+                        answer: "Ein offizielles Halbjahresergebnis (HJE) benötigt alle Bausteine (z. B. eine Schulaufgabe). Fehlt noch etwas, zeigt die App den aktuellen Durchschnitt als Zwischenstand an."
                     )
                     faqRow(
-                        question: "Wie teile ich Daten mit Mitschülerinnen und Mitschülern?",
-                        answer: "Lege unter Einstellungen ▸ Gruppen eine Gruppe an oder tritt mit einem Code bei. Prüfungen und Hausaufgaben werden innerhalb der Gruppe synchronisiert."
+                        question: "Sind meine Noten für andere sichtbar?",
+                        answer: "Nein. In Klassen und Gruppen werden nur Hausaufgaben und Prüfungstermine geteilt. Deine Noten und persönlichen Notizen bleiben ausschließlich auf deinem Gerät und in deiner privaten Cloud."
                     )
                     faqRow(
                         question: "Was bedeutet der Ferien-Hinweis auf der Startseite?",

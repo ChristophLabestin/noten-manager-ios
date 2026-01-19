@@ -147,7 +147,14 @@ struct ReportCardSheet: View {
     private func subjectsForReportCard(result: GradeCalculator.CalculationResult) -> [(name: String, average: Double?, gradingMode: GradingMode?, isAdvanced: Bool, grades: [ReportCardView.GradeDetail])] {
         return store.subjects.sorted(by: { $0.order ?? 0 < $1.order ?? 0 }).map { subject in
             let calc = result.subjects.first(where: { $0.subjectName == subject.name })
-            let grades = (store.gradesBySubject[subject.id] ?? []).map { grade in
+            
+            // Filter grades if dropped half-years should be excluded
+            var rawGrades = store.gradesBySubject[subject.id] ?? []
+            if !includeDroppedHalfYears, let dropped = subject.droppedHalfYear {
+                rawGrades = rawGrades.filter { $0.halfYear != dropped }
+            }
+            
+            let grades = rawGrades.map { grade in
                 ReportCardView.GradeDetail(value: grade.grade, type: grade.assessmentType, weight: grade.weight)
             }
             return (subject.name, calc?.average, subject.gradingMode, subject.isElective, grades)
