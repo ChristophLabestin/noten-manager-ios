@@ -405,6 +405,12 @@ final class GradesStore: ObservableObject {
     @Published var courses: [Course] = []
     @Published var migratedGroupIds: Set<String> = [] // Groups that have been upgraded to Classes
     @Published var activeClassId: String? = nil // Context: The class currently being attended in this year
+    
+    // MARK: - Web Re-import
+    @Published var isWebReimportLoading: Bool = false
+    @Published var webConflicts: [WebDataConflict] = []
+    @Published var detectedNewWebSubjects: [String] = []
+    @Published var webImportSummary: LegacyMigrationSummary? = nil
 
     // MARK: - Simulations (Session-only, not local to views)
     @Published var simulatedGrades: [SimulatedGradeEntry] = [] { didSet { saveSimulations() } }
@@ -2620,9 +2626,16 @@ final class GradesStore: ObservableObject {
     }
     
     private func rebuildSharedExams() {
-        let allExams = courseExamsMap.values.flatMap { $0 }
+        // 1. Collect from Courses
+        let courseExams = courseExamsMap.values.flatMap { $0 }
+        
+        // 2. Collect from Groups (New Logic: Merge with Group Exams)
+        let groupExams = groupExamsByGroup.values.flatMap { $0 }
+        
+        let allExams = courseExams + groupExams
+
         // Unique by ID + Sort by date
-        // Use dictionary to dedup by ID, keeping the latest one if duplicates exist (though usually identical)
+        // Use dictionary to dedup by ID, keeping the latest one if duplicates exist
         let uniqueMap = Dictionary(grouping: allExams, by: { $0.id })
             .compactMapValues { $0.first }
         
@@ -2640,6 +2653,11 @@ final class GradesStore: ObservableObject {
         
         DispatchQueue.main.async { [weak self] in
             self?.sharedExams = finalExams
+            self?.applySharedExamUserReminders()
+            self?.applySharedExamUserRescheduledDates()
+            self?.applySharedExamUserCompletion()
+            self?.rescheduleLocalNotifications()
+            self?.persistOfflineSnapshotIfPossible()
         }
     }
 
@@ -2649,7 +2667,14 @@ final class GradesStore: ObservableObject {
     }
     
     private func rebuildSharedHomeworks() {
-        let allHw = courseHomeworksMap.values.flatMap { $0 }
+        // 1. Collect from Courses
+        let courseHw = courseHomeworksMap.values.flatMap { $0 }
+        
+        // 2. Collect from Groups
+        let groupHw = groupHomeworksByGroup.values.flatMap { $0 }
+        
+        let allHw = courseHw + groupHw
+        
         let uniqueMap = Dictionary(grouping: allHw, by: { $0.id })
             .compactMapValues { $0.first }
         
@@ -2666,6 +2691,10 @@ final class GradesStore: ObservableObject {
         
         DispatchQueue.main.async { [weak self] in
             self?.sharedHomeworks = finalHw
+            self?.applySharedHomeworkUserCompletion()
+            self?.applySharedHomeworkUserReminders()
+            self?.rescheduleLocalNotifications()
+            self?.persistOfflineSnapshotIfPossible()
         }
     }
 
@@ -2734,6 +2763,108 @@ final class GradesStore: ObservableObject {
              
              return true
          }
+    }
+    
+    // MARK: - Subject Matching (Fuzzy)
+    
+    /// Suggests the best matching local subject for a given course using fuzzy matching.
+    /// Uses Levenshtein distance and bidirectional prefix/contains matching.
+    /// - Returns: A tuple of (Subject, confidence score 0-1) or nil if no reasonable match found
+    func suggestSubjectMatch(for course: Course) -> (subject: Subject, confidence: Double)? {
+        let courseName = course.name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !courseName.isEmpty else { return nil }
+        
+        var bestMatch: (Subject, Double)? = nil
+        
+        for subject in subjects {
+            let subjectName = subject.name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !subjectName.isEmpty else { continue }
+            
+            // 1. Exact match → confidence 1.0
+            if courseName == subjectName {
+                return (subject, 1.0)
+            }
+            
+            // 2. Prefix matching (bidirectional) → confidence 0.9
+            if courseName.hasPrefix(subjectName) || subjectName.hasPrefix(courseName) {
+                let longerLength = max(courseName.count, subjectName.count)
+                let shorterLength = min(courseName.count, subjectName.count)
+                let prefixConfidence = 0.9 * (Double(shorterLength) / Double(longerLength))
+                if bestMatch == nil || prefixConfidence > bestMatch!.1 {
+                    bestMatch = (subject, prefixConfidence)
+                }
+                continue
+            }
+            
+            // 3. Contains matching (bidirectional) → confidence 0.7
+            if courseName.contains(subjectName) || subjectName.contains(courseName) {
+                let containsConfidence = 0.7
+                if bestMatch == nil || containsConfidence > bestMatch!.1 {
+                    bestMatch = (subject, containsConfidence)
+                }
+                continue
+            }
+            
+            // 4. Levenshtein distance → variable confidence
+            let distance = levenshteinDistance(courseName, subjectName)
+            let maxLength = max(courseName.count, subjectName.count)
+            let similarity = 1.0 - (Double(distance) / Double(maxLength))
+            
+            // Only consider if similarity is above 0.5 (50% similar)
+            if similarity > 0.5 {
+                let levenshteinConfidence = similarity * 0.8 // Cap at 0.8 for fuzzy matches
+                if bestMatch == nil || levenshteinConfidence > bestMatch!.1 {
+                    bestMatch = (subject, levenshteinConfidence)
+                }
+            }
+        }
+        
+        // Only return if confidence is reasonable (> 0.4)
+        if let match = bestMatch, match.1 > 0.4 {
+            return match
+        }
+        
+        return nil
+    }
+    
+    /// Calculates the Levenshtein (edit) distance between two strings.
+    /// Lower distance = more similar strings.
+    private func levenshteinDistance(_ s1: String, _ s2: String) -> Int {
+        let s1Array = Array(s1)
+        let s2Array = Array(s2)
+        let m = s1Array.count
+        let n = s2Array.count
+        
+        // Edge cases
+        if m == 0 { return n }
+        if n == 0 { return m }
+        
+        // Create matrix
+        var matrix = [[Int]](repeating: [Int](repeating: 0, count: n + 1), count: m + 1)
+        
+        // Initialize first column
+        for i in 0...m {
+            matrix[i][0] = i
+        }
+        
+        // Initialize first row
+        for j in 0...n {
+            matrix[0][j] = j
+        }
+        
+        // Fill in the rest
+        for i in 1...m {
+            for j in 1...n {
+                let cost = s1Array[i - 1] == s2Array[j - 1] ? 0 : 1
+                matrix[i][j] = min(
+                    matrix[i - 1][j] + 1,      // Deletion
+                    matrix[i][j - 1] + 1,      // Insertion
+                    matrix[i - 1][j - 1] + cost // Substitution
+                )
+            }
+        }
+        
+        return matrix[m][n]
     }
 
     // MARK: - User-Settings + Key
@@ -5862,28 +5993,21 @@ final class GradesStore: ObservableObject {
 
     // MARK: - Course-Based Add Methods
     
-    func addExamToCourse(courseId: String, title: String, notes: String?, date: Date, hasTime: Bool, weight: Int?, customWeight: Double?, assessmentType: AssessmentType?, reminderAt: Date?, requiresGrade: Bool? = true) async throws -> String {
+    func addExamToCourse(courseId: String, subjectName: String? = nil, subjectKey: String? = nil, title: String, notes: String?, date: Date, hasTime: Bool, weight: Int?, customWeight: Double?, assessmentType: AssessmentType?, reminderAt: Date?, requiresGrade: Bool? = true) async throws -> String {
          guard let uid = Auth.auth().currentUser?.uid else {
              throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
          }
          let ref = db.collection("courses").document(courseId).collection("exams").document()
          
-         // Fetch course to get subject info? Or pass it in?
-         // Ideally exams should just store data, but current UI assumes subject info is on the exam or joined.
-         // Let's assume the View passes enough info or we fetch course.
-         // For now, minimal payload.
-         // ACTUALLY: The existing UI expects subjectName/subjectKey on the exam object sometimes.
-         // Let's look up the course first to be safe.
-         // But that's slow. Let's just store what we have. The view likely knows the subject name.
          // Optimization: Read local courses array.
          let course = courses.first(where: { $0.id == courseId })
-         let subjectName = course?.name ?? "Unbekannt"
-         let subjectKey = course?.subjectKey
+         let finalSubjectName = subjectName ?? course?.name ?? "Unbekannt"
+         let finalSubjectKey = subjectKey ?? course?.subjectKey ?? slugifySubjectName(finalSubjectName)
          
          var payload: [String: Any] = [
              "courseId": courseId,
-             "subjectName": subjectName,
-             "subjectKey": subjectKey ?? slugifySubjectName(subjectName),
+             "subjectName": finalSubjectName,
+             "subjectKey": finalSubjectKey,
              "title": title,
              "date": date,
              "hasTime": hasTime,
@@ -5962,6 +6086,10 @@ final class GradesStore: ObservableObject {
     func stopSharingExam(groupId: String, examId: String) async -> Bool {
         await deleteSharedExamFromGroup(groupId: groupId, id: examId)
         return true
+    }
+    
+    func deleteExamFromCourse(courseId: String, examId: String) async throws {
+         try await db.collection("courses").document(courseId).collection("exams").document(examId).delete()
     }
 
     func addHomeworkToFirestore(subjectName: String, title: String, dueDate: Date?, reminderAt: Date?, importedFromShare: Bool = false) async throws {
@@ -6302,6 +6430,47 @@ final class GradesStore: ObservableObject {
             "date": date,
             "hasTime": hasTime
         ]
+        if let subjectKey {
+            payload["subjectKey"] = subjectKey
+        } else {
+            payload["subjectKey"] = FieldValue.delete()
+        }
+        if let notes {
+            payload["notes"] = notes
+        } else {
+            payload["notes"] = FieldValue.delete()
+        }
+        if let weight {
+            payload["weight"] = weight
+        } else {
+            payload["weight"] = NSNull()
+        }
+        if let customWeight {
+            payload["customWeight"] = customWeight
+        } else {
+            payload["customWeight"] = NSNull()
+        }
+        if let assessmentType {
+            payload["assessmentType"] = assessmentType.rawValue
+        } else {
+            payload["assessmentType"] = NSNull()
+        }
+        if let requiresGrade {
+            payload["requiresGrade"] = requiresGrade
+        }
+        try await ref.updateData(payload)
+    }
+
+    func updateSharedExamInCourse(courseId: String, id: String, subjectName: String, subjectKey: String? = nil, title: String, notes: String?, date: Date, hasTime: Bool, weight: Int?, customWeight: Double?, assessmentType: AssessmentType?, reminderAt: Date?, requiresGrade: Bool? = nil) async throws {
+        let ref = db.collection("courses").document(courseId).collection("exams").document(id)
+
+        var payload: [String: Any] = [
+            "subjectName": subjectName,
+            "title": title,
+            "date": date,
+            "hasTime": hasTime
+        ]
+        // subjectKey logic might differ for courses (usually inferred from course), but if we allow override:
         if let subjectKey {
             payload["subjectKey"] = subjectKey
         } else {
@@ -7773,8 +7942,11 @@ final class GradesStore: ObservableObject {
 
     func restartOnboarding() async {
         await MainActor.run {
-            // Nur lokal erneut anzeigen, ohne den Backend-Status zu überschreiben,
-            // damit ein abgebrochenes Onboarding nicht dauerhaft erneut gefordert wird.
+            // First reset to force a change trigger in the UI if it was already true but hidden
+            onboardingRequired = false
+        }
+        try? await Task.sleep(nanoseconds: 50_000_000) // 0.05s
+        await MainActor.run {
             onboardingRequired = true
         }
     }
@@ -8419,22 +8591,11 @@ final class GradesStore: ObservableObject {
     }
 
     private func recomputeSharedCollections() {
-        let groupedExams = groupExamsByGroup.values.flatMap { $0 }
-        let groupedHomeworks = groupHomeworksByGroup.values.flatMap { $0 }
-
-        sharedExams = mergeSharedExams(groupedExams, legacySharedExams)
-        sharedHomeworks = mergeSharedHomeworks(groupedHomeworks, legacySharedHomeworks)
-
-        // Anwenderspezifische Erinnerungen/Erledigt-Status anwenden
-        applySharedExamUserReminders()
-        applySharedExamUserRescheduledDates()
-        applySharedExamUserCompletion()
-        applySharedHomeworkUserCompletion()
-        applySharedHomeworkUserReminders()
-
-        rescheduleLocalNotifications()
-        persistOfflineSnapshotIfPossible()
+        // Redirect to unified logic in rebuildSharedExams/Homeworks
+        rebuildSharedExams()
+        rebuildSharedHomeworks()
     }
+
 
     private func mergeSharedExams(_ grouped: [Exam], _ legacy: [Exam]) -> [Exam] {
         var seen: Set<String> = []
@@ -8711,5 +8872,152 @@ final class GradesStore: ObservableObject {
         Task {
             await FirestoreService.shared.logFeatureOnboardingSeen(featureId: "classes_v1")
         }
+    }
+
+    // MARK: - Web Data Re-import
+
+    func fetchWebDataAndDetectConflicts() async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        isWebReimportLoading = true
+        webConflicts = []
+        detectedNewWebSubjects = []
+        
+        let userRef = db.collection("users").document(uid)
+        
+        do {
+            // 1. Fetch legacy summary to see if anything is there
+            let userData = try await userRef.getDocument().data() ?? [:]
+            guard let summary = await fetchLegacyMigrationSummary(uid: uid, userData: userData) else {
+                isWebReimportLoading = false
+                return
+            }
+            webImportSummary = summary
+            
+            // 2. Identify new subjects
+            let currentSubjectNames = Set(subjects.map { $0.name })
+            detectedNewWebSubjects = summary.subjectNames.filter { !currentSubjectNames.contains($0) }
+            
+            // 3. Identify grade conflicts for existing subjects
+            var conflicts: [WebDataConflict] = []
+            
+            for subjectName in summary.subjectNames {
+                if currentSubjectNames.contains(subjectName) {
+                    // Fetch legacy grades for this subject
+                    let legacyGradesSnap = try await userRef.collection("subjects").document(subjectName).collection("grades").getDocuments()
+                    let currentGrades = gradesBySubject[subjectName] ?? []
+                    let currentGradesMap = Dictionary(uniqueKeysWithValues: currentGrades.map { ($0.id, $0) })
+                    
+                    for legacyDoc in legacyGradesSnap.documents {
+                        let legacyData = legacyDoc.data()
+                        guard let encryptedGrade = legacyData["grade"] as? String else { continue }
+                        
+                        // Decrypt legacy grade
+                        let decryptedGradeStr = try CryptoService.decryptString(encryptedGrade, key: encryptionKey!)
+                        guard let webGrade = Double(decryptedGradeStr) else { continue }
+                        
+                        let webDate = (legacyData["date"] as? Timestamp)?.dateValue() ?? Date()
+                        let webNote = try? (legacyData["note"] as? String).flatMap { try CryptoService.decryptString($0, key: encryptionKey!) }
+                        
+                        if let localGrade = currentGradesMap[legacyDoc.documentID] {
+                            // Compare
+                            if localGrade.grade != webGrade || localGrade.note != webNote {
+                                conflicts.append(WebDataConflict(
+                                    subjectName: subjectName,
+                                    gradeId: legacyDoc.documentID,
+                                    localGrade: localGrade.grade,
+                                    webGrade: webGrade,
+                                    localDate: localGrade.date,
+                                    webDate: webDate,
+                                    localNote: localGrade.note,
+                                    webNote: webNote
+                                ))
+                            }
+                        } else {
+                            // Potential new grade for existing subject
+                            conflicts.append(WebDataConflict(
+                                subjectName: subjectName,
+                                gradeId: legacyDoc.documentID,
+                                localGrade: nil,
+                                webGrade: webGrade,
+                                localDate: nil,
+                                webDate: webDate,
+                                localNote: nil,
+                                webNote: webNote,
+                                resolution: .useWeb // Default to web if it's new
+                            ))
+                        }
+                    }
+                }
+            }
+            
+            self.webConflicts = conflicts
+            
+        } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
+        }
+        
+        isWebReimportLoading = false
+    }
+
+    func applyWebImport(resolutions: [String: ResolutionStrategy]) async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let yearRef = try? await requireYearRef(uid: uid) else { return }
+        
+        isWebReimportLoading = true
+        let userRef = db.collection("users").document(uid)
+        
+        do {
+            // 1. Import new subjects
+            for subjectName in detectedNewWebSubjects {
+                let source = userRef.collection("subjects").document(subjectName)
+                let dest = yearRef.collection("subjects").document(subjectName)
+                
+                let subjectSnap = try await source.getDocument()
+                if let data = subjectSnap.data() {
+                    try await dest.setData(data, merge: true)
+                    
+                    // Copy grades
+                    let gradesSnap = try await source.collection("grades").getDocuments()
+                    for gradeDoc in gradesSnap.documents {
+                        try await dest.collection("grades").document(gradeDoc.documentID).setData(gradeDoc.data(), merge: true)
+                    }
+                }
+            }
+            
+            // 2. Resolve conflicts
+            for conflict in webConflicts {
+                let resolution = resolutions[conflict.id] ?? conflict.resolution
+                let dest = yearRef.collection("subjects").document(conflict.subjectName).collection("grades").document(conflict.gradeId)
+                
+                switch resolution {
+                case .keepLocal:
+                    break // Do nothing
+                case .useWeb:
+                    // Fetch from web and overwrite
+                    let source = userRef.collection("subjects").document(conflict.subjectName).collection("grades").document(conflict.gradeId)
+                    let snap = try await source.getDocument()
+                    if let data = snap.data() {
+                        try await dest.setData(data, merge: true)
+                    }
+                case .keepBoth:
+                    // Keep local and add web with new ID
+                    let source = userRef.collection("subjects").document(conflict.subjectName).collection("grades").document(conflict.gradeId)
+                    let snap = try await source.getDocument()
+                    if let data = snap.data() {
+                        // Generate a new ID to avoid conflict with local
+                        _ = try await yearRef.collection("subjects").document(conflict.subjectName).collection("grades").addDocument(data: data)
+                    }
+                }
+            }
+            
+            // Success
+            webConflicts = []
+            detectedNewWebSubjects = []
+            
+        } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
+        }
+        
+        isWebReimportLoading = false
     }
 }

@@ -171,6 +171,14 @@ struct HelpCenterView: View {
             summary: "Ticket direkt aus der App mit Betreff, Nachricht und E-Mail senden.",
             keywords: ["kontakt", "support", "ticket", "hilfe", "email", "fehler", "meldung", "fos", "bos"],
             icon: "envelope.fill"
+        ),
+        HelpSearchEntry(
+            id: "drops",
+            section: .exams,
+            title: "Halbjahre streichen (Einbringung)",
+            summary: "Wie viele Halbjahre du in FOS/BOS 12/13 einbringen musst und wie Streichungen funktionieren.",
+            keywords: ["streichen", "einbringung", "hje", "halbjahr", "ergebnis", "optimieren", "25", "17", "16", "fos", "bos"],
+            icon: "scissors"
         )
     ]
 
@@ -466,8 +474,8 @@ struct HelpCenterView: View {
                         text: "FOS 12: 25 Halbjahrsergebnisse (inkl. 11. Klasse), Fachreferat und fpA. BOS 12: 17 Ergebnisse + Fachreferat. 13. Klasse: 16 Ergebnisse + Seminarfach (doppelt)."
                     )
                     infoRow(
-                        title: "Streichungen",
-                        text: "Du kannst überflüssige Halbjahre streichen, um deinen Schnitt zu verbessern. Die App unterstützt dich mit smarten Vorschlägen in der Abschluss-Ansicht."
+                        title: "Streichungen & Optimierung",
+                        text: "Überflüssige Halbjahre können gestrichen werden, um den Schnitt zu verbessern. Die App zeigt dir automatisch die besten Streichmöglichkeiten an."
                     )
                     infoRow(
                         title: "Noch nicht automatisiert",
@@ -475,6 +483,25 @@ struct HelpCenterView: View {
                     )
                 }
             }
+            SettingsSectionBox {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(highlighted("Halbjahre streichen im Detail"))
+                        .font(.headline)
+                    infoRow(
+                        title: "Wie viele HJE müssen bleiben?",
+                        text: "Die Anzahl der einzubringenden Halbjahresergebnisse (HJE) ist fest vorgegeben: FOS 12 benötigt 25 HJE (aus 11. & 12.), BOS 12 benötigt 17 HJE, und in der 13. Klasse sind 16 HJE erforderlich."
+                    )
+                    infoRow(
+                        title: "Was darf gestrichen werden?",
+                        text: "Alle HJE, die über die Mindestanzahl hinausgehen, können gestrichen werden. In der Regel darf pro Fach maximal ein Halbjahr gestrichen werden. Prüfungspflichtige Kernfächer müssen meist voll eingebracht werden."
+                    )
+                    infoRow(
+                        title: "Smarte Vorschläge",
+                        text: "Im Tab Abschluss ▸ Streichungen Optimieren schlägt dir der Noten Manager automatisch die schlechtesten HJE vor, die rechtlich gestrichen werden dürfen."
+                    )
+                }
+            }
+            .id("help_exams_drops")
             SettingsSectionBox {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(highlighted("Seminarfach nach FOBOSO"))

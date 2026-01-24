@@ -123,6 +123,7 @@ struct AuthView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
                 .padding(.bottom, 24)
+                .frame(maxWidth: .infinity)
             }
             .scrollDismissesKeyboard(.interactively)
             .scrollBounceBehavior(.basedOnSize)
@@ -153,12 +154,6 @@ struct AuthView: View {
                 applyBiometricAfterLogin = false
             }
         }
-        .keyboardNavigationToolbar(
-            focus: $activeField,
-            fields: currentFields,
-            label: "Tastatur schließen",
-            onDone: { hideKeyboard() }
-        )
     }
 
     private var formCard: some View {
@@ -574,7 +569,6 @@ struct AuthView: View {
                     .disabled(authManager.isLoading)
                 }
             }
-            .keyboardDismissToolbar()
             .onAppear {
                 if resetEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     resetEmail = loginEmail

@@ -784,6 +784,7 @@ struct SubjectDetailView: View {
                     schulaufgabeMergeView
                 }
                 .scrollDismissesKeyboard(.interactively)
+                .keyboardDismissToolbar()
                 .hideKeyboardOnTap()
             }
         }
@@ -958,7 +959,6 @@ struct SubjectDetailView: View {
             EditHomeworkView(homework: hw)
                 .environmentObject(store)
         }
-        .keyboardDismissToolbar()
         .navigationDestination(isPresented: $navigateToSettings) {
             AppSettingsView().environmentObject(store)
         }

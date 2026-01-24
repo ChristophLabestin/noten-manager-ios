@@ -86,6 +86,14 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
             Task { @MainActor in
                 NotificationInboxStore.shared.record(item: item)
             }
+            // Handle Default Tap
+            if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
+                // Post notification to open deep link in MainView
+                // Delay slightly to ensure UI is ready if cold launch
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    NotificationCenter.default.post(name: .openNotificationItem, object: item)
+                }
+            }
         }
         HomeworkNotificationManager.handleNotificationResponse(response)
         ExamNotificationManager.handleNotificationResponse(response)

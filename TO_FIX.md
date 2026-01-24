@@ -18,29 +18,36 @@
     2. when merging a legacy group into the class as branch and additional courses the subscribed courses there still get added to the userdocument (the ammount of ids when doing that seems to be ok) and don't get deleted out of the userdocument on unselect/leave
 - [x] [ ] Notifications need to be slightly reworked. Clarification: currently when there is that automatic reminder thats been setup in the settings the notifications text should be different and more fitting especiall when theres an exam AND a homework. it should then also display a dedicated sheet when the user opens the app through tapping that notification that gives a brief overview over whats up for the next day
 - [x] [ ] the FinalGradeView needs a switch to display the whatif values and switch the big highlighted grade value in the hero with the MSS values. 
-    - [ ] [ ] the swtch is implemented as intended but it should also change the displayed format in the whatif card and use the raw value for MSS
+    - [x] [ ] the swtch is implemented as intended but it should also change the displayed format in the whatif card and use the raw value for MSS
 - [x] [ ] the finalgradeview is still using the rounded grade values not the raw values
     - [x] [ ] the MSS value below the rating is still not using the rounded value
     - Comment: every MSS average value in the finalgradeview is using the rounded MSS value not the raw value. it should use the raw overall average value
 - [x] [ ] Fix Homework completion logic: auto-complete on deadline vs manual
-- [ ] [ ] Onboarding Class Join step has 2 "weiter" buttons...
-- [ ] [ ] "Andere Termin" still cant be shared in a class
+- [x] [x] Onboarding Class Join step has 2 "weiter" buttons...
+- [x] [x] "Andere Termin" still cant be shared in a class
+    - Comment: Fixed by unifying shared exam aggregation logic in GradesStore. Previously, course listeners and group listeners were overwriting `sharedExams` with partial data, causing appointments to disappear. Now sort/merge logic is unified.
 - [ ] [ ] Sharing of exam appointments are still sharing in legacy groups i think based on the subject selection
-    - Comment: if sharing is toggled on but no group is selected it should behave as if the share toggle is off
-- [ ] [ ] the DailySummarySheet that should appear when the user taps on the Automatic reminder thats set in the settings is not appearing.
+    - Comment: if sharing is toggled on but no group is selected it should behave as if the share toggle is off. "Andere Termin" was sharing with course name as subject name, fixed by explicit nil subject name.
+    - [x] [x] in the ExamEditView there is no way to change the branch or class or group where the exam is shared to. 
+        - Comment: Implemented `ShareTargetSelector` in `EditExamView` for shared (owner) exams. Added logic to pre-select current targets and handle delta updates (add new copies / delete current if removed).
+- [x] [ ] the DailySummarySheet that should appear when the user taps on the Automatic reminder thats set in the settings is not appearing.
+- [ ] [ ] Android App has bugs:
+    - [ ] [ ] When I open the App it crashes immediately
 - [ ] [ ] Fix remaining warnings.
 
 ##Adaptions
 - [ ] [ ] in the MSS calculation sheet on the homeview the user should be able to click on the individual subject and see the calculation for each subject
+    - Comment: its tappable but its not expanding to show the calculation of the individual subject.
 - [ ] [ ] the feature for sending notifications from the admin dashboard to all or individual users still needs to be fully implemented
 - [ ] [ ] explaining sheet in the classlistview?
-- [ ] [ ] dropped halfyear switch in insightsview
+    - Comment: Looks good but please fix the sheet toolbar to have the same icons as the other sheets. Also the individual Box that lists a feature should look like in the whats new sheet.
+- [x] [ ] dropped halfyear switch in insightsview
     - [ ] [ ] redesign that switch in the insightsview to toggle the values for the dropped halfyears in the graph
-    - [ ] [ ] make that switch to toggle the values for the entire insightsview but nowhere else
-- [ ] [ ] add a section to the helpcenter that explains the dropping of halfyear for each school type and class level
-- [x] [ ] In the class detail view there is no chance to "rejoin" courses that come mandatory with the class after somehow leaving them.
-- [x] [ ] add button in the classdetailview should be updated to allow to add a branch or link a class
-- [ ] [ ] show the class code of the class as a subheadline below the classname in its card in small
+        - Comment: looks good but please make the switch look more compact.
+    - [x] [x] make that switch to toggle the values for the entire insightsview but nowhere else
+
+- [ ] [ ] add button in the classdetailview should be updated to allow to add a branch or link a class
+    - Comment: I'm not happy with the current implementation. I think it should be a sheet that allows to select a branch, add a course to a branch, or link a class. 
 
 ##Feature Ideas and Tentative Upgrades for next Version
 - [ ] a weekly summary that shows the grade development of the week and summarizes what happend this week. 
@@ -54,6 +61,8 @@
 - [ ] [ ] Onboarding Rework for better usability and a better UX
 
 ##Completed
+- [x] [x] Sharing of exam appointments are still sharing in legacy groups i think based on the subject selection
+    - Comment: if sharing is toggled on but no group is selected it should behave as if the share toggle is off. "Andere Termin" was sharing with course name as subject name, fixed by explicit nil subject name.
 - [x] [x] the selection Grid or Row view for the subjects are not persistant.
 - [x] [x] the toggle in the CalendarView for the preview of the next appointment is not persistant. That setting should also be saved in firebase.
 - [x] [x] in the SubjectDetailView the assessmenttype displayed for Kurzarbeit are wrong because it says "Sonstige Leistung (0x)" but it should 
@@ -73,3 +82,6 @@
     - [x] [x] its working as intended but when adding a subject the value of how many hj are droppable is only updating when restarting the app or when adding another subject even when the limit has been reached --> still open. should update the value of amount of max droppable halfyears on subject add.
 - [x] [x] the delta in the whatif card in the final grade view stays at 0.00 no matter the entry
     - Comment: still open because only the abitur simulation is changing the delta value in the whatif card in the finalgradeview.
+- [x] [x] add a section to the helpcenter that explains the dropping of halfyear for each school type and class level
+- [x] [x] In the class detail view there is no chance to "rejoin" courses that come mandatory with the class after somehow leaving them.
+- [x] [x] show the class code of the class as a subheadline below the classname in its card in small

@@ -252,6 +252,11 @@ struct MainView: View {
                     handleOpenSheet(type)
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .openNotificationItem)) { notification in
+                if let item = notification.object as? NotificationInboxItem {
+                    openInboxNotification(item)
+                }
+            }
 
             .onChange(of: gradesStore.legacyMigrationSummary) { _, summary in
                 if summary != nil {

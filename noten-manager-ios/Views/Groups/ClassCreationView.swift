@@ -19,6 +19,11 @@ struct ClassCreationView: View {
     @State private var isCreating: Bool = false
     @State private var errorMessage: String?
     
+    // Subject Mapping after creation
+    @State private var showSubjectMapping: Bool = false
+    @State private var createdClassId: String?
+    @State private var missingCourses: [Course] = []
+    
     private var isFeminine: Bool { store.theme == "feminine" }
     private var isDark: Bool { store.darkMode }
     private var animationsOn: Bool { store.animationsEnabled }
@@ -173,6 +178,14 @@ struct ClassCreationView: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .sheet(isPresented: $showSubjectMapping, onDismiss: {
+            dismiss()
+        }) {
+            if let classId = createdClassId {
+                SubjectMappingView(classId: classId, missingCourses: missingCourses)
+                    .environmentObject(store)
+            }
+        }
     }
     
     private func addCommonSubject() {
@@ -209,10 +222,19 @@ struct ClassCreationView: View {
         )
         
         do {
-            _ = try await store.createClassWithCourses(config: config)
+            let classId = try await store.createClassWithCourses(config: config)
             let generator = UINotificationFeedbackGenerator()
             generator.notificationOccurred(.success)
-            dismiss()
+            
+            // Check for missing subject mappings
+            let missing = store.missingSubjects(for: classId)
+            if !missing.isEmpty {
+                self.createdClassId = classId
+                self.missingCourses = missing
+                self.showSubjectMapping = true
+            } else {
+                dismiss()
+            }
         } catch {
             errorMessage = error.localizedDescription
             let generator = UINotificationFeedbackGenerator()

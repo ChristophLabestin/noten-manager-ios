@@ -435,6 +435,7 @@ struct EditGradeView: View {
                 Text("Diese Note wird dauerhaft gelöscht.")
             }
         }
+        .keyboardNavigationToolbar(focus: $focusedField, fields: [.grade, .note])
     }
 
     private func save() async {

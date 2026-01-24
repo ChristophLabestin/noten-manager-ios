@@ -325,7 +325,7 @@ enum GradeCalculationService {
         var total = 0.0
         var count = 0.0
         
-        let examWeight: Double = (schoolType == .fos) ? (Double(gradeYear ?? 12) >= 13 ? 2 : 2) : 2
+        let examWeight: Double = (schoolType == .fos && (gradeYear ?? 12) < 13) ? 3 : 2
         
         for subject in eligibleSubjects {
             let droppedHalf = droppedHalfYearProvider?(subject)
@@ -419,7 +419,7 @@ enum GradeCalculationService {
         var total = 0.0
         var count = 0.0
         
-        let examWeight: Double = (schoolType == .fos) ? (Double(gradeYear ?? 12) >= 13 ? 2 : 2) : 2
+        let examWeight: Double = (schoolType == .fos && (gradeYear ?? 12) < 13) ? 3 : 2
         
         for subject in eligibleSubjects {
             let droppedHalf = droppedHalfYearProvider?(subject)

@@ -402,7 +402,7 @@ extension Notification.Name {
     static let openExamDetail = Notification.Name("openExamDetail")
     static let openLaunchOffer = Notification.Name("openLaunchOffer")
     static let openGroupJoin = Notification.Name("openGroupJoin")
-
+    static let openNotificationItem = Notification.Name("openNotificationItem")
 }
 
 private struct PreAuthOnboardingView: View {
@@ -415,11 +415,10 @@ private struct PreAuthOnboardingView: View {
 
     @AppStorage("allowAnonymousErrorLogging") private var storedAllowAnonymousErrorLogging = false
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var step: Step = .welcome
     @State private var allowAnonymousErrorLogging: Bool = false
     @State private var didLoadPreference: Bool = false
-    @State private var animateDecorations: Bool = false
+    @State private var animateDecorations: Bool = true
     private let contentMaxWidth: CGFloat = 600
     private let buttonMaxWidth: CGFloat = 520
 
@@ -437,14 +436,6 @@ private struct PreAuthOnboardingView: View {
             if !didLoadPreference {
                 allowAnonymousErrorLogging = storedAllowAnonymousErrorLogging
                 didLoadPreference = true
-            }
-            guard !animateDecorations else { return }
-            if reduceMotion {
-                animateDecorations = true
-            } else {
-                withAnimation(.easeInOut(duration: 6).repeatForever(autoreverses: true)) {
-                    animateDecorations = true
-                }
             }
         }
     }

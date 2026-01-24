@@ -6,6 +6,8 @@ struct MSSDetailedCalculationView: View {
     @Environment(\.colorScheme) private var colorScheme
     let halfYearFilter: HomeView.HalfYearFilter
     
+    @State private var selectedSubject: Subject?
+    
     private var filterInt: Int? {
         switch halfYearFilter {
         case .all: return nil
@@ -88,6 +90,10 @@ struct MSSDetailedCalculationView: View {
                         .foregroundStyle(Color.primary)
                 }
             }
+        }
+        .sheet(item: $selectedSubject) { subject in
+            SubjectCalculationView(subject: subject, halfYearFilter: filterInt)
+                .environmentObject(store)
         }
     }
     
@@ -181,34 +187,49 @@ struct MSSDetailedCalculationView: View {
         ) {
             VStack(spacing: 0) {
                 ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(item.label)
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(.primary)
+                    Button {
+                        if category == "Fächer", let subject = store.subjects.first(where: { $0.name == item.label }) {
+                            self.selectedSubject = subject
+                        }
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.label)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.primary)
+                                
+                                if item.weight != 1.0 {
+                                    Text("Gewichtung: \(String(format: "%g", item.weight))x")
+                                        .font(.caption2.weight(.semibold))
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(
+                                            Capsule()
+                                                .fill(Color.primary.opacity(0.05))
+                                        )
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
                             
-                            if item.weight != 1.0 {
-                                Text("Gewichtung: \(String(format: "%g", item.weight))x")
-                                    .font(.caption2.weight(.semibold))
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(
-                                        Capsule()
-                                            .fill(Color.primary.opacity(0.05))
-                                    )
-                                    .foregroundStyle(.secondary)
+                            Spacer()
+                            
+                            Text(String(format: "%.1f", item.value))
+                                .font(.system(.body, design: .rounded).weight(.semibold))
+                                .monospacedDigit()
+                                .foregroundStyle(.primary)
+                                .privacyBlur()
+                            
+                            if category == "Fächer" {
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(.secondary.opacity(0.5))
+                                    .padding(.leading, 8)
                             }
                         }
-                        
-                        Spacer()
-                        
-                        Text(String(format: "%.1f", item.value))
-                            .font(.system(.body, design: .rounded).weight(.semibold))
-                            .monospacedDigit()
-                            .foregroundStyle(.primary)
-                            .privacyBlur()
+                        .padding(.vertical, 10)
+                        .contentShape(Rectangle())
                     }
-                    .padding(.vertical, 10)
+                    .buttonStyle(.plain)
                     
                     if index < items.count - 1 {
                         Divider()

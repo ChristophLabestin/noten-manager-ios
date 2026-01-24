@@ -68,6 +68,17 @@ struct EditExamView: View {
         isFachreferatExam = trimmedSubject.lowercased() == "fachreferat"
         isGeneralEvent = trimmedSubject.isEmpty && (exam.requiresGrade == false)
         _fachreferatSubjectName = State(initialValue: exam.subjectKey ?? "")
+        
+        // Initialize selection with current exam location
+        if exam.isShared {
+            if let gid = exam.groupId {
+                _selectedGroupIds = State(initialValue: [gid])
+                _shareWithGroup = State(initialValue: true)
+            } else if let cid = exam.courseId {
+                _selectedCourseIds = State(initialValue: [cid])
+                _shareWithGroup = State(initialValue: true)
+            }
+        }
     }
 
     private enum Field: Hashable {
@@ -480,6 +491,39 @@ struct EditExamView: View {
                                 .foregroundStyle(.red)
                                 .padding(.horizontal, 16)
                         }
+                    } else if exam.isShared && isSharedOwner {
+                         // Editing existing shared exam targets
+                         let availableCourses: [Course] = {
+                             if isGeneralEvent {
+                                 return Array(Dictionary(grouping: store.courses, by: { $0.id }).values.compactMap(\.first))
+                             }
+                             let targetIds = Set(store.targetCourseIds(forLocalSubject: subjectName))
+                             let matches = store.courses.filter { targetIds.contains($0.id) }
+                             return Array(Dictionary(grouping: matches, by: { $0.id }).values.compactMap(\.first))
+                         }()
+                         
+                         ShareTargetSelector(
+                             shareWithGroup: $shareWithGroup,
+                             selectedGroupIds: $selectedGroupIds,
+                             selectedClassIds: $selectedClassIds,
+                             selectedCourseIds: $selectedCourseIds,
+                             availableCourses: availableCourses,
+                             autoSelectedGroupIds: autoSelectedGroupIds,
+                             autoSelectedCourseIds: autoSelectedCourseIds
+                         )
+                         
+                        if let shareInfo {
+                            Text(shareInfo)
+                                .font(.footnote)
+                                .foregroundStyle(.green)
+                                .padding(.horizontal, 16)
+                        }
+                        if let shareError {
+                            Text(shareError)
+                                .font(.footnote)
+                                .foregroundStyle(.red)
+                                .padding(.horizontal, 16)
+                        }
                     }
 
                     if exam.isShared {
@@ -611,6 +655,7 @@ struct EditExamView: View {
                 Text("Dieser Klausurtermin wird dauerhaft gelöscht.")
             }
         }
+        .keyboardNavigationToolbar(focus: $focusedField, fields: [.title, .notes])
     }
 
     private func save() async {
@@ -647,27 +692,54 @@ struct EditExamView: View {
             let requiresGradeValue = isGeneralEvent ? false : requiresGrade
             let hasTime = includeTime
             if exam.isShared {
-                guard let gid = exam.groupId else {
-                    error = "Keine Gruppe für diese Klausur gefunden."
+                if let gid = exam.groupId {
+                    try await store.updateSharedExamInGroup(
+                        groupId: gid,
+                        id: exam.id,
+                        subjectName: effectiveSubject,
+                        subjectKey: relatedSubject,
+                        title: trimmedTitle,
+                        notes: storedNotes,
+                        date: examDate,
+                        hasTime: hasTime,
+                        weight: weightToStore,
+                        customWeight: customWeight,
+                        assessmentType: allowWeights && !useCustomWeight ? examAssessmentType : nil,
+                        reminderAt: reminder
+                    )
+                    try await store.setUserReminderForSharedExam(examId: exam.id, reminderAt: reminder, groupId: gid)
+                    await store.setUserNoteForSharedExam(examId: exam.id, note: personalNote, groupId: gid)
+                } else if let cid = exam.courseId {
+                     try await store.updateSharedExamInCourse(
+                        courseId: cid,
+                        id: exam.id,
+                        subjectName: effectiveSubject,
+                        subjectKey: relatedSubject,
+                        title: trimmedTitle,
+                        notes: storedNotes,
+                        date: examDate,
+                        hasTime: hasTime,
+                        weight: weightToStore,
+                        customWeight: customWeight,
+                        assessmentType: allowWeights && !useCustomWeight ? examAssessmentType : nil,
+                        reminderAt: reminder
+                     )
+                     // Reminders for course exams? Currently simpler model, but let's assume we can set reminders on the "Course Exam" ID generally or via same method if ID is unique.
+                     // setUserReminderForSharedExam expects groupId opt.
+                     try await store.setUserReminderForSharedExam(examId: exam.id, reminderAt: reminder, groupId: nil) 
+                     // nil groupId works as long as ID is unique in sharedExams list.
+                     await store.setUserNoteForSharedExam(examId: exam.id, note: personalNote, groupId: nil)
+                } else {
+                    // Fallback or Error
+                    error = "Keine Gruppe oder Kurs für diese geteilte Klausur gefunden."
                     isSaving = false
                     return
                 }
-                try await store.updateSharedExamInGroup(
-                    groupId: gid,
-                    id: exam.id,
-                    subjectName: effectiveSubject,
-                    subjectKey: relatedSubject,
-                    title: trimmedTitle,
-                    notes: storedNotes,
-                    date: examDate,
-                    hasTime: hasTime,
-                    weight: weightToStore,
-                    customWeight: customWeight,
-                    assessmentType: allowWeights && !useCustomWeight ? examAssessmentType : nil,
-                    reminderAt: reminder
-                )
-                try await store.setUserReminderForSharedExam(examId: exam.id, reminderAt: reminder, groupId: gid)
-                await store.setUserNoteForSharedExam(examId: exam.id, note: personalNote, groupId: gid)
+
+                // Handle changes in sharing targets if owner
+                if isSharedOwner {
+                    await updateSharingTargets()
+                }
             } else {
                 try await store.updateExamInFirestore(
                     id: exam.id,
@@ -714,6 +786,12 @@ struct EditExamView: View {
         shareInfo = nil
         isSharing = true
         
+        // Determine override subject name
+        // If subjectName is not in local subjects (e.g. "Termin" or "Fachreferat"), pass it.
+        // Otherwise pass nil (use Course Name).
+        let isLocalSubject = subjects.contains(where: { $0.name == subjectName })
+        let overrideSubjectName = isLocalSubject ? nil : subjectName
+        
         var createdAny = false
         
         // 1. Share to selected Courses
@@ -721,6 +799,7 @@ struct EditExamView: View {
             do {
                 _ = try await store.addExamToCourse(
                     courseId: courseId,
+                    subjectName: overrideSubjectName,
                     title: title,
                     notes: notes,
                     date: combinedExamDate(),
@@ -745,6 +824,7 @@ struct EditExamView: View {
                 do {
                     _ = try await store.addExamToCourse(
                         courseId: courseId,
+                        subjectName: overrideSubjectName,
                         title: title,
                         notes: notes,
                         date: combinedExamDate(),
@@ -800,7 +880,93 @@ struct EditExamView: View {
         }
     }
 
+    private func updateSharingTargets() async {
+        guard let currentId = currentUserId, exam.creatorId == currentId else { return }
+        
+        // 1. Check if the current source was deselected
+        // If the exam is from a group (exam.groupId) and that group is NOT in selectedGroupIds:
+        if let gid = exam.groupId, !selectedGroupIds.contains(gid) {
+            // Unshare (delete) from this group
+            _ = await store.stopSharingExam(groupId: gid, examId: exam.id)
+        }
+        
+        // If the exam is from a course (exam.courseId) and that course is NOT in selectedCourseIds:
+        if let cid = exam.courseId, !selectedCourseIds.contains(cid) {
+             // Unshare (delete) from this course
+             // Note: GradesStore might need a specific delete method for courses if different from groups?
+             // `deleteCourse` removes the course. `deleteSharedExamFromGroup` removes from `groups/{gid}`.
+             // We need `deleteExamFromCourse`.
+             try? await store.deleteExamFromCourse(courseId: cid, examId: exam.id)
+        }
+
+        // 2. Share to new targets
+        // Note: This creates NEW copies. Existing copies in other groups are not tracked here unless we query them.
+        // We only "manage" the current exam instance and "add" new ones.
+        // To avoid creating duplicates in the CURRENT source, filter it out.
+        
+        let targetCourseIds = selectedCourseIds.filter { $0 != exam.courseId }
+        let targetGroupIds = selectedGroupIds.filter { $0 != exam.groupId }
+        // Classes logic for new targets
+        // Add course IDs from selected classes
+        var finalCourseIds = targetCourseIds
+        for classId in selectedClassIds {
+             let cids = store.courses.filter { $0.classId == classId }.map { $0.id }
+             for cid in cids where cid != exam.courseId {
+                 // Check if already in finalCourseIds
+                 if !finalCourseIds.contains(cid) {
+                     finalCourseIds.insert(cid)
+                 }
+             }
+        }
+        
+        // Use shareToGroups logic (but customized for editing context to avoid side effects like dismissing prematurely)
+        // Actually, we can just reuse the core logic of `shareToGroups` manually.
+        
+        let overrideSubjectName = subjects.contains(where: { $0.name == subjectName }) ? nil : subjectName
+        
+        for courseId in finalCourseIds {
+             do {
+                 _ = try await store.addExamToCourse(
+                     courseId: courseId,
+                     subjectName: overrideSubjectName,
+                     title: title,
+                     notes: notes,
+                     date: combinedExamDate(),
+                     hasTime: includeTime,
+                     weight: useCustomWeight ? nil : examWeight,
+                     customWeight: useCustomWeight ? parsedCustomWeight() : nil,
+                     assessmentType: useCustomWeight ? nil : examAssessmentType,
+                     reminderAt: hasReminder ? reminderDate : nil,
+                     requiresGrade: requiresGrade
+                 )
+             } catch {
+                 print("Error adding to course \(courseId): \(error)")
+             }
+        }
+        
+        if !targetGroupIds.isEmpty {
+            _ = try? await store.addExamToGroups(
+                subjectName: overrideSubjectName ?? subjectName, // Groups mostly use legacy subjectName, but check logic
+                subjectKey: nil,
+                title: title,
+                notes: notes,
+                date: combinedExamDate(),
+                hasTime: includeTime,
+                weight: useCustomWeight ? nil : examWeight,
+                customWeight: useCustomWeight ? parsedCustomWeight() : nil,
+                assessmentType: useCustomWeight ? nil : examAssessmentType,
+                reminderAt: hasReminder ? reminderDate : nil,
+                requiresGrade: requiresGrade,
+                targetGroupIds: Array(targetGroupIds)
+            )
+        }
+    }
+
     private func updateSelectedGroupsForSubject(_ subject: String) {
+        // Only update auto-selection if NOT editing an existing shared exam
+        // (If editing, we want to respect the user's explicit choices or the exam's current state)
+        if exam.isShared { return }
+
         // 1. Remove previously auto-selected groups & courses
         selectedGroupIds.subtract(autoSelectedGroupIds)
         autoSelectedGroupIds.removeAll()

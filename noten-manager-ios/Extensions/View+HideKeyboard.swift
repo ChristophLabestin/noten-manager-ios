@@ -180,29 +180,8 @@ enum KeyboardToolbarAppearance {
     static var isConfigured = false
 
     static func configure() {
-        guard !isConfigured else { return }
+        // We no longer strip the toolbar background as we are using native toolbars.
         isConfigured = true
-
-        if let inputController = NSClassFromString("UIInputWindowController") as? UIAppearanceContainer.Type {
-            let toolbar = UIToolbar.appearance(whenContainedInInstancesOf: [inputController])
-            if #available(iOS 15.0, *) {
-                let appearance = UIToolbarAppearance()
-                appearance.configureWithTransparentBackground()
-                appearance.backgroundEffect = nil
-                appearance.backgroundColor = .clear
-                appearance.shadowColor = .clear
-                toolbar.standardAppearance = appearance
-                toolbar.scrollEdgeAppearance = appearance
-                toolbar.compactAppearance = appearance
-                toolbar.isTranslucent = true
-            } else {
-                toolbar.setBackgroundImage(UIImage(), forToolbarPosition: .any, barMetrics: .default)
-                toolbar.setShadowImage(UIImage(), forToolbarPosition: .any)
-                toolbar.backgroundColor = .clear
-                toolbar.barTintColor = .clear
-                toolbar.isTranslucent = true
-            }
-        }
     }
 }
 
@@ -220,12 +199,11 @@ extension View {
         )
     }
 
-    /// Shows a native-style bar above the keyboard with navigation and a done action.
+    /// Shows a native-style bar above the keyboard with a done action.
+    /// Uses a custom overlay to avoid iOS 17+ native toolbar bugs.
     func keyboardDismissToolbar(label: String? = nil) -> some View {
         self.modifier(
-            KeyboardToolbarOverlay(
-                height: KeyboardToolbarMetrics.totalHeight
-            ) {
+            KeyboardToolbarOverlay(height: KeyboardToolbarMetrics.totalHeight) {
                 KeyboardAccessoryBar(
                     canGoPrev: false,
                     canGoNext: false,
@@ -239,6 +217,7 @@ extension View {
     }
 
     /// Keyboard toolbar that enables previous/next focus navigation for multi-field forms.
+    /// Uses a custom overlay to avoid iOS 17+ native toolbar bugs.
     func keyboardNavigationToolbar<Focus: Hashable>(
         focus: FocusState<Focus?>.Binding,
         fields: [Focus],
@@ -246,9 +225,7 @@ extension View {
         onDone: (() -> Void)? = nil
     ) -> some View {
         self.modifier(
-            KeyboardToolbarOverlay(
-                height: KeyboardToolbarMetrics.totalHeight
-            ) {
+            KeyboardToolbarOverlay(height: KeyboardToolbarMetrics.totalHeight) {
                 KeyboardNavigationAccessory(
                     focus: focus,
                     fields: fields,
@@ -269,41 +246,35 @@ private struct KeyboardToolbarOverlay<Bar: View>: ViewModifier {
     func body(content: Content) -> some View {
         content
             .safeAreaInset(edge: .bottom) {
-                Color.clear
-                    .frame(height: isKeyboardVisible ? height : 0)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-            }
-            .overlay(alignment: .bottom) {
                 if isKeyboardVisible {
-                    HStack {
-                        Spacer(minLength: 20)
-                        bar()
-                        Spacer(minLength: 20)
-                    }
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    bar()
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
-            .animation(.easeOut(duration: 0.18), value: isKeyboardVisible)
+            .animation(.easeOut(duration: 0.25), value: isKeyboardVisible)
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { notification in
-                isKeyboardVisible = true
+                withAnimation(.easeOut(duration: 0.25)) {
+                    isKeyboardVisible = true
+                }
                 keyboardHeight = extractedKeyboardHeight(from: notification)
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
                 let newHeight = extractedKeyboardHeight(from: notification)
-                // Sobald die Tastaturhöhe schrumpft (z. B. durch Scrollen), direkt komplett schließen,
-                // damit sie nicht "gehalten" werden kann.
-                if newHeight + 8 < keyboardHeight {
-                    dismissKeyboard()
-                    isKeyboardVisible = false
-                    keyboardHeight = 0
+                if newHeight <= 0 {
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        isKeyboardVisible = false
+                    }
                 } else {
-                    keyboardHeight = newHeight
-                    isKeyboardVisible = newHeight > 0
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        isKeyboardVisible = true
+                    }
                 }
+                keyboardHeight = newHeight
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-                isKeyboardVisible = false
+                withAnimation(.easeOut(duration: 0.25)) {
+                    isKeyboardVisible = false
+                }
                 keyboardHeight = 0
             }
     }

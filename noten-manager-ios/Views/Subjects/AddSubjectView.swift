@@ -116,6 +116,7 @@ struct AddSubjectView: View {
             }
             .scrollDismissesKeyboard(.interactively)
         }
+        .keyboardNavigationToolbar(focus: $focusedField, fields: [.name, .teacher, .room, .alias, .email])
     }
 
     private func save() async {

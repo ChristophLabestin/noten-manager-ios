@@ -501,6 +501,7 @@ struct AddExamView: View {
         } message: {
             Text("Am \(date.formatted(date: .numeric, time: .omitted)) ist bereits eine Prüfung in \(conflictingExamSubject) eingetragen. Möchtest du diesen Termin trotzdem anlegen?")
         }
+        .keyboardNavigationToolbar(focus: $focusedField, fields: [.title, .notes])
     }
 
     @State private var showDuplicateAlert: Bool = false
@@ -583,6 +584,7 @@ struct AddExamView: View {
                 for courseId in selectedCourseIds {
                     _ = try await store.addExamToCourse(
                         courseId: courseId,
+                        subjectName: isGeneralEvent ? effectiveSubject : nil,
                         title: trimmedTitle,
                         notes: storedNotes,
                         date: examDate,
@@ -602,6 +604,7 @@ struct AddExamView: View {
                     for courseId in classCourseIds where !selectedCourseIds.contains(courseId) {
                         _ = try await store.addExamToCourse(
                             courseId: courseId,
+                            subjectName: isGeneralEvent ? effectiveSubject : nil,
                             title: trimmedTitle,
                             notes: storedNotes,
                             date: examDate,

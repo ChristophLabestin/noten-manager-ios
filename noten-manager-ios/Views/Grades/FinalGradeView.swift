@@ -184,11 +184,19 @@ struct FinalGradeView: View {
     }
     
     private var deltaColor: Color {
-        guard let base = baselineFinalGradeValue, let sim = simulatedFinalGradeValue else { return .orange }
-        // Lower grade is better (1.0 vs 2.0)
-        if sim < base { return .green }
-        if sim > base { return .orange }
-        return .secondary
+        if useMSSInHero {
+            guard let base = baselineMSSValue, let sim = simulatedMSSValue else { return .orange }
+            // Higher points is better
+            if sim > base { return .green }
+            if sim < base { return .orange }
+            return .secondary
+        } else {
+            guard let base = baselineFinalGradeValue, let sim = simulatedFinalGradeValue else { return .orange }
+            // Lower grade is better (1.0 vs 2.0)
+            if sim < base { return .green }
+            if sim > base { return .orange }
+            return .secondary
+        }
     }
     
     private var hasOverdueHomeworks: Bool {
@@ -666,17 +674,15 @@ struct FinalGradeView: View {
         
         /// MSS value (0-15 points average) for hero display
         private var heroMSSValue: String {
-            guard fobosoSummary.maxPoints > 0 else { return "-" }
-            let avgPoints = (fobosoSummary.totalPoints * 15.0) / Double(fobosoSummary.maxPoints)
-            return String(format: "%.2f", avgPoints)
+            guard let avg = fobosoSummary.averageAfterDrops else { return "-" }
+            return String(format: "%.2f", avg)
         }
         
         /// MSS text for display under grade
         private var heroMSSText: String {
-            guard fobosoSummary.maxPoints > 0 else { return "MSS: -" }
-            let avgPoints = (fobosoSummary.totalPoints * 15.0) / Double(fobosoSummary.maxPoints)
+            guard let avg = fobosoSummary.averageAfterDrops else { return "MSS: -" }
             // Use raw value for precision, let store.formatMSS handle formatting/rounding preference
-            return "MSS: \(store.formatMSS(avgPoints))"
+            return "MSS: \(store.formatMSS(avg))"
         }
         
         
@@ -697,7 +703,14 @@ struct FinalGradeView: View {
                         HStack(spacing: 12) {
                             StatChip(title: "Aktuell", value: baselineFinalGradeText, accent: .indigo)
                             StatChip(title: "Simulation", value: finalGradeText, accent: .pink)
-                            StatChip(title: "Δ", value: formatFinalGradeDelta(base: baselineFinalGradeValue, simulated: simulatedFinalGradeValue), accent: deltaColor)
+                            StatChip(
+                                title: "Δ",
+                                value: formatFinalGradeDelta(
+                                    base: useMSSInHero ? baselineMSSValue : baselineFinalGradeValue,
+                                    simulated: useMSSInHero ? simulatedMSSValue : simulatedFinalGradeValue
+                                ),
+                                accent: deltaColor
+                            )
                         }
 
 
@@ -1482,20 +1495,28 @@ struct FinalGradeView: View {
             return (17.0 - p) / 3.0
         }
         
+        private var baselineMSSValue: Double? {
+            baselineFobosoSummary.averageAfterDrops
+        }
+
+        private var simulatedMSSValue: Double? {
+            fobosoSummary.averageAfterDrops
+        }
+
         private var finalGradeText: String {
-            finalGradeText(for: activeExamPointsBySubject)
+            finalGradeText(for: activeExamPointsBySubject, isBaseline: false)
         }
         
         private var baselineFinalGradeText: String {
-            finalGradeText(for: store.examPoints)
+            finalGradeText(for: store.examPoints, isBaseline: true)
         }
         
         private var baselineFinalGradeValue: Double? {
-            mssToGrade(overallAverageMSS(examPoints: store.examPoints, isBaseline: true))
+            baselineFobosoSummary.gradeRaw
         }
         
         private var simulatedFinalGradeValue: Double? {
-            mssToGrade(overallAverageMSS(examPoints: activeExamPointsBySubject, isBaseline: false))
+            fobosoSummary.gradeRaw
         }
         
         private var finalGradeValueForColor: Double? {
@@ -1571,24 +1592,21 @@ struct FinalGradeView: View {
             return abiturFinalAverage(points: points) ?? gradesOnlyFinalAverage
         }
             
-        private func finalGradeText(for points: [String: Double?]) -> String {
-                let decimals = 2
-                
-                // Use the same calculation as HomeView for consistency
-                if let mss = overallAverageMSS(examPoints: points, isBaseline: false) {
-                    if useMSSInHero {
-                        // Show MSS points (0-15 scale)
-                        return String(format: "%.\(decimals)f", mss)
-                    } else {
-                        // Convert to grade (1-6 scale)
-                        let grade = (17.0 - mss) / 3.0
-                        return String(format: "%.\(decimals)f", grade)
-                    }
+        private func finalGradeText(for points: [String: Double?], isBaseline: Bool = false) -> String {
+            let summary = makeFobosoSummary(examPoints: points, isBaseline: isBaseline)
+            let decimals = 2
+            
+            if useMSSInHero {
+                if let avg = summary.averageAfterDrops {
+                    return String(format: "%.\(decimals)f", avg)
                 }
-                
-                // Fallback if no average available
-                return "-"
+            } else {
+                if let grade = summary.gradeRaw {
+                    return String(format: "%.\(decimals)f", grade)
+                }
             }
+            return "--"
+        }
             
         private func roundedExamPoints(_ value: Double?) -> Double? {
                 guard let v = value else { return nil }
@@ -1927,6 +1945,7 @@ struct FinalGradeView: View {
                                                                                      halfYearPoints: Double,
                                                                                      seminarPointsDouble: Double,
                                                                                      totalPoints: Double,
+                                                                                     totalPointsRaw: Double,
                                                                                      maxPoints: Int,
                                                                                      grade: Double?,
                                                                                      gradeRaw: Double?,
@@ -1957,8 +1976,8 @@ struct FinalGradeView: View {
                     effectiveGradeWeight: { type, weight in store.effectiveGradeWeight(subjectType: type, rawWeight: weight) }
                 )
                 
-                let avgAfterDrops = res.maxPoints > 0 ? (res.totalPoints * 15.0) / Double(res.maxPoints) : nil
-                return (res.examCount, res.halfYearCount, res.examPointsDouble, res.halfYearPoints, res.seminarPointsDouble, res.totalPoints, res.maxPoints, res.grade, res.gradeRaw, avgAfterDrops)
+                let avgAfterDrops = res.maxPoints > 0 ? (res.totalPointsRaw * 15.0) / Double(res.maxPoints) : nil
+                return (res.examCount, res.halfYearCount, res.examPointsDouble, res.halfYearPoints, res.seminarPointsDouble, res.totalPoints, res.totalPointsRaw, res.maxPoints, res.grade, res.gradeRaw, avgAfterDrops)
             }
             
             
@@ -1968,6 +1987,7 @@ struct FinalGradeView: View {
                                         halfYearPoints: Double,
                                         seminarPointsDouble: Double,
                                         totalPoints: Double,
+                                        totalPointsRaw: Double,
                                         maxPoints: Int,
                                         grade: Double?,
                                         gradeRaw: Double?,
@@ -1981,6 +2001,7 @@ struct FinalGradeView: View {
                                                 halfYearPoints: Double,
                                                 seminarPointsDouble: Double,
                                                 totalPoints: Double,
+                                                totalPointsRaw: Double,
                                                 maxPoints: Int,
                                                 grade: Double?,
                                                 gradeRaw: Double?,
@@ -2743,7 +2764,7 @@ extension FinalGradeView {
         let loadPreviousYearSnapshotIfNeeded: () async -> Void
         let previousYearSnapshot: Any?
         let triggerUpdate: () -> Void
-        let makeFobosoSummary: ([String: Double?]?) -> (examCount: Int, halfYearCount: Int, examPointsDouble: Double, halfYearPoints: Double, seminarPointsDouble: Double, totalPoints: Double, maxPoints: Int, grade: Double?, gradeRaw: Double?, averageAfterDrops: Double?)
+        let makeFobosoSummary: ([String: Double?]?) -> (examCount: Int, halfYearCount: Int, examPointsDouble: Double, halfYearPoints: Double, seminarPointsDouble: Double, totalPoints: Double, totalPointsRaw: Double, maxPoints: Int, grade: Double?, gradeRaw: Double?, averageAfterDrops: Double?)
         let finalGradeText: ([String: Double?]) -> String
         let mergedExamPoints: ([String: Double?], [String: Double]) -> [String: Double?]
         
@@ -2776,7 +2797,7 @@ extension FinalGradeView {
             loadPreviousYearSnapshotIfNeeded: @escaping () async -> Void,
             previousYearSnapshot: Any?,
             triggerUpdate: @escaping () -> Void,
-            makeFobosoSummary: @escaping ([String: Double?]?) -> (examCount: Int, halfYearCount: Int, examPointsDouble: Double, halfYearPoints: Double, seminarPointsDouble: Double, totalPoints: Double, maxPoints: Int, grade: Double?, gradeRaw: Double?, averageAfterDrops: Double?),
+            makeFobosoSummary: @escaping ([String: Double?]?) -> (examCount: Int, halfYearCount: Int, examPointsDouble: Double, halfYearPoints: Double, seminarPointsDouble: Double, totalPoints: Double, totalPointsRaw: Double, maxPoints: Int, grade: Double?, gradeRaw: Double?, averageAfterDrops: Double?),
             finalGradeText: @escaping ([String: Double?]) -> String,
             mergedExamPoints: @escaping ([String: Double?], [String: Double]) -> [String: Double?]
         ) {

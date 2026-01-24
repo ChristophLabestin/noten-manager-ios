@@ -19,6 +19,7 @@ struct ClassesListView: View {
     @State private var showGroupMergeSheet = false
     @State private var showSocialCreateSheet = false
     @State private var showClassesOnboarding = false
+    @State private var showExplainingSheet = false
     
     private var animationsOn: Bool { store.animationsEnabled }
     
@@ -164,6 +165,10 @@ struct ClassesListView: View {
             ClassesFeatureOnboardingSheet()
                 .environmentObject(store)
         }
+        .sheet(isPresented: $showExplainingSheet) {
+            ClassesExplainingSheet()
+                .environmentObject(store)
+        }
         .onAppear {
             if !store.hasSeenClassesOnboarding {
                 showClassesOnboarding = true
@@ -189,12 +194,26 @@ struct ClassesListView: View {
     }
     
     private var headerSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Klassen & Gruppen")
-                .font(.title2.weight(.bold))
-            Text("Verwalte deine Klassen und Lerngruppen")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Klassen & Gruppen")
+                    .font(.title2.weight(.bold))
+                Text("Verwalte deine Klassen und Lerngruppen")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button {
+                showExplainingSheet = true
+            } label: {
+                Image(systemName: "info.circle")
+                    .font(.title3)
+                    .foregroundStyle(.indigo)
+                    .padding(8)
+                    .background(Color.indigo.opacity(0.1))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -422,7 +441,7 @@ private struct ClassCardView: View {
     var body: some View {
         SettingsCard(
             title: store.classNames[classId] ?? "Unbenannte Klasse",
-            subtitle: "Code: \(classId)",
+            subtitle: nil,
             systemImage: "rectangle.stack.fill",
             accent: .indigo,
             trailing: {
@@ -449,6 +468,15 @@ private struct ClassCardView: View {
                             .foregroundStyle(.secondary)
                         Text("\(branchCount) Zweige")
                             .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    
+                    HStack(spacing: 6) {
+                        Image(systemName: "number")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(classId)
+                            .font(.caption.monospaced().weight(.medium))
                             .foregroundStyle(.secondary)
                     }
                 }

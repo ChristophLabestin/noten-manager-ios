@@ -245,12 +245,6 @@ struct SeminarPerformanceView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .hideKeyboardOnTap()
-            .keyboardNavigationToolbar(
-                focus: $focusedField,
-                fields: [.topic, .note],
-                label: nil,
-                onDone: { hideKeyboard() }
-            )
             .alert("Seminarfach löschen?", isPresented: $showDeleteAlert) {
                 Button("Löschen", role: .destructive) {
                     Task { await delete() }

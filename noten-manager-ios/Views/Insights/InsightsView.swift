@@ -9,6 +9,7 @@ struct InsightsView: View {
     @State private var showExamSheet: Bool = false
     @State private var showWhatIfMode: Bool = false
     @State private var showNotifications: Bool = false
+    @State private var includeDroppedHalfYears: Bool = false
     @AppStorage("launchOfferPurchased") private var launchOfferPurchased = false
     @ObservedObject private var notificationInbox = NotificationInboxStore.shared
     var onOpenCreationMenu: () -> Void = {}
@@ -26,7 +27,7 @@ struct InsightsView: View {
                 store.bestAvailableHalfYearValue(subject: subject, halfYear: halfYear)
             },
             droppedHalfYearProvider: { subject in
-                subject.droppedHalfYear
+                includeDroppedHalfYears ? nil : subject.droppedHalfYear
             },
             halfYearFilter: nil,
             fachreferat: store.fachreferat,
@@ -46,7 +47,7 @@ struct InsightsView: View {
                 store.bestAvailableHalfYearValue(subject: subject, halfYear: hy)
             },
             droppedHalfYearProvider: { subject in
-                subject.droppedHalfYear
+                includeDroppedHalfYears ? nil : subject.droppedHalfYear
             },
             halfYearFilter: halfYear,
             schoolType: store.schoolType,
@@ -55,7 +56,7 @@ struct InsightsView: View {
     }
 
     private func subjectAverage(_ subject: Subject) -> Double? {
-        let droppedHalf = subject.droppedHalfYear
+        let droppedHalf = includeDroppedHalfYears ? nil : subject.droppedHalfYear
         let v1 = droppedHalf == 1 ? nil : store.bestAvailableHalfYearValue(subject: subject, halfYear: 1)
         let v2 = droppedHalf == 2 ? nil : store.bestAvailableHalfYearValue(subject: subject, halfYear: 2)
         switch (v1, v2) {
@@ -180,8 +181,35 @@ struct InsightsView: View {
         ScrollView {
             VStack(spacing: 16) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Insights")
-                        .font(.title2.weight(.bold))
+                    HStack {
+                        Text("Insights")
+                            .font(.title2.weight(.bold))
+                        
+                        Spacer()
+                        
+                        let hasDrops = store.subjects.contains { $0.droppedHalfYear != nil }
+                        if hasDrops {
+                            Button {
+                                withAnimation {
+                                    includeDroppedHalfYears.toggle()
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: includeDroppedHalfYears ? "eye.slash" : "eye")
+                                    Text(includeDroppedHalfYears ? "Streichungen ignoriert" : "Streichungen aktiv")
+                                }
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(includeDroppedHalfYears ? Color.secondary : Color.indigo)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(
+                                    Capsule()
+                                        .fill(includeDroppedHalfYears ? Color.secondary.opacity(0.1) : Color.indigo.opacity(0.1))
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
                     Text("Schnitt, Fächer & Fortschritt")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -197,7 +225,7 @@ struct InsightsView: View {
                 }
                 .softFadeIn(enabled: animationsOn, delay: 0.1, offset: 12)
 
-                MSSHistoryChartView()
+                MSSHistoryChartView(includeDroppedHalfYears: $includeDroppedHalfYears)
                     .environmentObject(store)
                     .softFadeIn(enabled: animationsOn, delay: 0.06, offset: 12)
 

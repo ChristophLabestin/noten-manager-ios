@@ -166,12 +166,6 @@ struct AddPraktikumGradeView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .hideKeyboardOnTap()
-            .keyboardNavigationToolbar(
-                focus: $focusedField,
-                fields: [.grade, .company, .note],
-                label: nil,
-                onDone: { hideKeyboard() }
-            )
             .onAppear {
                 halfYear = suggestedHalfYear
             }

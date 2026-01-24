@@ -41,6 +41,25 @@ extension View {
     func privacyBlur() -> some View {
         self.modifier(PrivacyBlurModifier())
     }
+
+    func glassCard(cornerRadius: CGFloat = 20) -> some View {
+        self.modifier(GlassCardModifier(cornerRadius: cornerRadius))
+    }
+}
+
+struct GlassCardModifier: ViewModifier {
+    let cornerRadius: CGFloat
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        content
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(.white.opacity(colorScheme == .dark ? 0.1 : 0.3), lineWidth: 1)
+            )
+    }
 }
 
 struct PrivacyBlurModifier: ViewModifier {
@@ -125,6 +144,33 @@ struct SoftTintButtonStyle: ButtonStyle {
             .scaleEffect(configuration.isPressed ? 0.985 : 1)
             .opacity(isEnabled ? 1 : 0.7)
             .animation(.spring(response: 0.28, dampingFraction: 0.85), value: configuration.isPressed)
+    }
+}
+
+struct LargeSoftButtonStyle: ButtonStyle {
+    var accent: Color
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.headline.weight(.bold))
+            .foregroundStyle(.white)
+            .padding(.vertical, 16)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [accent, accent.opacity(0.8)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .shadow(color: accent.opacity(0.3), radius: 8, x: 0, y: 4)
+            )
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .opacity(isEnabled ? 1 : 0.6)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: configuration.isPressed)
     }
 }
 

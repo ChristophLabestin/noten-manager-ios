@@ -472,6 +472,7 @@ struct AddGradeView: View {
                 applyExamWeightIfAvailable(examId: newValue)
             }
         }
+        .keyboardNavigationToolbar(focus: $focusedField, fields: [.grade, .note])
     }
 
     private func save() async {

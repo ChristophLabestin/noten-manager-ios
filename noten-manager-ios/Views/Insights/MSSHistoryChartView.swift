@@ -16,7 +16,7 @@ struct MSSHistoryChartView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var dataPoints: [MSSHistoryChartDataPoint] = []
     @State private var isLoading: Bool = true
-    @State private var includeDroppedHalfYears: Bool = false
+    @Binding var includeDroppedHalfYears: Bool
 
     @State private var selectedDate: Date?
     @State private var selectedPoint: MSSHistoryChartDataPoint?
@@ -510,29 +510,6 @@ struct MSSHistoryChartView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            
-            // Toggle to include/exclude dropped half-years
-            // Toggle to include/exclude dropped half-years
-            if hasDroppedHalfYears {
-                Button(action: {
-                    withAnimation {
-                        includeDroppedHalfYears.toggle()
-                    }
-                }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: includeDroppedHalfYears ? "eye.slash" : "eye")
-                        Text(includeDroppedHalfYears ? "Streichungen ignoriert" : "Streichungen aktiv")
-                    }
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(includeDroppedHalfYears ? Color.secondary : Color.indigo)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(
-                        Capsule()
-                            .fill(includeDroppedHalfYears ? Color.secondary.opacity(0.1) : Color.indigo.opacity(0.1))
-                    )
-                }
-            }
         }
     }
 }

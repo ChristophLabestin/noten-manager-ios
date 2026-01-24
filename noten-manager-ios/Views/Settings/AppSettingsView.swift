@@ -90,6 +90,8 @@ struct AppSettingsView: View {
     @State private var changePasswordMessage: String?
     @State private var changePasswordError: String?
     @State private var isUpdatingPassword: Bool = false
+    
+    @State private var showWebMergeSheet: Bool = false
 
     init(scrollToAccount: Bool = false, onOpenCreationMenu: @escaping () -> Void = {}) {
         self.scrollToAccount = scrollToAccount
@@ -285,6 +287,12 @@ struct AppSettingsView: View {
 
                         onboardingCard
                             .softFadeIn(enabled: animationsOn, delay: 0.20, offset: 12)
+                        
+                        if store.legacyMigrationSummary != nil || store.webImportSummary != nil {
+                            webMigrationCard
+                                .softFadeIn(enabled: animationsOn, delay: 0.22, offset: 12)
+                        }
+
                         helpCard
                             .softFadeIn(enabled: animationsOn, delay: 0.24, offset: 12)
                         purchaseCard
@@ -466,6 +474,11 @@ struct AppSettingsView: View {
             } message: {
                 Text("Möchtest du diese Gruppe wirklich verlassen?")
             }
+            .sheet(isPresented: $showWebMergeSheet) {
+                WebDataMergeSheet()
+                    .environmentObject(store)
+            }
+            .keyboardDismissToolbar()
         }
     }
 
@@ -1825,6 +1838,42 @@ struct AppSettingsView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(SoftTintButtonStyle(accent: .teal))
+                }
+            }
+        }
+    }
+
+    private var webMigrationCard: some View {
+        SettingsCard(
+            title: "Web-Version Daten",
+            subtitle: "Daten aus der Browser-Version abgleichen",
+            systemImage: "globe",
+            accent: .blue
+        ) {
+            SettingsSectionBox {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Falls du parallel die Web-Version genutzt hast, kannst du hier neue Noten oder Fächer in die App übernehmen.")
+                        .font(helperFont)
+                        .foregroundStyle(.secondary)
+                    
+                    Button {
+                        Task {
+                            await store.fetchWebDataAndDetectConflicts()
+                            showWebMergeSheet = true
+                        }
+                    } label: {
+                        HStack {
+                            if store.isWebReimportLoading {
+                                ProgressView().tint(.blue)
+                            } else {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                            }
+                            Text("Web-Daten abgleichen")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(SoftTintButtonStyle(accent: .blue))
+                    .disabled(store.isWebReimportLoading)
                 }
             }
         }
