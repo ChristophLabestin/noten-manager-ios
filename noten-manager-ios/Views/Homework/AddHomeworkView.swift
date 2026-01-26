@@ -171,7 +171,7 @@ struct AddHomeworkView: View {
 
                     // Visibility & Sharing
                     // Visibility & Sharing
-                    if !store.groupIds.isEmpty || !store.classIds.isEmpty || !store.courses.isEmpty {
+                    if !store.classIds.isEmpty || !store.courses.isEmpty {
                         // Filter courses relevant to the current subject
                         let availableCourses: [Course] = {
                             let targetIds = Set(store.targetCourseIds(forLocalSubject: subjectName))
@@ -234,14 +234,14 @@ struct AddHomeworkView: View {
                 applyInitialSubjectSelection()
                 // Initial update based on subject
                 updateSelectedGroupsForSubject(subjectName)
-                shareWithGroup = !selectedGroupIds.isEmpty
+                shareWithGroup = !selectedClassIds.isEmpty || !selectedCourseIds.isEmpty
             }
             .onChange(of: store.subjects) { _, _ in
                 applyInitialSubjectSelection()
             }
             .onChange(of: subjectName) { _, newSubject in
                 updateSelectedGroupsForSubject(newSubject)
-                if !selectedGroupIds.isEmpty {
+                if !selectedClassIds.isEmpty || !selectedCourseIds.isEmpty {
                     shareWithGroup = true
                 }
             }
@@ -274,27 +274,6 @@ struct AddHomeworkView: View {
                         reminderAt: reminder
                     )
                     createdAny = true
-                }
-                
-                // 2. Share to Groups (Legacy)
-                let targetGroups = Array(selectedGroupIds.union(selectedClassIds.flatMap { store.classDetails[$0]?.groupIds ?? [] }))
-                if !targetGroups.isEmpty {
-                    let sharedIds = try await store.addHomeworkToGroups(
-                        subjectName: subjectName,
-                        title: trimmedTitle,
-                        dueDate: due,
-                        reminderAt: reminder,
-                        targetGroupIds: targetGroups
-                    )
-                    
-                    if !sharedIds.isEmpty {
-                        createdAny = true
-                        if let reminder {
-                            for item in sharedIds {
-                                try await store.setUserReminderForSharedHomework(homeworkId: item.docId, reminderAt: reminder, groupId: item.groupId)
-                            }
-                        }
-                    }
                 }
                 
                 // Fallback
@@ -348,20 +327,12 @@ struct AddHomeworkView: View {
     }
     
     private func updateSelectedGroupsForSubject(_ subject: String) {
-        // 1. Remove previously auto-selected groups & courses
-        selectedGroupIds.subtract(autoSelectedGroupIds)
-        autoSelectedGroupIds.removeAll()
+        // 1. Remove previously auto-selected courses
         selectedCourseIds.subtract(autoSelectedCourseIds)
         autoSelectedCourseIds.removeAll()
         
         // 2. If subject is valid, find new matches
         if subject != noSubjectLabel && !subject.isEmpty {
-            let matchedGroups = Set(store.targetGroupIds(forLocalSubject: subject))
-            if !matchedGroups.isEmpty {
-                selectedGroupIds.formUnion(matchedGroups)
-                autoSelectedGroupIds = matchedGroups
-            }
-            
             let matchedCourses = Set(store.targetCourseIds(forLocalSubject: subject))
             if !matchedCourses.isEmpty {
                 selectedCourseIds.formUnion(matchedCourses)

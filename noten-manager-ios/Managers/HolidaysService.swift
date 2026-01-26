@@ -1,6 +1,6 @@
 import Foundation
 
-struct HolidayPeriod: Decodable {
+struct HolidayPeriod: Codable {
     let start: Date
     let end: Date
     let year: Int
@@ -60,7 +60,13 @@ final class HolidaysService {
 
     func fetchHolidays(year: Int) async -> [HolidayPeriod] {
         if let cached = holidaysCache[year] { return cached }
+        
+        if await MainActor.run(body: { OfflineModeManager.shared.isOfflineModeActive }) {
+            return []
+        }
+        
         guard let url = URL(string: "https://schulferien-api.de/api/v1/\(year)/BY") else { return [] }
+
         
         var request = URLRequest(url: url)
         request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
@@ -184,8 +190,14 @@ final class HolidaysService {
 
     func fetchPublicHolidays(year: Int) async -> [HolidayPeriod] {
         if let cached = feiertageCache[year] { return cached }
+        
+        if await MainActor.run(body: { OfflineModeManager.shared.isOfflineModeActive }) {
+            return []
+        }
+        
         // New API: https://feiertage-api.de/api/?jahr=2026
         guard let url = URL(string: "https://feiertage-api.de/api/?jahr=\(year)") else { return [] }
+
         
         var request = URLRequest(url: url)
         request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
@@ -226,5 +238,24 @@ final class HolidaysService {
             print("Error fetching public holidays for year \(year): \(error)")
             return []
         }
+    }
+
+    // MARK: - Cache Access for Offline Mode
+
+    func getHolidaysCache() -> [Int: [HolidayPeriod]] { holidaysCache }
+    func getFeiertageCache() -> [Int: [HolidayPeriod]] { feiertageCache }
+    func getPfingstferienCache() -> [Int: Date] { pfingstferienCache }
+    func getSummerEndCache() -> [Int: Date] { summerEndCache }
+
+    func restoreCaches(
+        holidays: [Int: [HolidayPeriod]],
+        feiertage: [Int: [HolidayPeriod]],
+        pfingstferien: [Int: Date],
+        summerEnd: [Int: Date]
+    ) {
+        self.holidaysCache = holidays
+        self.feiertageCache = feiertage
+        self.pfingstferienCache = pfingstferien
+        self.summerEndCache = summerEnd
     }
 }

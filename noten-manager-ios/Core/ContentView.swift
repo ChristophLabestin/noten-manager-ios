@@ -13,11 +13,15 @@ import LocalAuthentication
 enum DeeplinkDestination: Equatable {
     case examList
     case homeworkList
+    case notifications
+    case support
+    case launchMessage
 }
 
 @MainActor
 struct ContentView: View {
     @StateObject private var authManager = AuthManager()
+    @StateObject private var gradesStore = GradesStore()
     @StateObject private var biometricManager = BiometricAuthManager.shared
     @StateObject private var storeKitManager = StoreKitManager()
     @EnvironmentObject private var offlineManager: OfflineModeManager
@@ -45,18 +49,30 @@ struct ContentView: View {
             backgroundGradient
 
             Group {
-                if authManager.isAuthenticated || offlineManager.isOfflineModeActive {
+                if (authManager.isAuthenticated || offlineManager.isOfflineModeActive) && !authManager.isLoading {
                     if biometricRequired && !biometricUnlocked {
                         biometricLockScreen
+                    } else if (authManager.isNewRegistration || gradesStore.onboardingRequired || gradesStore.legacyMigrationSummary != nil) && !offlineManager.isOfflineModeActive {
+                        OnboardingFunnelView {
+                            authManager.isNewRegistration = false
+                        }
+                        .environmentObject(gradesStore)
+                        .environmentObject(authManager)
+                        .transition(.opacity)
                     } else {
                         MainView(onLogout: {
+                            gradesStore.stopListening()
                             authManager.signOut()
                         }, incomingHomeworkShare: $incomingHomeworkShare, incomingExamId: $incomingExamId, deeplinkDestination: $deeplinkDestination)
                         .environmentObject(authManager)
                         .environmentObject(offlineManager)
                         .environmentObject(biometricManager)
                         .environmentObject(storeKitManager)
+                        .environmentObject(storeKitManager)
+                        .environmentObject(gradesStore)
+                        .transition(.opacity)
                     }
+
                 } else {
                     NavigationStack {
                         Group {
@@ -71,7 +87,9 @@ struct ContentView: View {
                         .navigationBarHidden(true)
                     }
                     .environmentObject(biometricManager)
+                    .transition(.opacity)
                 }
+
             }
         }
         .onAppear {
@@ -91,6 +109,9 @@ struct ContentView: View {
         .onChange(of: authManager.isAuthenticated) { _, isAuth in
             if isAuth {
                 preAuthOnboardingCompleted = true
+            } else {
+                // Ensure store is reset on any logout
+                gradesStore.stopListening()
             }
             if isAuth && offlineManager.isOfflineModeActive && !offlineManager.isManualOfflinePinned {
                 offlineManager.deactivateOfflineMode()

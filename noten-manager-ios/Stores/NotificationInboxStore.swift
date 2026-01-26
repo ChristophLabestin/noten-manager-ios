@@ -7,6 +7,7 @@ struct NotificationInboxItem: Identifiable, Codable, Hashable, Sendable {
         case exam
         case homework
         case daily
+        case support
         case unknown
     }
 
@@ -19,6 +20,7 @@ struct NotificationInboxItem: Identifiable, Codable, Hashable, Sendable {
     let examIds: [String]?
     let homeworkId: String?
     let homeworkIds: [String]?
+    let ticketId: String?
     let groupId: String?
     let isRead: Bool
 
@@ -32,6 +34,7 @@ struct NotificationInboxItem: Identifiable, Codable, Hashable, Sendable {
         examIds: [String]? = nil,
         homeworkId: String?,
         homeworkIds: [String]? = nil,
+        ticketId: String? = nil,
         groupId: String?,
         isRead: Bool = false
     ) {
@@ -44,6 +47,7 @@ struct NotificationInboxItem: Identifiable, Codable, Hashable, Sendable {
         self.examIds = examIds
         self.homeworkId = homeworkId
         self.homeworkIds = homeworkIds
+        self.ticketId = ticketId
         self.groupId = groupId
         self.isRead = isRead
     }
@@ -58,6 +62,7 @@ struct NotificationInboxItem: Identifiable, Codable, Hashable, Sendable {
         case examIds
         case homeworkId
         case homeworkIds
+        case ticketId
         case groupId
         case isRead
     }
@@ -73,6 +78,7 @@ struct NotificationInboxItem: Identifiable, Codable, Hashable, Sendable {
         examIds = try container.decodeIfPresent([String].self, forKey: .examIds)
         homeworkId = try container.decodeIfPresent(String.self, forKey: .homeworkId)
         homeworkIds = try container.decodeIfPresent([String].self, forKey: .homeworkIds)
+        ticketId = try container.decodeIfPresent(String.self, forKey: .ticketId)
         groupId = try container.decodeIfPresent(String.self, forKey: .groupId)
         isRead = try container.decodeIfPresent(Bool.self, forKey: .isRead) ?? false
     }
@@ -88,6 +94,7 @@ struct NotificationInboxItem: Identifiable, Codable, Hashable, Sendable {
         try container.encodeIfPresent(examIds, forKey: .examIds)
         try container.encodeIfPresent(homeworkId, forKey: .homeworkId)
         try container.encodeIfPresent(homeworkIds, forKey: .homeworkIds)
+        try container.encodeIfPresent(ticketId, forKey: .ticketId)
         try container.encodeIfPresent(groupId, forKey: .groupId)
         try container.encode(isRead, forKey: .isRead)
     }
@@ -98,6 +105,7 @@ final class NotificationInboxStore: ObservableObject {
     static let shared = NotificationInboxStore()
 
     @Published private(set) var items: [NotificationInboxItem] = []
+    @Published private(set) var broadcasts: [BroadcastNotification] = []
 
     private let storageKey = "notification_inbox_items_v1"
 
@@ -113,6 +121,16 @@ final class NotificationInboxStore: ObservableObject {
             let notifications = await UNUserNotificationCenter.current().deliveredNotifications()
             let items = notifications.compactMap { NotificationInboxItem.from($0) }
             mergeDelivered(items)
+            await fetchBroadcasts()
+        }
+    }
+
+    func fetchBroadcasts() async {
+        do {
+            let fetched = try await FirestoreService.shared.getActiveBroadcastNotifications()
+            broadcasts = fetched
+        } catch {
+            print("Error fetching broadcasts: \(error)")
         }
     }
 
@@ -198,6 +216,7 @@ extension NotificationInboxItem {
         let explicitHomeworkId = (userInfo["homeworkId"] as? String) ?? extractHomeworkId(from: identifier)
         let homeworkIds = extractHomeworkIds(from: userInfo, fallback: explicitHomeworkId)
         let homeworkId = explicitHomeworkId ?? (homeworkIds.count == 1 ? homeworkIds.first : nil)
+        let ticketId = userInfo["ticketId"] as? String
         let groupId = userInfo["groupId"] as? String
 
         let title = content.title.isEmpty ? "Benachrichtigung" : content.title
@@ -213,6 +232,7 @@ extension NotificationInboxItem {
             examIds: examIds.isEmpty ? nil : examIds,
             homeworkId: homeworkId,
             homeworkIds: homeworkIds.isEmpty ? nil : homeworkIds,
+            ticketId: ticketId,
             groupId: groupId,
             isRead: markRead
         )
@@ -229,6 +249,7 @@ extension NotificationInboxItem {
             examIds: examIds,
             homeworkId: homeworkId,
             homeworkIds: homeworkIds,
+            ticketId: ticketId,
             groupId: groupId,
             isRead: isRead
         )
@@ -288,6 +309,7 @@ extension NotificationInboxItem.Kind {
         if identifier.hasPrefix("daily_reminder_") { return .daily }
         if userInfo["examId"] != nil { return .exam }
         if userInfo["homeworkId"] != nil { return .homework }
+        if userInfo["ticketId"] != nil { return .support }
         return .unknown
     }
 }

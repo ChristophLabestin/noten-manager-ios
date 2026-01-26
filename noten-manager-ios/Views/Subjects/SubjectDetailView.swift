@@ -180,20 +180,20 @@ struct SubjectDetailView: View {
     
     private func formatAverage(_ v: Double?) -> String {
         guard let v else { return "-" }
-        return String(format: "%.2f", v)
+        return String(format: "%.\(store.mssDecimalPrecision)f", v)
     }
     
     private func fobosoValueText(_ comp: HalfYearComputation, subject: Subject, halfYear: Int) -> String {
         // Always show a calculated grade value, never a range
         if let raw = comp.rawFinal {
-            return String(format: "%.2f", raw)
+            return String(format: "%.\(store.mssDecimalPrecision)f", raw)
         }
         if let final = comp.finalRounded {
             return "\(final)"
         }
         // Fall back to bestAvailableHalfYearValue for consistent display
         if let value = store.bestAvailableHalfYearValue(subject: subject, halfYear: halfYear) {
-            return String(format: "%.2f", value)
+            return String(format: "%.\(store.mssDecimalPrecision)f", value)
         }
         return "-"
     }
@@ -333,7 +333,7 @@ struct SubjectDetailView: View {
                     let half = (halfYear == .one) ? 1 : 2
                     // Always show the calculated grade value
                     if let value = store.bestAvailableHalfYearValue(subject: subject, halfYear: half) {
-                        StatChip(title: "\(half). Hj", value: String(format: "%.2f Punkte", value), accent: .teal)
+                        StatChip(title: "\(half). Hj", value: String(format: "%.\(store.mssDecimalPrecision)f Punkte", value), accent: .teal)
                     }
                 }
                 

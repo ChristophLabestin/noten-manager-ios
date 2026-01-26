@@ -49,8 +49,8 @@ struct HelpCenterLink: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .background(GradeCardStyle.surface(colorScheme: colorScheme, theme: store.theme, accent: accent))
-            .overlay(GradeCardStyle.border(colorScheme: colorScheme, accent: accent))
+            .background(GradeCardStyle.surface(colorScheme: colorScheme, theme: store.theme, accent: accent, cornerRadius: 16))
+            .overlay(GradeCardStyle.border(colorScheme: colorScheme, accent: accent, cornerRadius: 16))
             .shadow(
                 color: Color.black.opacity(colorScheme == .dark ? 0.40 : 0.06),
                 radius: 4,

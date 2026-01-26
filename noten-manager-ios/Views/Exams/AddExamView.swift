@@ -377,7 +377,7 @@ struct AddExamView: View {
 
                     // Visibility & Sharing
                     // Visibility & Sharing
-                    if !store.groupIds.isEmpty || !store.classIds.isEmpty || !store.courses.isEmpty {
+                    if !store.classIds.isEmpty || !store.courses.isEmpty {
                         // Filter courses relevant to the current subject
                         // For General Events, show ALL courses since there's no subject to filter by
                         let availableCourses: [Course] = {
@@ -469,7 +469,7 @@ struct AddExamView: View {
                 // Initial update based on subject
                 let initialSubject = isFachreferatEvent ? fachreferatSubjectName : subjectName
                 updateSelectedGroupsForSubject(initialSubject)
-                shareWithGroup = !selectedGroupIds.isEmpty
+                shareWithGroup = !selectedClassIds.isEmpty || !selectedCourseIds.isEmpty
                 
                 // Sync weight/type defaults for initial subject
                 syncWeightAndTypeForSubject(subjectName)
@@ -477,7 +477,7 @@ struct AddExamView: View {
             .onChange(of: subjectName) { _, newSubject in
                 if !isGeneralEvent && !isFachreferatEvent {
                     updateSelectedGroupsForSubject(newSubject)
-                    if !selectedGroupIds.isEmpty {
+                    if !selectedClassIds.isEmpty || !selectedCourseIds.isEmpty {
                         shareWithGroup = true
                     }
                     // Sync weight/type when subject changes
@@ -487,7 +487,7 @@ struct AddExamView: View {
             .onChange(of: fachreferatSubjectName) { _, newSubject in
                 if isFachreferatEvent {
                     updateSelectedGroupsForSubject(newSubject)
-                    if !selectedGroupIds.isEmpty {
+                    if !selectedClassIds.isEmpty || !selectedCourseIds.isEmpty {
                         shareWithGroup = true
                     }
                 }
@@ -619,34 +619,6 @@ struct AddExamView: View {
                     }
                 }
                 
-                // 3. Share to Legacy Groups (from selected groups + classes with groupIds)
-                let targetGroups = Array(selectedGroupIds.union(selectedClassIds.flatMap { store.classDetails[$0]?.groupIds ?? [] }))
-                if !targetGroups.isEmpty {
-                    let sharedIds = try await store.addExamToGroups(
-                        subjectName: effectiveSubject,
-                        subjectKey: relatedSubject,
-                        title: trimmedTitle,
-                        notes: storedNotes,
-                        date: examDate,
-                        hasTime: hasTime,
-                        weight: weightToStore,
-                        customWeight: customWeight,
-                        assessmentType: allowWeights && !useCustomWeight ? examAssessmentType : nil,
-                        reminderAt: reminder,
-                        requiresGrade: requiresGrade,
-                        targetGroupIds: targetGroups
-                    )
-                    
-                    if !sharedIds.isEmpty {
-                        createdAny = true
-                        if let reminder {
-                            for item in sharedIds {
-                                try await store.setUserReminderForSharedExam(examId: item.docId, reminderAt: reminder, groupId: item.groupId)
-                            }
-                        }
-                    }
-                }
-                
                 // Fallback if nothing shared
                 if !createdAny {
                     try await store.addExamToFirestore(
@@ -687,20 +659,12 @@ struct AddExamView: View {
     }
     
     private func updateSelectedGroupsForSubject(_ subject: String) {
-        // 1. Remove previously auto-selected groups & courses
-        selectedGroupIds.subtract(autoSelectedGroupIds)
-        autoSelectedGroupIds.removeAll()
+        // 1. Remove previously auto-selected courses
         selectedCourseIds.subtract(autoSelectedCourseIds)
         autoSelectedCourseIds.removeAll()
         
         // 2. If subject is valid, find new matches
         if !subject.isEmpty {
-            let matchedGroups = Set(store.targetGroupIds(forLocalSubject: subject))
-            if !matchedGroups.isEmpty {
-                selectedGroupIds.formUnion(matchedGroups)
-                autoSelectedGroupIds = matchedGroups
-            }
-            
             let matchedCourses = Set(store.targetCourseIds(forLocalSubject: subject))
             if !matchedCourses.isEmpty {
                 selectedCourseIds.formUnion(matchedCourses)

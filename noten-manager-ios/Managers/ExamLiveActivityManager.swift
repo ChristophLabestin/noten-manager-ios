@@ -1,4 +1,5 @@
 import Foundation
+import os.log
 
 #if canImport(ActivityKit)
 @preconcurrency import ActivityKit
@@ -48,7 +49,8 @@ enum ExamLiveActivityManager {
                 activityMap[activity.attributes.examId] = nil
                 continue
             }
-            if exam.date <= now || exam.date.timeIntervalSince(now) > leadTime {
+            // Be slightly more permissive (95 mins) to match BackgroundRefreshManager scheduling logic.
+            if exam.date <= now || exam.date.timeIntervalSince(now) > (leadTime + 300) {
                 cancelAutoEnd(for: activity.id)
                 cancelPushTokenTask(for: activity.id)
                 await end(activity)
@@ -59,7 +61,7 @@ enum ExamLiveActivityManager {
             await activity.update(content)
         }
 
-        for exam in relevant where exam.date > now && exam.date.timeIntervalSince(now) <= leadTime {
+        for exam in relevant where exam.date > now && exam.date.timeIntervalSince(now) <= (leadTime + 300) {
             if activityMap[exam.id] != nil { continue }
             await start(for: exam)
         }
@@ -75,7 +77,8 @@ enum ExamLiveActivityManager {
             accent: currentAccentTheme()
         )
         let (content, alert) = activityContent(for: exam, existing: nil, includeAlert: true)
-        if let activity = try? Activity.request(attributes: attributes, content: content, pushType: .token) {
+        do {
+            let activity = try Activity.request(attributes: attributes, content: content, pushType: .token)
             if let alert, #available(iOS 17.0, *) {
                 await activity.update(content, alertConfiguration: alert)
             }
@@ -84,16 +87,33 @@ enum ExamLiveActivityManager {
             await notifyStartIfNeeded(for: exam)
             await triggerHaptic()
             return
+        } catch {
+            os_log(
+                "Failed to start Live Activity (push): id=%{public}@ error=%{public}@",
+                log: OSLog(subsystem: "de.christophlabestin.noten-manager-ios", category: "LiveActivity"),
+                type: .error,
+                exam.id,
+                String(describing: error)
+            )
         }
 
         // Fallback: falls Push-Token-Flow scheitert (kein APNs-Key/Entitlement), trotzdem lokal starten.
-        if let activity = try? Activity.request(attributes: attributes, content: content, pushType: nil) {
+        do {
+            let activity = try Activity.request(attributes: attributes, content: content, pushType: nil)
             if let alert, #available(iOS 17.0, *) {
                 await activity.update(content, alertConfiguration: alert)
             }
             scheduleAutoEnd(for: activity, at: exam.date)
             await notifyStartIfNeeded(for: exam)
             await triggerHaptic()
+        } catch {
+            os_log(
+                "Failed to start Live Activity (local fallback): id=%{public}@ error=%{public}@",
+                log: OSLog(subsystem: "de.christophlabestin.noten-manager-ios", category: "LiveActivity"),
+                type: .error,
+                exam.id,
+                String(describing: error)
+            )
         }
     }
 

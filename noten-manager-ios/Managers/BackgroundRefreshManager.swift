@@ -221,37 +221,123 @@ enum BackgroundRefreshManager {
 
     @available(iOS 13.0, *)
     private static func scheduleAppRefresh(for exams: [Exam]?) {
+        guard UIApplication.shared.backgroundRefreshStatus == .available else {
+            os_log(
+                "Background App Refresh is disabled/restricted. Skipping scheduleAppRefresh.",
+                log: makeLog(),
+                type: .default
+            )
+            return
+        }
+
         let request = BGAppRefreshTaskRequest(identifier: refreshTaskId)
         if #available(iOS 16.2, *), let next = nextLiveActivityStart(from: exams) {
             request.earliestBeginDate = max(Date(), next.addingTimeInterval(-120))
         } else {
             request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60)
         }
+
+        os_log(
+            "Attempting to submit BGAppRefreshTaskRequest: id=%{public}@, earliestBeginDate=%{public}@",
+            log: makeLog(),
+            type: .info,
+            refreshTaskId,
+            String(describing: request.earliestBeginDate)
+        )
+
         do {
             try BGTaskScheduler.shared.submit(request)
+            os_log(
+                "Successfully scheduled app refresh: %{public}@",
+                log: makeLog(),
+                type: .info,
+                refreshTaskId
+            )
         } catch {
+            let errorCode = (error as NSError).code
+            os_log(
+                "BGTaskScheduler error while scheduling app refresh: id=%{public}@, code=%ld, description=%{public}@",
+                log: makeLog(),
+                type: .error,
+                refreshTaskId,
+                errorCode,
+                error.localizedDescription
+            )
             Task { @MainActor in
                 ErrorLoggingService.logErrorIfEnabled(error)
             }
-            // optional logging
+        } catch {
+            os_log(
+                "Generic error while scheduling app refresh: id=%{public}@, error=%{public}@",
+                log: makeLog(),
+                type: .error,
+                refreshTaskId,
+                error.localizedDescription
+            )
+            Task { @MainActor in
+                ErrorLoggingService.logErrorIfEnabled(error)
+            }
         }
     }
 
     @available(iOS 13.0, *)
     private static func scheduleProcessing(for exams: [Exam]?) {
+        guard UIApplication.shared.backgroundRefreshStatus == .available else {
+            os_log(
+                "Background App Refresh is disabled/restricted. Skipping scheduleProcessing.",
+                log: makeLog(),
+                type: .default
+            )
+            return
+        }
+
         let request = BGProcessingTaskRequest(identifier: liveActivityTaskId)
         request.requiresNetworkConnectivity = false
         request.requiresExternalPower = false
         if #available(iOS 16.2, *), let next = nextLiveActivityStart(from: exams) {
             request.earliestBeginDate = max(Date(), next.addingTimeInterval(-120))
         }
+
+        os_log(
+            "Attempting to submit BGProcessingTaskRequest: id=%{public}@, earliestBeginDate=%{public}@",
+            log: makeLog(),
+            type: .info,
+            liveActivityTaskId,
+            String(describing: request.earliestBeginDate)
+        )
+
         do {
             try BGTaskScheduler.shared.submit(request)
+            os_log(
+                "Successfully scheduled processing task: %{public}@",
+                log: makeLog(),
+                type: .info,
+                liveActivityTaskId
+            )
         } catch {
+            let errorCode = (error as NSError).code
+            os_log(
+                "BGTaskScheduler error while scheduling processing task: id=%{public}@, code=%ld, description=%{public}@",
+                log: makeLog(),
+                type: .error,
+                liveActivityTaskId,
+                errorCode,
+                error.localizedDescription
+            )
             Task { @MainActor in
                 ErrorLoggingService.logErrorIfEnabled(error)
             }
-            // optional logging
+        } catch {
+            os_log(
+                "Generic error while scheduling processing task: id=%{public}@, error=%{public}@",
+                log: makeLog(),
+                type: .error,
+                liveActivityTaskId,
+                error.localizedDescription
+            )
+            Task { @MainActor in
+                ErrorLoggingService.logErrorIfEnabled(error)
+            }
         }
     }
 
@@ -279,7 +365,9 @@ enum BackgroundRefreshManager {
         let upcoming = allSnapshotExams.filter { exam in
             guard exam.hasTime, !exam.isCompleted else { return false }
             let delta = exam.date.timeIntervalSince(now)
-            return delta > 0 && delta <= liveActivityLeadTime
+            // Use 95 minutes window to account for the ~2 minute scheduling buffer.
+            // This ensures that if the background task fires at 92 minutes, it will still start the activity.
+            return delta > 0 && delta <= (liveActivityLeadTime + 300)
         }
         guard !Task.isCancelled else { return false }
         await syncLiveActivitiesOnMain(for: upcoming)

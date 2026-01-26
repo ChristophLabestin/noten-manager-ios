@@ -5,11 +5,12 @@ struct SubjectMappingView: View {
     @EnvironmentObject var store: GradesStore
     
     let classId: String
-    let missingCourses: [Course]
+    let courses: [Course]
     
     @State private var mappings: [String: String] = [:] // courseId -> selectedSubjectName (or "CREATE")
     @State private var createdSubjectNames: [String: String] = [:] // courseId -> newName
     @State private var matchConfidences: [String: Double] = [:] // courseId -> confidence
+    @State private var excludedIds: Set<String> = [] // courseIds that should NOT be linked
     
     @State private var isSaving: Bool = false
     @State private var errorMessage: String?
@@ -41,7 +42,7 @@ struct SubjectMappingView: View {
                     
                     // Course mapping cards
                     VStack(spacing: 16) {
-                        ForEach(missingCourses) { course in
+                        ForEach(courses) { course in
                             MappingCard(
                                 course: course,
                                 existingSubjects: store.subjects,
@@ -52,6 +53,13 @@ struct SubjectMappingView: View {
                                 newName: Binding(
                                     get: { createdSubjectNames[course.id] ?? course.name },
                                     set: { createdSubjectNames[course.id] = $0 }
+                                ),
+                                isIncluded: Binding(
+                                    get: { !excludedIds.contains(course.id) },
+                                    set: { included in
+                                        if included { excludedIds.remove(course.id) }
+                                        else { excludedIds.insert(course.id) }
+                                    }
                                 ),
                                 confidence: matchConfidences[course.id]
                             )
@@ -150,15 +158,25 @@ struct SubjectMappingView: View {
     private func autoPopulateSuggestions() {
         guard !didAutoPopulate else { return }
         
-        for course in missingCourses {
+        for course in courses {
+            // 1. Check if already mapped
+            if let existingMapping = store.courseMappings[course.id] {
+                mappings[course.id] = existingMapping
+                // Determine if we should treat it as a perfect match confidence-wise for UI
+                if store.subjects.contains(where: { $0.name == existingMapping }) {
+                    matchConfidences[course.id] = 1.0
+                }
+                continue // It's mapped, so we don't need to suggest
+            }
+            
+            // 2. Suggest Match
             if let match = store.suggestSubjectMatch(for: course) {
-                // Pre-select the suggested subject
                 mappings[course.id] = match.subject.name
                 matchConfidences[course.id] = match.confidence
             } else {
-                // No match - offer to create
+                // 3. No match - offer to create
                 mappings[course.id] = "CREATE"
-                createdSubjectNames[course.id] = course.name
+                createdSubjectNames[course.id] = course.name.trimmingCharacters(in: .whitespacesAndNewlines)
             }
         }
         
@@ -171,11 +189,21 @@ struct SubjectMappingView: View {
         errorMessage = nil
         
         do {
-            for course in missingCourses {
+            for course in courses {
+                // If user chose NOT to link this course
+                if excludedIds.contains(course.id) {
+                    // Try to delete any existing mapping to be safe
+                    try? await store.deleteCourseMapping(courseId: course.id)
+                    continue
+                }
+                
                 let selection = mappings[course.id] ?? "CREATE"
                 
                 if selection == "CREATE" {
-                    let name = createdSubjectNames[course.id] ?? course.name
+                    let rawName = createdSubjectNames[course.id] ?? course.name
+                    let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !name.isEmpty else { continue }
+                    
                     // Double check if subject exists now (maybe created in previous loop iteration?)
                     if store.subjects.contains(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) {
                         // Just map it
@@ -211,6 +239,7 @@ private struct MappingCard: View {
     let existingSubjects: [Subject]
     @Binding var selection: String
     @Binding var newName: String
+    @Binding var isIncluded: Bool
     let confidence: Double?
     
     private var isMatched: Bool {
@@ -219,13 +248,9 @@ private struct MappingCard: View {
     
     private var confidenceLabel: String? {
         guard let conf = confidence, isMatched else { return nil }
-        if conf >= 0.9 {
-            return "Perfekte Übereinstimmung"
-        } else if conf >= 0.7 {
-            return "Gute Übereinstimmung"
-        } else {
-            return "Mögliche Übereinstimmung"
-        }
+        if conf >= 0.9 { return "Perfekte Übereinstimmung" }
+        else if conf >= 0.7 { return "Gute Übereinstimmung" }
+        else { return "Mögliche Übereinstimmung" }
     }
     
     private var confidenceColor: Color {
@@ -237,54 +262,79 @@ private struct MappingCard: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Header with course name
-            HStack {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(isMatched ? Color.green.opacity(0.1) : Color.orange.opacity(0.1))
-                        .frame(width: 36, height: 36)
-                    Image(systemName: isMatched ? "checkmark.circle.fill" : "plus.circle.fill")
-                        .foregroundStyle(isMatched ? .green : .orange)
+            // Header with checkbox and course name
+            HStack(spacing: 12) {
+                // Checkbox
+                Button {
+                   withAnimation { isIncluded.toggle() }
+                } label: {
+                    Image(systemName: isIncluded ? "checkmark.square.fill" : "square")
+                        .font(.title2)
+                        .foregroundStyle(isIncluded ? .indigo : .secondary)
                 }
+                .buttonStyle(.plain)
                 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(course.name)
                         .font(.headline)
+                        .foregroundStyle(isIncluded ? .primary : .secondary)
+                        .strikethrough(!isIncluded)
                     
-                    if let label = confidenceLabel {
+                    if isIncluded, let label = confidenceLabel {
                         Text(label)
                             .font(.caption)
                             .foregroundStyle(confidenceColor)
+                    } else if !isIncluded {
+                        Text("Wird nicht verknüpft")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 
                 Spacer()
+                
+                if isIncluded {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(isMatched ? Color.green.opacity(0.1) : Color.orange.opacity(0.1))
+                            .frame(width: 32, height: 32)
+                        Image(systemName: isMatched ? "checkmark" : "plus")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(isMatched ? .green : .orange)
+                    }
+                }
             }
             
-            // Picker for action
-            Picker("Aktion", selection: $selection) {
-                if isMatched {
-                    // Show matched option first
-                    Text("→ \(selection)").tag(selection)
-                    Divider()
-                }
-                Text("Neu erstellen").tag("CREATE")
+            if isIncluded {
                 Divider()
-                ForEach(existingSubjects.filter { $0.name != selection }) { subject in
-                    Text(subject.name).tag(subject.name)
+                
+                // Picker for action
+                Picker("Aktion", selection: $selection) {
+                    if isMatched {
+                        // Show matched option first
+                        Text("→ \(selection)").tag(selection)
+                        Divider()
+                    }
+                    Text("Neu erstellen").tag("CREATE")
+                    Divider()
+                    ForEach(existingSubjects.filter { $0.name != selection }) { subject in
+                        Text(subject.name).tag(subject.name)
+                    }
                 }
-            }
-            .pickerStyle(.menu)
-            .tint(.primary)
-            .padding(8)
-            .background(Color.formInputBackground)
-            .cornerRadius(8)
-            
-            // Text field for new subject name
-            if selection == "CREATE" {
-                TextField("Fachname", text: $newName)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .padding(.leading, 4)
+                .pickerStyle(.menu)
+                .tint(.primary)
+                .labelsHidden()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8)
+                .background(Color.formInputBackground)
+                .cornerRadius(8)
+                
+                // Text field for new subject name
+                if selection == "CREATE" {
+                    TextField("Fachname", text: $newName)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        //.padding(.leading, 4)
+                }
             }
         }
         .padding()
@@ -292,8 +342,9 @@ private struct MappingCard: View {
         .cornerRadius(12)
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(isMatched ? Color.green.opacity(0.3) : Color.clear, lineWidth: 1)
+                .stroke(isIncluded && isMatched ? Color.green.opacity(0.3) : Color.clear, lineWidth: 1)
         )
+        .opacity(isIncluded ? 1.0 : 0.6)
         .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
 }

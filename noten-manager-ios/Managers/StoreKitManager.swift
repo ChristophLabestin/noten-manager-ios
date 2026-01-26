@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import StoreKit
+import FirebaseAuth
 
 @MainActor
 final class StoreKitManager: ObservableObject {
@@ -121,6 +122,9 @@ final class StoreKitManager: ObservableObject {
                     let transaction = try checkVerified(verification)
                     await transaction.finish()
                     setPurchased(true)
+                    if let uid = Auth.auth().currentUser?.uid {
+                        await FirestoreService.shared.updateUserPurchaseMetadata(uid: uid, type: "lifetime", tier: nil)
+                    }
                     return .success
                 } catch {
                     return .failed(.verificationFailed)
@@ -159,6 +163,10 @@ final class StoreKitManager: ObservableObject {
                     let transaction = try checkVerified(verification)
                     await transaction.finish()
                     setSubscriptionActive(true)
+                    if let uid = Auth.auth().currentUser?.uid {
+                        let tier = productId == subscriptionProductId ? "yearly" : "monthly"
+                        await FirestoreService.shared.updateUserPurchaseMetadata(uid: uid, type: "subscription", tier: tier)
+                    }
                     return .success
                 } catch {
                     return .failed(.verificationFailed)

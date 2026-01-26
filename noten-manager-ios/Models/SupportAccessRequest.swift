@@ -2,7 +2,7 @@
 import Foundation
 
 /// Model representing a user's request for admin support access to their data.
-struct SupportAccessRequest: Identifiable, Codable {
+struct SupportAccessRequest: Identifiable, Codable, Hashable {
     let id: String
     let message: String           // User's problem description
     let createdAt: Date

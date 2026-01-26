@@ -182,6 +182,7 @@ struct SettingsCard<Content: View, Trailing: View>: View {
     let subtitle: String?
     let systemImage: String?
     let accent: Color
+    let multiline: Bool
     var isExpanded: Binding<Bool>?
     @ViewBuilder let content: Content
     @ViewBuilder let trailing: Trailing
@@ -191,6 +192,7 @@ struct SettingsCard<Content: View, Trailing: View>: View {
         subtitle: String?,
         systemImage: String? = nil,
         accent: Color = .accentColor,
+        multiline: Bool = false,
         isExpanded: Binding<Bool>? = nil,
         @ViewBuilder trailing: () -> Trailing,
         @ViewBuilder content: () -> Content
@@ -199,6 +201,7 @@ struct SettingsCard<Content: View, Trailing: View>: View {
         self.subtitle = subtitle
         self.systemImage = systemImage
         self.accent = accent
+        self.multiline = multiline
         self.isExpanded = isExpanded
         self.trailing = trailing()
         self.content = content()
@@ -257,14 +260,16 @@ struct SettingsCard<Content: View, Trailing: View>: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.title3.weight(.bold))
-                    .lineLimit(1)
+                    .lineLimit(multiline ? nil : 1)
                     .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let subtitle, !subtitle.isEmpty {
                     Text(subtitle)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .lineLimit(multiline ? nil : 1)
                         .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             Spacer()
@@ -306,7 +311,7 @@ struct SettingsCard<Content: View, Trailing: View>: View {
                         colors: [baseTop, baseBottom],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
-                    )
+                        )
                 )
             
             cardBorder
@@ -325,6 +330,7 @@ extension SettingsCard where Trailing == EmptyView {
         subtitle: String?,
         systemImage: String? = nil,
         accent: Color = .accentColor,
+        multiline: Bool = false,
         isExpanded: Binding<Bool>? = nil,
         @ViewBuilder content: () -> Content
     ) {
@@ -333,6 +339,7 @@ extension SettingsCard where Trailing == EmptyView {
             subtitle: subtitle,
             systemImage: systemImage,
             accent: accent,
+            multiline: multiline,
             isExpanded: isExpanded,
             trailing: { EmptyView() },
             content: content
@@ -364,12 +371,13 @@ struct ToolbarIcon: View {
     let symbol: String
     let showDot: Bool
     var dotOffset: CGSize = CGSize(width: 2, height: 0)
+    var color: Color = .primary
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
             Image(systemName: symbol)
                 .font(.callout.weight(.semibold))
-                .foregroundStyle(Color.primary)
+                .foregroundStyle(color)
                 .padding(4)
             if showDot {
                 Circle()
@@ -717,7 +725,7 @@ struct ThemedBackground: View {
 // MARK: - Shared Grade Card Styles
 
 struct GradeCardStyle {
-    static func surface(colorScheme: ColorScheme, theme: String, accent: Color) -> some View {
+    static func surface(colorScheme: ColorScheme, theme: String, accent: Color, cornerRadius: CGFloat = 22) -> some View {
         let baseTop = (colorScheme == .dark)
             ? (theme == "feminine" ? Color(hex: "#1b1022") : Color(hex: "#0b1220"))
             : (theme == "feminine" ? Color(hex: "#fff1f7") : Color(hex: "#eef2ff"))
@@ -726,7 +734,7 @@ struct GradeCardStyle {
             ? (theme == "feminine" ? Color(hex: "#120a16") : Color(hex: "#111827"))
             : (theme == "feminine" ? Color(hex: "#fff7fb") : Color(hex: "#f8fafc"))
             
-        return RoundedRectangle(cornerRadius: 22, style: .continuous)
+        return RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
             .fill(
                 LinearGradient(
                     colors: [baseTop, baseBottom],
@@ -735,7 +743,7 @@ struct GradeCardStyle {
                 )
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(
                         LinearGradient(
                             colors: [
@@ -749,8 +757,8 @@ struct GradeCardStyle {
             )
     }
 
-    static func border(colorScheme: ColorScheme, accent: Color) -> some View {
-        RoundedRectangle(cornerRadius: 22, style: .continuous)
+    static func border(colorScheme: ColorScheme, accent: Color, cornerRadius: CGFloat = 22) -> some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
             .stroke(borderStrokeColor(colorScheme: colorScheme, accent: accent), lineWidth: 1)
     }
 

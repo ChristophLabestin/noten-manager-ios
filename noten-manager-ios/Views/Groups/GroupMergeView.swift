@@ -7,7 +7,9 @@ struct GroupMergeView: View {
     
     @State private var className: String = ""
     @State private var selectedGroups: Set<String> = []
-    @State private var branchNames: [String: String] = [:] // groupId -> branchName
+    @State private var branchNames: [String: String] = [:] // groupId -> branchName/targetName
+    @State private var isWahlpflicht: [String: Bool] = [:] // groupId -> true if Wahlpflicht
+    @State private var hasSchulaufgabe: [String: Bool] = [:] // groupId -> true if has Schulaufgaben
     @State private var isMerging: Bool = false
     @State private var errorMessage: String?
     
@@ -39,7 +41,7 @@ struct GroupMergeView: View {
                         Text("Gruppen zusammenführen")
                             .font(.title3.weight(.bold))
                         
-                        Text("Wähle mehrere Gruppen aus, um sie zu einer Klasse mit Zweigen zusammenzuführen.")
+                        Text("Wähle mehrere Gruppen aus, um sie zu einer Klasse zusammenzuführen.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
@@ -73,9 +75,9 @@ struct GroupMergeView: View {
                     ) {
                         if availableGroups.isEmpty {
                             Text("Keine unabhängigen Gruppen verfügbar.")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .padding()
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .padding()
                         } else {
                             VStack(spacing: 0) {
                                 ForEach(Array(availableGroups.enumerated()), id: \.element) { index, groupId in
@@ -84,17 +86,29 @@ struct GroupMergeView: View {
                                         groupName: store.groupNames[groupId] ?? "Unbenannt",
                                         isSelected: selectedGroups.contains(groupId),
                                         branchName: branchNames[groupId] ?? store.groupNames[groupId] ?? "",
+                                        isWahlpflicht: isWahlpflicht[groupId] ?? false,
+                                        hasSA: hasSchulaufgabe[groupId] ?? true,
                                         onToggle: {
                                             if selectedGroups.contains(groupId) {
                                                 selectedGroups.remove(groupId)
                                                 branchNames.removeValue(forKey: groupId)
+                                                isWahlpflicht.removeValue(forKey: groupId)
+                                                hasSchulaufgabe.removeValue(forKey: groupId)
                                             } else {
                                                 selectedGroups.insert(groupId)
                                                 branchNames[groupId] = store.groupNames[groupId] ?? ""
+                                                isWahlpflicht[groupId] = false // Default to Branch
+                                                hasSchulaufgabe[groupId] = true // Default to with SA
                                             }
                                         },
                                         onBranchNameChange: { newName in
                                             branchNames[groupId] = newName
+                                        },
+                                        onTypeToggle: { isWP in
+                                            isWahlpflicht[groupId] = isWP
+                                        },
+                                        onSAToggle: { hasSA in
+                                            hasSchulaufgabe[groupId] = hasSA
                                         }
                                     )
                                     
@@ -154,7 +168,12 @@ struct GroupMergeView: View {
         errorMessage = nil
         
         let groups = selectedGroups.map { gid in
-            (groupId: gid, branchName: branchNames[gid] ?? store.groupNames[gid] ?? "Unbenannt")
+            (
+                groupId: gid,
+                targetName: branchNames[gid] ?? store.groupNames[gid] ?? "Unbenannt",
+                isWahlpflicht: isWahlpflicht[gid] ?? false,
+                hasSchulaufgabe: hasSchulaufgabe[gid] ?? true
+            )
         }
         
         do {
@@ -179,8 +198,12 @@ private struct GroupSelectionRow: View {
     let groupName: String
     let isSelected: Bool
     var branchName: String
+    var isWahlpflicht: Bool
+    var hasSA: Bool
     let onToggle: () -> Void
     let onBranchNameChange: (String) -> Void
+    let onTypeToggle: (Bool) -> Void
+    let onSAToggle: (Bool) -> Void
     
     @State private var localBranchName: String = ""
     
@@ -190,28 +213,55 @@ private struct GroupSelectionRow: View {
                 Button(action: onToggle) {
                     Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                         .font(.title2)
-                        .foregroundStyle(isSelected ? .green : .secondary.opacity(0.5))
+                        .foregroundStyle(isSelected ? (isWahlpflicht ? .orange : .green) : .secondary.opacity(0.5))
                 }
                 .buttonStyle(.plain)
                 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(groupName)
                         .font(.subheadline.weight(.semibold))
-                    Text("Gruppe")
+                    Text("Legacy Gruppe")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
                 
                 Spacer()
+                
+                if isSelected {
+                    HStack(spacing: 4) {
+                        Picker("Typ", selection: Binding(
+                            get: { isWahlpflicht },
+                            set: { onTypeToggle($0) }
+                        )) {
+                            Text("Zweig").tag(false)
+                            Text("Wahlpflicht").tag(true)
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(width: 140)
+                        .labelsHidden()
+                        
+                        Button {
+                            onSAToggle(!hasSA)
+                        } label: {
+                            Text("SA")
+                                .font(.system(size: 10, weight: .bold))
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 2)
+                                .background(hasSA ? Color.indigo : Color.secondary.opacity(0.2))
+                                .foregroundStyle(hasSA ? .white : .secondary)
+                                .cornerRadius(4)
+                        }
+                    }
+                }
             }
             
             if isSelected {
                 HStack {
-                    Text("Zweig-Name:")
+                    Text(isWahlpflicht ? "WP-Name:" : "Zweig-Name:")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     
-                    TextField("Zweig", text: $localBranchName)
+                    TextField("Name", text: $localBranchName)
                         .font(.subheadline)
                         .padding(8)
                         .background(Color.formInputBackground)

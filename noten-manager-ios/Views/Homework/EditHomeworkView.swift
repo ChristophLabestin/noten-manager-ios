@@ -252,7 +252,7 @@ struct EditHomeworkView: View {
                         }
                     }
 
-                    if !homework.isShared && (!store.groupIds.isEmpty || !store.classIds.isEmpty || !store.courses.isEmpty) {
+                    if !homework.isShared && (!store.classIds.isEmpty || !store.courses.isEmpty) {
                         let availableCourses: [Course] = {
                             let targetIds = Set(store.targetCourseIds(forLocalSubject: subjectName))
                             let matches = store.courses.filter { targetIds.contains($0.id) }
@@ -277,12 +277,12 @@ struct EditHomeworkView: View {
                                     if isSharing {
                                         ProgressView()
                                     } else {
-                                        Text("In Gruppe teilen")
+                                        Text("Teilen")
                                             .frame(maxWidth: .infinity)
                                     }
                                 }
                                 .buttonStyle(SoftTintButtonStyle(accent: .blue))
-                                .disabled(isSharing || (selectedGroupIds.isEmpty && selectedClassIds.isEmpty && selectedCourseIds.isEmpty))
+                                .disabled(isSharing || (selectedClassIds.isEmpty && selectedCourseIds.isEmpty))
                             }
                             .padding(.top, -8)
                         }
@@ -401,7 +401,11 @@ struct EditHomeworkView: View {
                     loadedNote = true
                 }
                 updateSelectedGroupsForSubject(subjectName)
-                shareWithGroup = !selectedGroupIds.isEmpty && !homework.isShared
+                if homework.groupId != nil {
+                    shareWithGroup = true
+                } else {
+                    shareWithGroup = (!selectedClassIds.isEmpty || !selectedCourseIds.isEmpty) && !homework.isShared
+                }
             }
             .onChange(of: subjectName) { _, newSubject in
                 updateSelectedGroupsForSubject(newSubject)
@@ -486,16 +490,6 @@ struct EditHomeworkView: View {
             }
         }
         
-        // 2. Share to Groups (Legacy + Social)
-        let targetGroups = Array(selectedGroupIds.union(selectedClassIds.flatMap { store.classDetails[$0]?.groupIds ?? [] }))
-        if !targetGroups.isEmpty {
-            let success = await store.shareHomeworkToGroups(
-                homeworkId: homework.id,
-                targetGroupIds: targetGroups
-            )
-            if success { createdAny = true }
-        }
-        
         await MainActor.run {
             isSharing = false
             if createdAny {
@@ -542,20 +536,12 @@ struct EditHomeworkView: View {
     }
 
     private func updateSelectedGroupsForSubject(_ subject: String) {
-        // 1. Remove previously auto-selected groups & courses
-        selectedGroupIds.subtract(autoSelectedGroupIds)
-        autoSelectedGroupIds.removeAll()
+        // 1. Remove previously auto-selected courses
         selectedCourseIds.subtract(autoSelectedCourseIds)
         autoSelectedCourseIds.removeAll()
         
         // 2. If subject is valid, find new matches
         if subject != noSubjectLabel && !subject.isEmpty {
-            let matchedGroups = Set(store.targetGroupIds(forLocalSubject: subject))
-            if !matchedGroups.isEmpty {
-                selectedGroupIds.formUnion(matchedGroups)
-                autoSelectedGroupIds = matchedGroups
-            }
-            
             let matchedCourses = Set(store.targetCourseIds(forLocalSubject: subject))
             if !matchedCourses.isEmpty {
                 selectedCourseIds.formUnion(matchedCourses)

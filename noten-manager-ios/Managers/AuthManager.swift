@@ -5,6 +5,8 @@ import FirebaseCore
 import GoogleSignIn
 import AuthenticationServices
 import CryptoKit
+import SwiftUI
+
 
 enum SignInResult {
     case success
@@ -17,6 +19,7 @@ final class AuthManager: ObservableObject {
     @Published var isAuthenticated: Bool = false
     @Published var isLoading: Bool = false
     @Published var errorMessage: String?
+    @Published var isNewRegistration: Bool = false
 
     var currentUser: User? {
         Auth.auth().currentUser
@@ -34,10 +37,17 @@ final class AuthManager: ObservableObject {
     func startListeningAuthState() {
         if authHandle != nil { return }
         authHandle = Auth.auth().addStateDidChangeListener { [weak self] _, user in
-            self?.isAuthenticated = (user != nil)
+            withAnimation {
+                self?.isAuthenticated = (user != nil)
+            }
             if let uid = user?.uid, OfflineModeManager.shared.isOnline {
                 OfflineModeManager.shared.recordOnlineLogin(uid: uid)
             }
+            if user != nil {
+                FcmTokenManager.syncCachedTokenIfPossible()
+                FcmTokenManager.refreshAndSyncCurrentToken()
+            }
+
         }
     }
 
@@ -54,7 +64,12 @@ final class AuthManager: ObservableObject {
         do {
             let result = try await Auth.auth().signIn(withEmail: email, password: password)
             OfflineModeManager.shared.recordOnlineLogin(uid: result.user.uid)
-            await MainActor.run { self.isLoading = false }
+            await MainActor.run {
+                withAnimation {
+                    self.isLoading = false
+                }
+            }
+
             return .success
         } catch {
             var outcome: SignInResult = .failure
@@ -81,11 +96,19 @@ final class AuthManager: ObservableObject {
             let uid = result.user.uid
 
             let saltB64 = CryptoService.generateSalt(length: 16)
-            let profile = UserProfile(id: uid, name: name, email: email, encryptionSalt: saltB64, activeClassId: nil, subscribedCourseIds: nil)
+            var profile = UserProfile(id: uid, name: name, email: email, encryptionSalt: saltB64)
+            profile.registeredInVersion = "1.3"
+            profile.registrationPlatform = "ios"
             try await FirestoreService.shared.setUserProfile(profile: profile, onboardingCompleted: false)
             OfflineModeManager.shared.recordOnlineLogin(uid: uid)
 
-            await MainActor.run { self.isLoading = false }
+            await MainActor.run {
+                withAnimation {
+                    self.isNewRegistration = true
+                    self.isLoading = false
+                }
+            }
+
         } catch {
             await MainActor.run {
                 self.errorMessage = self.mapAuthError(error)
@@ -153,10 +176,28 @@ final class AuthManager: ObservableObject {
             let credential = GoogleAuthProvider.credential(withIDToken: idToken, accessToken: accessToken)
             let authResult = try await Auth.auth().signIn(with: credential)
             OfflineModeManager.shared.recordOnlineLogin(uid: authResult.user.uid)
-            await MainActor.run {
-                self.isLoading = false
-                self.isAuthenticated = true
+            
+            if authResult.additionalUserInfo?.isNewUser == true {
+                let salt = CryptoService.generateSalt(length: 16)
+                var profile = UserProfile(
+                    id: authResult.user.uid,
+                    name: authResult.user.displayName ?? "Google Nutzer",
+                    email: authResult.user.email ?? "",
+                    encryptionSalt: salt
+                )
+                profile.registeredInVersion = "1.3"
+                profile.registrationPlatform = "ios"
+                try? await FirestoreService.shared.setUserProfile(profile: profile, onboardingCompleted: false)
             }
+
+            await MainActor.run {
+                withAnimation {
+                    self.isLoading = false
+                    self.isNewRegistration = authResult.additionalUserInfo?.isNewUser == true
+                    self.isAuthenticated = true
+                }
+            }
+
             return .success
         } catch {
             await MainActor.run {
@@ -172,6 +213,9 @@ final class AuthManager: ObservableObject {
         do {
             try Auth.auth().signOut()
             OfflineModeManager.shared.clearOfflineData()
+            withAnimation {
+                self.isNewRegistration = false
+            }
         } catch {
             self.errorMessage = "Abmelden fehlgeschlagen: \(error.localizedDescription)"
         }
@@ -304,22 +348,26 @@ final class AuthManager: ObservableObject {
                     ?? "Apple Nutzer"
 
                 let salt = CryptoService.generateSalt(length: 16)
-                let profile = UserProfile(
+                var profile = UserProfile(
                     id: authResult.user.uid,
                     name: resolvedName,
                     email: email,
-                    encryptionSalt: salt,
-                    activeClassId: nil,
-                    subscribedCourseIds: nil
+                    encryptionSalt: salt
                 )
+                profile.registeredInVersion = "1.3"
+                profile.registrationPlatform = "ios"
                 try? await FirestoreService.shared.setUserProfile(
                     profile: profile,
                     onboardingCompleted: false
                 )
             }
 
-            isLoading = false
-            isAuthenticated = true
+            withAnimation {
+                isLoading = false
+                isNewRegistration = authResult.additionalUserInfo?.isNewUser == true
+                isAuthenticated = true
+            }
+
             return .success
         } catch {
             isLoading = false

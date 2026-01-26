@@ -239,6 +239,7 @@ struct WhatIfModeView: View {
 // MARK: - Subviews
 
 struct WhatIfHeaderCard: View {
+    @EnvironmentObject var store: GradesStore
     let currentAverage: Double?
     let simulatedAverage: Double?
     let deltaAverage: Double?
@@ -289,13 +290,13 @@ struct WhatIfHeaderCard: View {
 
     private func formatAverage(_ value: Double?) -> String {
         guard let value else { return "-" }
-        return String(format: "%.2f", value)
+        return String(format: "%.\(store.mssDecimalPrecision)f", value)
     }
 
     private func formatDelta(_ value: Double?) -> String {
-        guard let value else { return "0,00" }
+        guard let value else { return String(format: "%.\(store.mssDecimalPrecision)f", 0.0) }
         let prefix = value > 0 ? "+" : ""
-        return prefix + String(format: "%.2f", value)
+        return prefix + String(format: "%.\(store.mssDecimalPrecision)f", value)
     }
 }
 
@@ -361,7 +362,7 @@ struct SubjectWhatIfRow: View {
                     
                     let delta = (simulatedAvg ?? 0) - (currentAvg ?? 0)
                     if abs(delta) > 0.001 {
-                        Text((delta > 0 ? "+" : "") + String(format: "%.2f", delta))
+                        Text((delta > 0 ? "+" : "") + String(format: "%.\(store.mssDecimalPrecision)f", delta))
                             .font(.caption2.weight(.bold).monospacedDigit())
                             .foregroundStyle(delta > 0 ? .green : .pink)
                             .padding(.horizontal, 6)
@@ -472,7 +473,7 @@ struct SubjectWhatIfRow: View {
 
     private func formatAvg(_ v: Double?) -> String {
         guard let v else { return "-" }
-        return String(format: "%.2f", v)
+        return String(format: "%.\(store.mssDecimalPrecision)f", v)
     }
 }
 

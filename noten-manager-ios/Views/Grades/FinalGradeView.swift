@@ -675,7 +675,7 @@ struct FinalGradeView: View {
         /// MSS value (0-15 points average) for hero display
         private var heroMSSValue: String {
             guard let avg = fobosoSummary.averageAfterDrops else { return "-" }
-            return String(format: "%.2f", avg)
+            return store.formatMSS(avg)
         }
         
         /// MSS text for display under grade
@@ -1230,7 +1230,7 @@ struct FinalGradeView: View {
                 // Impact badge
                 if let imp = calculateImpact(for: candidate.handle, halfYear: candidate.halfYear), imp > 0.005 {
                     let badgeColor = store.isPrivacyModeActive ? .primary : Color.green
-                    Text("+\(String(format: "%.2f", imp))")
+                    Text("+\(String(format: "%.\(store.mssDecimalPrecision)f", imp))")
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(badgeColor)
                         .padding(.horizontal, 6)
@@ -1408,7 +1408,7 @@ struct FinalGradeView: View {
         
         private func formatAverage(_ value: Double?) -> String {
             guard let v = value else { return "-" }
-            return String(format: "%.1f", v) // Standard is 1 decimal for average display in chips, but let's check callers
+            return String(format: "%.\(store.mssDecimalPrecision)f", v)
         }
         
         private func formatDateShort(_ date: Date?) -> String {
@@ -1535,7 +1535,7 @@ struct FinalGradeView: View {
             // But mathematically: New - Old. 1.8 - 2.0 = -0.2.
             // Display standard numeric delta.
             let prefix = delta > 0 ? "+" : ""
-            return "\(prefix)\(String(format: "%.2f", delta))"
+            return "\(prefix)\(String(format: "%.\(store.mssDecimalPrecision)f", delta))"
         }
         
         private func gradeColor(_ value: Double?) -> Color {
@@ -2628,7 +2628,7 @@ struct FinalGradeView: View {
                         if !isSelected {
                             if let imp = calculateImpact(for: handle, halfYear: halfYear), abs(imp) > 0.005 {
                                 let isPositive = imp > 0
-                                Text((isPositive ? "+" : "") + String(format: "%.2f", imp))
+                                Text((isPositive ? "+" : "") + String(format: "%.\(store.mssDecimalPrecision)f", imp))
                                     .font(.caption.weight(.bold))
                                     .foregroundStyle(isPositive ? .green : .red)
                                     .padding(.horizontal, 6)

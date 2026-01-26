@@ -18,6 +18,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, MessagingDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil
     ) -> Bool {
+        FirebaseConfiguration.shared.setLoggerLevel(.min)
         FirebaseApp.configure()
 
         Messaging.messaging().delegate = self
@@ -55,10 +56,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, MessagingDelegate {
         print("FCM registration token: \(String(describing: fcmToken))")
         // Note: This callback is fired at each app startup and whenever a new token is generated.
         
-        if let token = fcmToken, let uid = Auth.auth().currentUser?.uid {
-            Task {
-                await FirestoreService.shared.updateFcmToken(userId: uid, token: token)
-            }
+        if let token = fcmToken {
+            FcmTokenManager.cache(token: token)
+            FcmTokenManager.syncCachedTokenIfPossible()
         }
     }
 }

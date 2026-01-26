@@ -4,47 +4,7 @@ import Combine
 import FirebaseFirestore
 import WidgetKit
 
-struct OfflineSnapshot: Codable {
-    let userId: String
-    let capturedAt: Date
-    let activeSchoolYearId: String?
-    let encryptionSalt: String?
-    let subjects: [Subject]
-    let gradesBySubject: [String: [GradeWithId]]
-    let fachreferat: Fachreferat?
-    let seminarPerformance: SeminarPerformance?
-    let practicalPerformance: PracticalPerformance?
-    let homeworks: [Homework]
-    let exams: [Exam]
-    let sharedExams: [Exam]
-    let sharedHomeworks: [Homework]
-    let examGroupId: String?
-    let homeworkGroupId: String?
-    let groupIds: [String]
-    let groupNames: [String: String]
-    let groupSubjectMappings: [String: [String: String]]
-    let groupExamsByGroup: [String: [Exam]]
-    let groupHomeworksByGroup: [String: [Homework]]
-    let schoolYears: [String]
-    let gradeYear: Int?
-    let schoolType: SchoolType
-    let subjectSortMode: SubjectSortMode
-    let subjectSortOrder: [String]
-    let compactView: Bool
-    let animationsEnabled: Bool
-    let showHolidayHints: Bool?
-    let theme: String
-    let themeIntensity: Double?
-    let appIcon: String?
-    let darkMode: Bool
-    let darkModeMode: String
-    let homeworkReminderHour: Int
-    let homeworkReminderMinute: Int
-    let standardRemindersEnabled: Bool?
-    let pendingGrades: [PendingGrade]
-    let pendingFachreferat: PendingFachreferat?
-    let pendingSeminar: PendingSeminarPerformance?
-}
+
 
 @MainActor
 final class OfflineModeManager: ObservableObject {
@@ -128,6 +88,16 @@ final class OfflineModeManager: ObservableObject {
         return true
     }
 
+    func loadSnapshotAsync() async -> OfflineSnapshot? {
+        if let snapshot = cachedSnapshot {
+            return snapshot
+        }
+        return await Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self = self else { return nil }
+            return try? self.loadSnapshotFromDisk()
+        }.value
+    }
+
     func availableSnapshot() -> OfflineSnapshot? {
         if let snapshot = cachedSnapshot {
             return snapshot
@@ -191,7 +161,7 @@ final class OfflineModeManager: ObservableObject {
         }
     }
 
-    private func loadSnapshotFromDisk() throws -> OfflineSnapshot {
+    nonisolated private func loadSnapshotFromDisk() throws -> OfflineSnapshot {
         if let sharedURL = sharedSnapshotURL(),
            let sharedData = try? Data(contentsOf: sharedURL) {
             return try decoder.decode(OfflineSnapshot.self, from: sharedData)
@@ -200,7 +170,7 @@ final class OfflineModeManager: ObservableObject {
         return try decoder.decode(OfflineSnapshot.self, from: data)
     }
 
-    private func snapshotURL() -> URL {
+    nonisolated private func snapshotURL() -> URL {
         if let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
             return dir.appendingPathComponent(snapshotFileName)
         }
@@ -208,7 +178,7 @@ final class OfflineModeManager: ObservableObject {
         return FileManager.default.temporaryDirectory.appendingPathComponent(snapshotFileName)
     }
 
-    private func sharedSnapshotURL() -> URL? {
+    nonisolated private func sharedSnapshotURL() -> URL? {
         FileManager.default
             .containerURL(forSecurityApplicationGroupIdentifier: appGroupId)?
             .appendingPathComponent(snapshotFileName)

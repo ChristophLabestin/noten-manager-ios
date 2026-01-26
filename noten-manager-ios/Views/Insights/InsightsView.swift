@@ -118,7 +118,7 @@ struct InsightsView: View {
 
     private func formatAverage(_ value: Double?) -> String {
         guard let v = value else { return "-" }
-        return String(format: "%.1f", v)
+        return String(format: "%.\(store.mssDecimalPrecision)f", v)
     }
 
     private func formatMSS(_ value: Double?) -> String {

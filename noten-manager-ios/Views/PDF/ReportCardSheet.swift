@@ -141,7 +141,8 @@ struct ReportCardSheet: View {
                     showAbiturExams: showAbiturExams,
                     showPoints: showPoints,
                     showGrades: showGrades,
-                    showIndividualGrades: showIndividualGrades
+                    showIndividualGrades: showIndividualGrades,
+                    mssDecimalPrecision: store.mssDecimalPrecision
                 )
                 
                 let pages = ReportCardPaginator().paginate(data: reportData)
@@ -302,7 +303,8 @@ struct ReportCardSheet: View {
             showAbiturExams: showAbiturExams,
             showPoints: showPoints,
             showGrades: showGrades,
-            showIndividualGrades: showIndividualGrades
+            showIndividualGrades: showIndividualGrades,
+            mssDecimalPrecision: store.mssDecimalPrecision
         )
         
         // 2. Paginate

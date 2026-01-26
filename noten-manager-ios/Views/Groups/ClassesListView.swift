@@ -36,7 +36,7 @@ struct ClassesListView: View {
                 
                 
 
-                if store.classIds.isEmpty && socialGroups.isEmpty && legacyGroups.isEmpty {
+                if store.classIds.isEmpty && (store.groupsHidden || (socialGroups.isEmpty && legacyGroups.isEmpty)) {
                     emptyState
                         .softFadeIn(enabled: animationsOn, delay: 0.15, offset: 12)
                 } else {
@@ -44,20 +44,20 @@ struct ClassesListView: View {
                         classesSection
                     }
                     
-                    if !socialGroups.isEmpty {
+                    if !store.groupsHidden && !socialGroups.isEmpty {
                         socialGroupsSection
                             .softFadeIn(enabled: animationsOn, delay: 0.2, offset: 14)
                     }
                     
-                    if !legacyGroups.isEmpty {
+                    if !store.groupsHidden && !legacyGroups.isEmpty {
                         legacyGroupsSection
                             .softFadeIn(enabled: animationsOn, delay: 0.25, offset: 16)
                     }
                 }
                 
                 HelpCenterLink(
-                    title: "Hilfe zu Klassen & Gruppen",
-                    subtitle: "Unterschiede, Synchronisation & Features",
+                    title: store.groupsHidden ? "Hilfe zu Klassen" : "Hilfe zu Klassen & Gruppen",
+                    subtitle: store.groupsHidden ? "Beitritt, Kurse & Synchronisation" : "Unterschiede, Synchronisation & Features",
                     section: .classesGroups,
                     accent: .pink
                 )
@@ -145,21 +145,16 @@ struct ClassesListView: View {
         } message: {
             Text("Möchtest du diese Klasse wirklich unwiderruflich löschen? Alle zugehörigen Kurse werden ebenfalls gelöscht.")
         }
-        .alert("In Klasse umwandeln?", isPresented: Binding(
+        .sheet(isPresented: Binding(
             get: { groupPendingMigration != nil },
             set: { if !$0 { groupPendingMigration = nil } }
         )) {
-            Button("Abbrechen", role: .cancel) { groupPendingMigration = nil }
-            Button("Umwandeln", role: .none) {
-                if let gid = groupPendingMigration {
-                     Task {
-                        try? await store.migrateGroupToClass(groupId: gid)
-                     }
+            if let gid = groupPendingMigration {
+                LegacyGroupMigrationSheet(groupId: gid, ownedClassIds: ownedClassIds) {
+                    groupPendingMigration = nil
                 }
-                groupPendingMigration = nil
+                .environmentObject(store)
             }
-        } message: {
-            Text("Es wird eine neue Klasse basierend auf dieser Gruppe erstellt. Die alte Gruppe bleibt für Nutzer älterer Versionen erhalten.")
         }
         .sheet(isPresented: $showClassesOnboarding) {
             ClassesFeatureOnboardingSheet()
@@ -179,6 +174,7 @@ struct ClassesListView: View {
     
     // Independent groups: Groups not in any known class list and not migrated
     private var independentGroups: [String] {
+        guard !store.groupsHidden else { return [] }
         let allClassGroups = Set(store.classDetails.values.flatMap { $0.groupIds })
         return store.groupIds.filter { 
             !allClassGroups.contains($0) && !store.migratedGroupIds.contains($0)
@@ -192,13 +188,18 @@ struct ClassesListView: View {
     private var legacyGroups: [String] {
         independentGroups.filter { store.groupTypes[$0] != "social" }
     }
+
+    private var ownedClassIds: [String] {
+        let uid = Auth.auth().currentUser?.uid
+        return store.classIds.filter { store.classOwners[$0] == uid }.sorted()
+    }
     
     private var headerSection: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Klassen & Gruppen")
+                Text(store.groupsHidden ? "Klassen" : "Klassen & Gruppen")
                     .font(.title2.weight(.bold))
-                Text("Verwalte deine Klassen und Lerngruppen")
+                Text(store.groupsHidden ? "Verwalte deine Klassen und Kurse" : "Verwalte deine Klassen und Lerngruppen")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -221,21 +222,25 @@ struct ClassesListView: View {
     private var statsSection: some View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing:10) {
             StatChip(title: "Klassen", value: "\(store.classIds.count)", accent: .indigo)
-            StatChip(title: "Soziale Gruppen", value: "\(socialGroups.count)", accent: .purple)
-            StatChip(title: "Legacy-Gruppen", value: "\(legacyGroups.count)", accent: .cyan)
-            StatChip(title: "Meine Kurse", value: "\(store.courses.count)", accent: .orange)
+            if store.groupsHidden {
+                StatChip(title: "Meine Kurse", value: "\(store.courses.count)", accent: .orange)
+            } else {
+                StatChip(title: "Soziale Gruppen", value: "\(socialGroups.count)", accent: .purple)
+                StatChip(title: "Legacy-Gruppen", value: "\(legacyGroups.count)", accent: .cyan)
+                StatChip(title: "Meine Kurse", value: "\(store.courses.count)", accent: .orange)
+            }
         }
     }
     
     private var emptyState: some View {
         SettingsCard(
-            title: "Keine Klassen oder Gruppen",
+            title: store.groupsHidden ? "Keine Klassen" : "Keine Klassen oder Gruppen",
             subtitle: "Tritt einer Klasse bei oder erstelle eine neue.",
             systemImage: "rectangle.stack.person.crop.fill",
             accent: .indigo
         ) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("In Klassen werden mehrere Gruppen gebündelt. Ideal für den gesamten Klassenverband.")
+                Text(store.groupsHidden ? "Klassen bündeln Fächer und Kurse für deinen Jahrgang." : "In Klassen werden mehrere Gruppen gebündelt. Ideal für den gesamten Klassenverband.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -261,7 +266,7 @@ struct ClassesListView: View {
                     isOwner: store.classOwners[cid] == Auth.auth().currentUser?.uid,
                     memberCount: store.classDetails[cid]?.memberCount ?? 0,
                     courseCount: store.courses.filter { $0.classId == cid }.count,
-                    branchCount: store.classDetails[cid]?.config?.branches.count ?? 0,
+                    branchCount: store.classDetails[cid]?.config?.branches?.count ?? 0,
                     onLeave: { classPendingLeave = cid },
                     onDelete: { classPendingDelete = cid }
                 )
@@ -290,17 +295,16 @@ struct ClassesListView: View {
     
     private var legacyGroupsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Weitere Gruppen")
+            Text("Legacy‑Gruppen (Migration)")
                 .font(.headline)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
             
             ForEach(legacyGroups, id: \.self) { gid in
-                IndependentGroupCardView(
+                LegacyGroupMigrationCardView(
                     groupId: gid,
                     isOwner: store.groupOwners[gid] == Auth.auth().currentUser?.uid,
                     memberCount: store.groupMemberIds[gid]?.count ?? 0,
-                    onLeave: { groupPendingLeave = gid },
                     onMigrate: { groupPendingMigration = gid }
                 )
             }
@@ -346,56 +350,40 @@ struct ClassesListView: View {
                 }
                 .buttonStyle(SoftTintButtonStyle(accent: .gray))
                 
-                Divider()
-                    .padding(.vertical, 4)
-                
-                // Section: Gruppen & Soziales
-                Text("Gruppen & Soziales")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.leading, 4)
-                
-                Button {
-                    showSocialCreateSheet = true
-                } label: {
-                    Label("Neue soziale Gruppe", systemImage: "person.2.badge.plus.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(SoftTintButtonStyle(accent: .purple))
-
-                Button {
-                    showCreateGroupSheet = true
-                } label: {
-                    Label("Neue Legacy-Gruppe", systemImage: "person.3.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(SoftTintButtonStyle(accent: .orange))
-
-                Button {
-                    showScannerSheet = true
-                } label: {
-                    Label("Gruppe beitreten (QR)", systemImage: "qrcode.viewfinder")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(SoftTintButtonStyle(accent: .cyan))
-                
-                Button {
-                    showGroupJoinSheet = true
-                } label: {
-                    Label("Gruppen-Code eingeben", systemImage: "keyboard")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(SoftTintButtonStyle(accent: .gray))
-                
-                if !legacyGroups.isEmpty {
+                if !store.groupsHidden {
+                    Divider()
+                        .padding(.vertical, 4)
+                    
+                    // Section: Gruppen & Soziales
+                    Text("Gruppen & Soziales")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.leading, 4)
+                    
                     Button {
-                        showGroupMergeSheet = true
+                        showSocialCreateSheet = true
                     } label: {
-                        Label("Gruppen zusammenführen", systemImage: "arrow.triangle.merge")
+                        Label("Neue soziale Gruppe", systemImage: "person.2.badge.plus.fill")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(SoftTintButtonStyle(accent: .indigo))
+                    .buttonStyle(SoftTintButtonStyle(accent: .purple))
+
+                    Button {
+                        showScannerSheet = true
+                    } label: {
+                        Label("Gruppe beitreten (QR)", systemImage: "qrcode.viewfinder")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(SoftTintButtonStyle(accent: .cyan))
+                    
+                    Button {
+                        showGroupJoinSheet = true
+                    } label: {
+                        Label("Gruppen-Code eingeben", systemImage: "keyboard")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(SoftTintButtonStyle(accent: .gray))
                 }
             }
         }
@@ -405,15 +393,20 @@ struct ClassesListView: View {
         // Deep link format: notenmanager://join/group/CODE or notenmanager://join/class/CODE
         Task {
             do {
-                if scannedCode.contains("join/class/") {
+                if store.groupsHidden {
                     let code = scannedCode.components(separatedBy: "/").last ?? scannedCode
                     try await store.joinClass(with: code)
-                } else if scannedCode.contains("join/group/") || !scannedCode.contains("://") {
-                    // If it's a group link or just a raw code, treat as group
-                    let code = scannedCode.components(separatedBy: "/").last ?? scannedCode
-                    let (_, errors) = await store.joinSharedGroups(codes: [code])
-                    if let firstError = errors.first {
-                        throw NSError(domain: "App", code: -1, userInfo: [NSLocalizedDescriptionKey: firstError.value])
+                } else {
+                    if scannedCode.contains("join/class/") {
+                        let code = scannedCode.components(separatedBy: "/").last ?? scannedCode
+                        try await store.joinClass(with: code)
+                    } else if scannedCode.contains("join/group/") || !scannedCode.contains("://") {
+                        // If it's a group link or just a raw code, treat as group
+                        let code = scannedCode.components(separatedBy: "/").last ?? scannedCode
+                        let (_, errors) = await store.joinSharedGroups(codes: [code])
+                        if let firstError = errors.first {
+                            throw NSError(domain: "App", code: -1, userInfo: [NSLocalizedDescriptionKey: firstError.value])
+                        }
                     }
                 }
             } catch {
@@ -422,6 +415,188 @@ struct ClassesListView: View {
                     self.showScanErrorAlert = true
                 }
             }
+        }
+    }
+}
+
+private struct AddLegacyGroupToClassSheet: View {
+    @EnvironmentObject var store: GradesStore
+    @Environment(\.dismiss) private var dismiss
+
+    let groupId: String
+    let ownedClassIds: [String]
+    let onComplete: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            AddLegacyGroupToClassForm(
+                groupId: groupId,
+                ownedClassIds: ownedClassIds
+            ) {
+                onComplete()
+                dismiss()
+            }
+        }
+    }
+}
+
+private struct LegacyGroupMigrationSheet: View {
+    @EnvironmentObject var store: GradesStore
+    @Environment(\.dismiss) private var dismiss
+
+    let groupId: String
+    let ownedClassIds: [String]
+    let onComplete: () -> Void
+
+    @State private var isMigrating = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Gruppe") {
+                    Text(store.groupNames[groupId] ?? groupId)
+                        .font(.headline)
+                }
+
+                Section("Aktion") {
+                    Button {
+                        Task { await migrateToNewClass() }
+                    } label: {
+                        Label("Neue Klasse erstellen", systemImage: "plus.rectangle.fill.on.rectangle.fill")
+                    }
+                    .disabled(isMigrating)
+
+                    if ownedClassIds.isEmpty {
+                        Text("Keine eigenen Klassen gefunden.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        NavigationLink("Als Zweig zu Klasse hinzufügen", value: MigrationRoute.addToClass)
+                    }
+                }
+
+                if let errorMessage {
+                    Section {
+                        Text(errorMessage)
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle("Gruppe migrieren")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") { dismiss() }
+                }
+            }
+            .navigationDestination(for: MigrationRoute.self) { _ in
+                AddLegacyGroupToClassForm(
+                    groupId: groupId,
+                    ownedClassIds: ownedClassIds
+                ) {
+                    onComplete()
+                    dismiss()
+                }
+            }
+        }
+    }
+
+    private func migrateToNewClass() async {
+        guard !isMigrating else { return }
+        isMigrating = true
+        errorMessage = nil
+        do {
+            _ = try await store.migrateGroupToClass(groupId: groupId)
+            onComplete()
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isMigrating = false
+    }
+}
+
+private enum MigrationRoute: Hashable {
+    case addToClass
+}
+
+private struct AddLegacyGroupToClassForm: View {
+    @EnvironmentObject var store: GradesStore
+    @Environment(\.dismiss) private var dismiss
+
+    let groupId: String
+    let ownedClassIds: [String]
+    let onComplete: () -> Void
+
+    @State private var selectedClassId: String = ""
+    @State private var branchName: String = ""
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Form {
+            Section("Gruppe") {
+                Text(store.groupNames[groupId] ?? groupId)
+                    .font(.headline)
+            }
+
+            Section("Klasse auswählen") {
+                if ownedClassIds.isEmpty {
+                    Text("Keine Klassen vorhanden.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Picker("Klasse", selection: $selectedClassId) {
+                        ForEach(ownedClassIds, id: \.self) { cid in
+                            Text(store.classNames[cid] ?? cid).tag(cid)
+                        }
+                    }
+                }
+            }
+
+            Section("Zweigname") {
+                TextField("Zweigname", text: $branchName)
+            }
+
+            if let errorMessage {
+                Section {
+                    Text(errorMessage)
+                        .foregroundStyle(.red)
+                }
+            }
+        }
+        .navigationTitle("Als Zweig hinzufügen")
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Abbrechen") { dismiss() }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button(isSaving ? "Speichern..." : "Hinzufügen") {
+                    Task { await addToClass() }
+                }
+                .disabled(isSaving || selectedClassId.isEmpty || branchName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .onAppear {
+            if selectedClassId.isEmpty, let first = ownedClassIds.first {
+                selectedClassId = first
+            }
+            if branchName.isEmpty {
+                branchName = store.groupNames[groupId] ?? ""
+            }
+        }
+    }
+
+    private func addToClass() async {
+        let trimmedBranch = branchName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !selectedClassId.isEmpty, !trimmedBranch.isEmpty else { return }
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            try await store.addLegacyGroupToClass(classId: selectedClassId, groupCode: groupId, branchName: trimmedBranch)
+            onComplete()
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 }
@@ -633,6 +808,68 @@ private struct IndependentGroupCardView: View {
     }
 }
 
+private struct LegacyGroupMigrationCardView: View {
+    @EnvironmentObject var store: GradesStore
+    let groupId: String
+    let isOwner: Bool
+    let memberCount: Int
+    let onMigrate: () -> Void
+
+    var body: some View {
+        SettingsCard(
+            title: store.groupNames[groupId] ?? "Legacy‑Gruppe",
+            subtitle: "Nur Migration möglich",
+            systemImage: "arrow.up.circle.fill",
+            accent: .orange,
+            trailing: {
+                if isOwner {
+                    PillBadge(text: "Owner", systemImage: "crown.fill", foreground: .orange, background: .orange.opacity(0.1))
+                }
+            }
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 16) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "person.2.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("\(memberCount) Mitglieder")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack(spacing: 6) {
+                        Image(systemName: "number")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(groupId)
+                            .font(.caption.monospaced().weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if isOwner {
+                    Button {
+                        onMigrate()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.triangle.merge")
+                            Text("Jetzt migrieren")
+                        }
+                        .font(.caption.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(SoftTintButtonStyle(accent: .orange, verticalPadding: 10))
+                } else {
+                    Text("Nur der Owner kann die Migration starten.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+}
+
 private struct SocialGroupCardView: View {
     @EnvironmentObject var store: GradesStore
     let groupId: String
@@ -721,4 +958,3 @@ private struct SocialGroupCardView: View {
         }
     }
 }
-

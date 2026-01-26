@@ -5,16 +5,28 @@ struct ClassCreationView: View {
     @EnvironmentObject var store: GradesStore
     
     @State private var name: String = ""
-    @State private var commonSubjects: [String] = ["Mathematik", "Deutsch", "Englisch"]
-    @State private var newCommonSubject: String = ""
-    
-    struct BranchInput: Identifiable {
+    struct SubjectInput: Identifiable, Hashable {
         let id = UUID()
         var name: String
-        var subjects: [String]
+        var hasSchulaufgabe: Bool = true
+    }
+    
+    @State private var commonSubjects: [SubjectInput] = [
+        SubjectInput(name: "Mathematik"),
+        SubjectInput(name: "Deutsch"),
+        SubjectInput(name: "Englisch")
+    ]
+    @State private var newCommonSubject: String = ""
+    
+    struct SubjectGroupInput: Identifiable {
+        let id = UUID()
+        var name: String
+        var subjects: [SubjectInput]
         var newSubject: String = ""
     }
-    @State private var branches: [BranchInput] = []
+    
+    @State private var branches: [SubjectGroupInput] = []
+    @State private var electives: [SubjectGroupInput] = []
     
     @State private var isCreating: Bool = false
     @State private var errorMessage: String?
@@ -22,11 +34,10 @@ struct ClassCreationView: View {
     // Subject Mapping after creation
     @State private var showSubjectMapping: Bool = false
     @State private var createdClassId: String?
-    @State private var missingCourses: [Course] = []
+    @State private var joinedCourses: [Course] = []
     
     private var isFeminine: Bool { store.theme == "feminine" }
     private var isDark: Bool { store.darkMode }
-    private var animationsOn: Bool { store.animationsEnabled }
     
     var body: some View {
         NavigationStack {
@@ -42,7 +53,7 @@ struct ClassCreationView: View {
                         Text("Neue Klasse erstellen")
                             .font(.title3.weight(.bold))
                         
-                        Text("Definiere Fächer und Zweige zentral.")
+                        Text("Definiere Fächer, Zweige und Wahlpflichtfächer.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
@@ -76,22 +87,14 @@ struct ClassCreationView: View {
                     ) {
                         VStack(alignment: .leading, spacing: 12) {
                             FlowLayout(spacing: 8) {
-                                ForEach(commonSubjects, id: \.self) { subject in
-                                    HStack(spacing: 4) {
-                                        Text(subject)
-                                        Button {
-                                            commonSubjects.removeAll { $0 == subject }
-                                        } label: {
-                                            Image(systemName: "xmark")
-                                                .font(.caption2.bold())
+                                ForEach($commonSubjects) { $subject in
+                                    SubjectCreationPill(
+                                        name: subject.name,
+                                        hasSA: $subject.hasSchulaufgabe,
+                                        onDelete: {
+                                            commonSubjects.removeAll { $0.id == subject.id }
                                         }
-                                    }
-                                    .font(.subheadline.weight(.medium))
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .background(Color.indigo.opacity(0.1))
-                                    .foregroundStyle(.indigo)
-                                    .clipShape(Capsule())
+                                    )
                                 }
                             }
                             
@@ -115,20 +118,61 @@ struct ClassCreationView: View {
                         }
                     }
                     
-                    // 3. Branches
+                    // 3. Branches (Zweige)
                     VStack(spacing: 16) {
                         ForEach($branches) { $branch in
-                            BranchEditCard(branch: $branch) {
-                                branches.removeAll { $0.id == branch.id }
-                            }
+                            SubjectGroupEditCard(
+                                name: $branch.name,
+                                subjects: $branch.subjects,
+                                newSubject: $branch.newSubject,
+                                titlePlaceholder: "Zweigname (z.B. Wirtschaft)",
+                                subtitle: "Zweig-spezifische Fächer",
+                                icon: "arrow.branch",
+                                color: .orange,
+                                onDelete: { branches.removeAll { $0.id == branch.id } }
+                            )
                         }
                         
                         Button {
                             withAnimation {
-                                branches.append(BranchInput(name: "", subjects: []))
+                                branches.append(SubjectGroupInput(name: "", subjects: []))
                             }
                         } label: {
                             Label("Zweig hinzufügen (z.B. Sozial)", systemImage: "arrow.branch")
+                                .font(.subheadline.weight(.medium))
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(Color.formInputBackground)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12).strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [5]))
+                                        .foregroundStyle(.secondary.opacity(0.5))
+                                )
+                        }
+                        .foregroundStyle(.primary)
+                    }
+                    
+                    // 4. Electives (Wahlpflichtfächer)
+                    VStack(spacing: 16) {
+                        ForEach($electives) { $elective in
+                            SubjectGroupEditCard(
+                                name: $elective.name,
+                                subjects: $elective.subjects,
+                                newSubject: $elective.newSubject,
+                                titlePlaceholder: "Name (z.B. Informatik)",
+                                subtitle: "Fächer dieser Gruppe",
+                                icon: "star.fill",
+                                color: .teal,
+                                onDelete: { electives.removeAll { $0.id == elective.id } }
+                            )
+                        }
+                        
+                        Button {
+                            withAnimation {
+                                electives.append(SubjectGroupInput(name: "", subjects: []))
+                            }
+                        } label: {
+                            Label("Wahlpflichtfach hinzufügen (z.B. IT)", systemImage: "star")
                                 .font(.subheadline.weight(.medium))
                                 .frame(maxWidth: .infinity)
                                 .padding()
@@ -182,7 +226,7 @@ struct ClassCreationView: View {
             dismiss()
         }) {
             if let classId = createdClassId {
-                SubjectMappingView(classId: classId, missingCourses: missingCourses)
+                SubjectMappingView(classId: classId, courses: joinedCourses)
                     .environmentObject(store)
             }
         }
@@ -190,9 +234,9 @@ struct ClassCreationView: View {
     
     private func addCommonSubject() {
         let trimmed = newCommonSubject.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty && !commonSubjects.contains(trimmed) {
+        if !trimmed.isEmpty && !commonSubjects.contains(where: { $0.name == trimmed }) {
             withAnimation {
-                commonSubjects.append(trimmed)
+                commonSubjects.append(SubjectInput(name: trimmed))
                 newCommonSubject = ""
             }
         }
@@ -209,14 +253,25 @@ struct ClassCreationView: View {
             isCreating = false
             return
         }
+        if electives.contains(where: { $0.name.isEmpty }) {
+            errorMessage = "Bitte gib allen Wahlpflichtfächern einen Namen."
+            isCreating = false
+            return
+        }
         
         let config = GradesStore.ClassCreationConfiguration(
             name: name,
-            commonSubjects: commonSubjects,
+            commonSubjects: commonSubjects.map { GradesStore.ClassCreationConfiguration.SubjectConfig(name: $0.name, hasSchulaufgabe: $0.hasSchulaufgabe) },
             branches: branches.map { b in
                 GradesStore.ClassCreationConfiguration.BranchConfig(
                     name: b.name,
-                    subjects: b.subjects
+                    subjects: b.subjects.map { GradesStore.ClassCreationConfiguration.SubjectConfig(name: $0.name, hasSchulaufgabe: $0.hasSchulaufgabe) }
+                )
+            },
+            wahlpflichtSubjects: electives.map { e in
+                GradesStore.ClassCreationConfiguration.WahlpflichtConfig(
+                    name: e.name,
+                    subjects: e.subjects.map { GradesStore.ClassCreationConfiguration.SubjectConfig(name: $0.name, hasSchulaufgabe: $0.hasSchulaufgabe) }
                 )
             }
         )
@@ -226,11 +281,11 @@ struct ClassCreationView: View {
             let generator = UINotificationFeedbackGenerator()
             generator.notificationOccurred(.success)
             
-            // Check for missing subject mappings
+            // Check for missing subject mappings (should be none for new class, but good to keep)
             let missing = store.missingSubjects(for: classId)
             if !missing.isEmpty {
                 self.createdClassId = classId
-                self.missingCourses = missing
+                self.joinedCourses = missing
                 self.showSubjectMapping = true
             } else {
                 dismiss()
@@ -244,20 +299,29 @@ struct ClassCreationView: View {
     }
 }
 
-struct BranchEditCard: View {
-    @Binding var branch: ClassCreationView.BranchInput
+// MARK: - Reusable Edit Card
+
+struct SubjectGroupEditCard: View {
+    @Binding var name: String
+    @Binding var subjects: [ClassCreationView.SubjectInput]
+    @Binding var newSubject: String
+    
+    let titlePlaceholder: String
+    let subtitle: String
+    let icon: String
+    let color: Color
     let onDelete: () -> Void
     
     var body: some View {
         SettingsCard(
-            title: branch.name.isEmpty ? "Neuer Zweig" : branch.name,
-            subtitle: "Zweig-spezifische Fächer",
-            systemImage: "arrow.branch",
-            accent: .orange
+            title: name.isEmpty ? "Neu" : name,
+            subtitle: subtitle,
+            systemImage: icon,
+            accent: color
         ) {
             VStack(alignment: .leading, spacing: 12) {
-                // Branch Name
-                TextField("Zweigname (z.B. Wirtschaft)", text: $branch.name)
+                // Name Input
+                TextField(titlePlaceholder, text: $name)
                     .font(.headline)
                     .padding(10)
                     .background(Color.formInputBackground)
@@ -265,50 +329,47 @@ struct BranchEditCard: View {
                 
                 Divider()
                 
-                // Subjects
-                FlowLayout(spacing: 8) {
-                    ForEach(branch.subjects, id: \.self) { subject in
-                        HStack(spacing: 4) {
-                            Text(subject)
-                            Button {
-                                branch.subjects.removeAll { $0 == subject }
-                            } label: {
-                                Image(systemName: "xmark")
-                                    .font(.caption2.bold())
-                            }
+                // Subjects Flow Layout
+                if !subjects.isEmpty {
+                    FlowLayout(spacing: 8) {
+                        ForEach($subjects) { $subject in
+                            SubjectCreationPill(
+                                name: subject.name,
+                                hasSA: $subject.hasSchulaufgabe,
+                                color: color,
+                                onDelete: {
+                                    subjects.removeAll { $0.id == subject.id }
+                                }
+                            )
                         }
-                        .font(.caption.weight(.medium))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.orange.opacity(0.1))
-                        .foregroundStyle(.orange)
-                        .clipShape(Capsule())
                     }
                 }
                 
+                // Add Subject Input
                 HStack {
-                    TextField("Fach hinzufügen...", text: $branch.newSubject)
+                    TextField("Fach hinzufügen...", text: $newSubject)
                         .font(.subheadline)
                         .onSubmit { addSubject() }
+                        .submitLabel(.done)
                     
                     Button {
                         addSubject()
                     } label: {
                         Image(systemName: "plus.circle.fill")
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(color)
                     }
-                    .disabled(branch.newSubject.isEmpty)
+                    .disabled(newSubject.isEmpty)
                 }
                 .padding(8)
                 .background(Color.formInputBackground)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 
-                // Delete Branch
+                // Delete Button
                 Button(role: .destructive, action: onDelete) {
                     HStack {
                         Spacer()
                         Image(systemName: "trash")
-                        Text("Zweig entfernen")
+                        Text("Entfernen")
                         Spacer()
                     }
                     .font(.caption)
@@ -320,14 +381,52 @@ struct BranchEditCard: View {
     }
     
     private func addSubject() {
-        let trimmed = branch.newSubject.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty && !branch.subjects.contains(trimmed) {
+        let trimmed = newSubject.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty && !subjects.contains(where: { $0.name == trimmed }) {
             withAnimation {
-                branch.subjects.append(trimmed)
-                branch.newSubject = ""
+                subjects.append(ClassCreationView.SubjectInput(name: trimmed))
+                newSubject = ""
             }
         }
     }
 }
+
+struct SubjectCreationPill: View {
+    let name: String
+    @Binding var hasSA: Bool
+    var color: Color = .indigo
+    let onDelete: () -> Void
     
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(name)
+                .font(.subheadline.weight(.semibold))
+            
+            Button {
+                withAnimation(.spring()) {
+                    hasSA.toggle()
+                }
+            } label: {
+                Text("SA")
+                    .font(.system(size: 10, weight: .bold))
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(hasSA ? color : Color.secondary.opacity(0.2))
+                    .foregroundStyle(hasSA ? .white : .secondary)
+                    .cornerRadius(4)
+            }
+            
+            Button(action: onDelete) {
+                Image(systemName: "xmark")
+                    .font(.caption2.bold())
+                    .foregroundStyle(color.opacity(0.5))
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(color.opacity(0.1))
+        .foregroundStyle(color)
+        .clipShape(Capsule())
+    }
+}
 

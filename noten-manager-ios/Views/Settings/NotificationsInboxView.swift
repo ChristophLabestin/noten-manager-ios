@@ -39,8 +39,16 @@ struct NotificationsInboxView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    // Broadcasts
+                    if !inbox.broadcasts.isEmpty {
+                        sectionHeader("Wichtige Meldungen")
+                        ForEach(inbox.broadcasts) { broadcast in
+                            broadcastRow(broadcast)
+                        }
+                    }
+
                     if LaunchOfferNotificationManager.isOfferActive(), !launchOfferPurchased {
-                        sectionHeader("Wichtig")
+                        sectionHeader("Spezialangebot")
                         importantNoticeCard
                     }
 
@@ -147,6 +155,43 @@ struct NotificationsInboxView: View {
         }
     }
 
+    private func broadcastRow(_ broadcast: BroadcastNotification) -> some View {
+        SettingsCard(
+            title: broadcast.title,
+            subtitle: "Ankündigung • \(formattedDate(broadcast.createdAt))",
+            systemImage: broadcastIcon(for: broadcast.type),
+            accent: broadcastAccent(for: broadcast.type),
+            trailing: {
+                Image(systemName: "megaphone.fill")
+                    .font(.caption)
+                    .foregroundStyle(broadcastAccent(for: broadcast.type).opacity(0.6))
+            }
+        ) {
+            Text(broadcast.body)
+                .font(.body)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func broadcastIcon(for type: String) -> String {
+        switch type {
+        case "maintenance": return "wrench.and.screwdriver.fill"
+        case "update": return "arrow.up.circle.fill"
+        case "important": return "exclamationmark.shield.fill"
+        default: return "megaphone.fill"
+        }
+    }
+
+    private func broadcastAccent(for type: String) -> Color {
+        switch type {
+        case "maintenance": return .orange
+        case "update": return .blue
+        case "important": return .red
+        default: return accentPrimary
+        }
+    }
+
     private func notificationRow(_ item: NotificationInboxItem) -> some View {
         Button {
             inbox.markRead(item.id)
@@ -193,6 +238,8 @@ struct NotificationsInboxView: View {
             return .green
         case .daily:
             return .orange
+        case .support:
+            return .blue
         default:
             return .secondary
         }
@@ -206,6 +253,8 @@ struct NotificationsInboxView: View {
             return "checklist"
         case .daily:
             return "clock.badge.exclamationmark"
+        case .support:
+            return "message.badge.filled.fill"
         default:
             return "bell"
         }

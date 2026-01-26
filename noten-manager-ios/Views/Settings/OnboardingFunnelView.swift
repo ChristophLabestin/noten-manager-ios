@@ -4,7 +4,7 @@ import FirebaseAuth
 
 struct OnboardingFunnelView: View {
     enum Step: String, CaseIterable {
-        case welcome, legacy, schoolYear, subjects, finish
+        case welcome, legacy, schoolYear, joinClass, subjects, finish
     }
 
     struct PendingSubject: Identifiable, Hashable {
@@ -123,6 +123,28 @@ struct OnboardingFunnelView: View {
     @State private var isLoadingPrevYear: Bool = false
     @State private var showPrevYearSubjects: Bool = false
 
+    // New: Class Join & Mapping
+    @State private var onboardingClassCode: String = ""
+    @State private var isJoiningClass: Bool = false
+    @State private var classJoinError: String?
+    @State private var showCourseJoinSheet: Bool = false
+    @State private var joinContextForSheet: ClassJoinContext?
+    @State private var showSubjectMappingSheet: Bool = false
+    @State private var joinedCoursesForMapping: [Course] = []
+    @State private var mappedClassId: String?
+    @State private var showScanner: Bool = false
+    @State private var showHelpSheet: Bool = false
+    @State private var showFeatureBriefing: Bool = false
+    @State private var wasAlreadyConfigured: Bool = false
+
+
+    struct ClassJoinContext: Identifiable {
+        let id: String
+        let name: String
+        let config: ClassConfiguration?
+        let linkedClassIds: [String]
+    }
+
     private var accentPrimary: Color {
         store.theme == "feminine" ? Color(hex: "#ec4899") : .indigo
     }
@@ -140,8 +162,9 @@ struct OnboardingFunnelView: View {
     }
 
     private var isManualRestart: Bool {
-        !isSchoolYearChange && store.onboardingRequired && (store.activeSchoolYearId != nil || !store.subjects.isEmpty)
+        !isSchoolYearChange && store.onboardingAlreadyCompleted
     }
+
 
     private var showSignOutButton: Bool {
         !isSchoolYearChange && !isManualRestart && store.onboardingRequired
@@ -156,6 +179,9 @@ struct OnboardingFunnelView: View {
         case .welcome: return "Jetzt einrichten"
         case .legacy: return "Daten übernehmen"
         case .schoolYear: return "Weiter"
+        case .joinClass: 
+             if hasJoinedClasses { return "Weiter" }
+             return onboardingClassCode.isEmpty ? "Überspringen" : "Klasse beitreten"
         case .subjects: return "Weiter"
         case .finish: return "Setup abschließen"
         }
@@ -164,6 +190,7 @@ struct OnboardingFunnelView: View {
     private var isPrimaryActionDisabled: Bool {
         switch currentStep {
         case .schoolYear: return false
+        case .joinClass: return isJoiningClass
         case .subjects: return false // Allow proceeding without subjects
         case .finish: return isFinishing
         default: return false
@@ -175,6 +202,7 @@ struct OnboardingFunnelView: View {
         case .welcome: withAnimation { currentStep = .schoolYear }
         case .legacy: handleLegacyChoice(keep: true)
         case .schoolYear: handleSchoolYearContinue()
+        case .joinClass: handleJoinClassAction()
         case .subjects: withAnimation { currentStep = .finish }
         case .finish: finishSetup()
         }
@@ -231,6 +259,12 @@ struct OnboardingFunnelView: View {
         store.legacyMigrationSummary != nil
     }
 
+    private var visibleSteps: [Step] {
+        Step.allCases.filter { step in
+            step != .legacy || legacyStepRequired
+        }
+    }
+
 
     var body: some View {
         NavigationStack {
@@ -238,16 +272,12 @@ struct OnboardingFunnelView: View {
                 ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity)
                 
                 VStack(spacing: 0) {
-                    
                     // Progress Indicator
                     HStack(spacing: 4) {
-                        // Filter out legacy step if not required
-                        let visibleSteps = Step.allCases.filter { step in
-                            step != .legacy || legacyStepRequired
-                        }
-                        let currentIdx = visibleSteps.firstIndex(of: currentStep) ?? 0
-                        ForEach(0..<visibleSteps.count, id: \.self) { idx in
-                            let step = visibleSteps[idx]
+                        let steps = visibleSteps
+                        let currentIdx = steps.firstIndex(of: currentStep) ?? 0
+                        ForEach(0..<steps.count, id: \.self) { idx in
+                            let step = steps[idx]
                             let isActive = currentStep == step
                             let isPast = currentIdx > idx
                             
@@ -260,108 +290,168 @@ struct OnboardingFunnelView: View {
                     .padding(.horizontal, 24)
                     .padding(.vertical, 16)
                     
-                    ZStack(alignment: .bottom) {
-                        TabView(selection: $currentStep) {
-                            WelcomePage()
-                                .tag(Step.welcome)
-                            
-                            if legacyStepRequired {
-                                if let summary = store.legacyMigrationSummary {
-                                    LegacyPage(summary: summary)
-                                        .tag(Step.legacy)
-                                }
-                            }
-                            
-                            SchoolYearPage()
-                                .tag(Step.schoolYear)
-                            
-                            SubjectsPage()
-                                .tag(Step.subjects)
-                            
-                            FinishPage()
-                                .tag(Step.finish)
-                        }
-                        .tabViewStyle(.page(indexDisplayMode: .never))
+                    TabView(selection: $currentStep) {
+                        WelcomePage()
+                            .tag(Step.welcome)
                         
-                        VStack(spacing: 8) {
-                            Button {
-                                handlePrimaryAction()
-                            } label: {
-                                HStack {
-                                    if isSavingSchoolYear || isFinishing || isHandlingLegacyChoice {
-                                        ProgressView().tint(.white)
-                                    } else {
-                                        Text(primaryActionTitle)
-                                    }
+                        if legacyStepRequired {
+                            if let summary = store.legacyMigrationSummary {
+                                LegacyPage(summary: summary)
+                                    .tag(Step.legacy)
+                            }
+                        }
+                        
+                        SchoolYearPage()
+                            .tag(Step.schoolYear)
+                        
+                        JoinClassPage()
+                            .tag(Step.joinClass)
+                        
+                        SubjectsPage()
+                            .tag(Step.subjects)
+                        
+                        FinishPage()
+                            .tag(Step.finish)
+                    }
+                    .tabViewStyle(.page(indexDisplayMode: .never))
+                }
+                
+                VStack(spacing: 0) {
+                    Spacer()
+                    VStack(spacing: 8) {
+                        Button {
+                            handlePrimaryAction()
+                        } label: {
+                            HStack {
+                                if isSavingSchoolYear || isFinishing || isHandlingLegacyChoice || isJoiningClass {
+                                    ProgressView().tint(.white)
+                                } else {
+                                    Text(primaryActionTitle)
                                 }
                             }
-                            .buttonStyle(PremiumOnboardingButtonStyle(accent: accentPrimary))
-                            .padding(.horizontal, 24)
-                            .disabled(isPrimaryActionDisabled)
-                            
-                            // Tighter bottom spacing for premium feel
-                            Spacer().frame(height: 16)
                         }
-                        .background(
-                            LinearGradient(
-                                colors: [.clear, Color.black.opacity(0.15)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                            .ignoresSafeArea()
+                        .buttonStyle(PremiumOnboardingButtonStyle(accent: accentPrimary))
+                        .padding(.horizontal, 24)
+                        .disabled(isPrimaryActionDisabled)
+                        
+                        // Tighter bottom spacing for premium feel
+                        Spacer().frame(height: 16)
+                    }
+                    .background(
+                        LinearGradient(
+                            colors: [.clear, Color.black.opacity(0.15)],
+                            startPoint: .top,
+                            endPoint: .bottom
                         )
-                        .allowsHitTesting(true)
-                    }
+                        .ignoresSafeArea()
+                    )
                 }
-            }
-        }
-        .sheetNavigationTitle("Einrichtung")
-        .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                if canGoBack {
-                    Button(action: goBack) {
-                        Image(systemName: "chevron.left")
-                            .imageScale(.medium)
-                            .font(.body.weight(.semibold))
-                    }
-                    .foregroundStyle(.primary)
-                }
-            }
-            
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Group {
-                    if showCloseButton {
-                        Button(action: closeOnboarding) {
-                            Image(systemName: "xmark")
-                                .imageScale(.medium)
-                                .font(.body.weight(.semibold))
+                .allowsHitTesting(true)
+                .ignoresSafeArea(.keyboard, edges: .bottom)
+                .navigationTitle("")
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        if canGoBack {
+                            Button(action: goBack) {
+                                ToolbarIcon(symbol: "chevron.left", showDot: false)
+                            }
                         }
-                        .foregroundStyle(.primary)
-                    } else if showSignOutButton {
-                        Button {
-                            authManager.signOut()
-                            dismiss()
-                        } label: {
-                            Image(systemName: "rectangle.portrait.and.arrow.right")
-                                .imageScale(.medium)
-                                .font(.body.weight(.semibold))
+                    }
+                    
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        HStack(spacing: 0) {
+                            Button {
+                                showHelpSheet = true
+                            } label: {
+                                ToolbarIcon(symbol: "questionmark.circle", showDot: false)
+                            }
+                            
+                            if showCloseButton {
+                                Button(action: closeOnboarding) {
+                                    ToolbarIcon(symbol: "xmark", showDot: false)
+                                }
+                            } else if showSignOutButton || currentStep == .welcome {
+                                Button {
+                                    authManager.signOut()
+                                    dismiss()
+                                } label: {
+                                    ToolbarIcon(symbol: "rectangle.portrait.and.arrow.right", showDot: false, color: .red)
+                                }
+
+                            }
                         }
-                        .foregroundStyle(.red)
                     }
                 }
-            }
-        }
-        .onAppear {
-            bootstrapDefaults()
-            currentStep = .welcome
-        }
-        .sheet(isPresented: $showAddSubjectSheet) {
-            AddSubjectView()
-                .environmentObject(store)
-        }
-        .onChange(of: store.legacyMigrationSummary) { _, summary in
-            if summary != nil {
-                currentStep = .legacy
+                .sheet(isPresented: $showHelpSheet) {
+                    NavigationStack {
+                        HelpCenterView()
+                            .environmentObject(store)
+                            .toolbar {
+                                ToolbarItem(placement: .topBarTrailing) {
+                                    Button {
+                                        showHelpSheet = false
+                                    } label: {
+                                        ToolbarIcon(symbol: "xmark", showDot: false)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                    }
+                }
+                .onAppear {
+                    bootstrapDefaults()
+                    currentStep = .welcome
+                }
+                .sheet(isPresented: $showAddSubjectSheet) {
+                    AddSubjectView()
+                        .environmentObject(store)
+                }
+                .sheet(isPresented: $showCourseJoinSheet) {
+                    if let ctx = joinContextForSheet {
+                        CourseJoinView(
+                            classId: ctx.id,
+                            className: ctx.name,
+                            config: ctx.config,
+                            linkedClassIds: ctx.linkedClassIds,
+                            onJoinSuccess: {
+                                showCourseJoinSheet = false
+                                self.mappedClassId = ctx.id
+                                // Check for mapping
+                                let missing = store.missingSubjects(for: ctx.id)
+                                if !missing.isEmpty {
+                                    self.joinedCoursesForMapping = missing
+                                    self.showSubjectMappingSheet = true
+                                } else {
+                                    withAnimation { currentStep = .subjects }
+                                }
+                            }
+                        )
+                        .environmentObject(store)
+                    }
+                }
+                .sheet(isPresented: $showSubjectMappingSheet) {
+                    if let activeClassId = mappedClassId {
+                        SubjectMappingView(classId: activeClassId, courses: joinedCoursesForMapping)
+                            .environmentObject(store)
+                            .onDisappear {
+                                withAnimation { currentStep = .subjects }
+                            }
+                    }
+                }
+                .sheet(isPresented: $showScanner) {
+                    QRScannerView { scannedCode in
+                        onboardingClassCode = extractCode(from: scannedCode)
+                    }
+                }
+                .sheet(isPresented: $showFeatureBriefing) {
+                    FeatureBriefingSheet()
+                }
+                .onChange(of: store.legacyMigrationSummary) { _, summary in
+                    if summary != nil {
+                        currentStep = .legacy
+                    }
+                }
+                .keyboardDismissToolbar()
             }
         }
     }
@@ -374,7 +464,9 @@ struct OnboardingFunnelView: View {
             await store.handleLegacyMigrationChoice(keepWebData: keep)
             await MainActor.run {
                 isHandlingLegacyChoice = false
-                currentStep = .schoolYear
+                withAnimation {
+                    currentStep = .schoolYear
+                }
                 if !keep {
                     store.legacySelectedSubjects = []
                 }
@@ -415,7 +507,9 @@ struct OnboardingFunnelView: View {
     }
 
     private func bootstrapDefaults() {
+        wasAlreadyConfigured = (store.activeSchoolYearId != nil || !store.subjects.isEmpty)
         let baseYear = store.activeSchoolYearId ?? SchoolYearService.currentSchoolYearId()
+
         selectedSchoolType = store.schoolType
         if isSchoolYearChange {
             schoolYearInput = SchoolYearService.nextSchoolYearId(from: baseYear)
@@ -507,8 +601,77 @@ struct OnboardingFunnelView: View {
                 pendingSchoolYearId = targetId
                 pendingSchoolType = selectedSchoolType
                 pendingGradeYear = gradeSelection
+                store.activeSchoolYearId = targetId
                 isSavingSchoolYear = false
-                currentStep = .subjects
+                withAnimation {
+                    currentStep = .joinClass
+                }
+            }
+        }
+    }
+
+    private func handleJoinClassAction() {
+        if hasJoinedClasses {
+            withAnimation { currentStep = .subjects }
+            return
+        }
+        
+        let code = onboardingClassCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        if code.isEmpty {
+            withAnimation { currentStep = .subjects }
+            return
+        }
+        
+        isJoiningClass = true
+        classJoinError = nil
+        
+        Task {
+            do {
+                let info = try await store.fetchClassInfo(with: code)
+                if let config = info.config {
+                    // Has branches -> Always show sheet
+                    await MainActor.run {
+                        self.joinContextForSheet = ClassJoinContext(
+                            id: info.id,
+                            name: info.name,
+                            config: config,
+                            linkedClassIds: info.linkedClassIds ?? []
+                        )
+                        self.isJoiningClass = false
+                        self.showCourseJoinSheet = true
+                    }
+                } else if let linked = info.linkedClassIds, !linked.isEmpty {
+                    // No branches, but has linked classes -> Show sheet to opt-in
+                    await MainActor.run {
+                        self.joinContextForSheet = ClassJoinContext(
+                            id: info.id,
+                            name: info.name,
+                            config: nil,
+                            linkedClassIds: linked
+                        )
+                        self.isJoiningClass = false
+                        self.showCourseJoinSheet = true
+                    }
+                } else {
+                    try await store.joinClass(with: code)
+                    await MainActor.run {
+                        self.isJoiningClass = false
+                        self.mappedClassId = info.id
+                        
+                        let missing = store.missingSubjects(for: info.id)
+                        if !missing.isEmpty {
+                            self.joinedCoursesForMapping = missing
+                            self.showSubjectMappingSheet = true
+                        } else {
+                            withAnimation { currentStep = .subjects }
+                        }
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.classJoinError = error.localizedDescription
+                    self.isJoiningClass = false
+                }
             }
         }
     }
@@ -539,9 +702,9 @@ struct OnboardingFunnelView: View {
     }
 
     private func goBack() {
-        let all = Step.allCases
-        if let idx = all.firstIndex(of: currentStep), idx > 0 {
-            currentStep = all[idx - 1]
+        let steps = visibleSteps
+        if let idx = steps.firstIndex(of: currentStep), idx > 0 {
+            withAnimation { currentStep = steps[idx - 1] }
         }
     }
 
@@ -668,6 +831,103 @@ extension OnboardingFunnelView {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+        }
+    }
+
+    @ViewBuilder
+    func JoinClassPage() -> some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 24) {
+                HeaderSection(
+                    icon: "person.badge.plus.fill",
+                    title: "Klasse beitreten",
+                    subtitle: "Überspringe diesen Schritt, wenn du deine Fächer manuell verwalten möchtest."
+                )
+                
+                if let classId = store.classIds.first {
+                    // JOINED STATE
+                    SettingsCard(
+                        title: "Beigetreten",
+                        subtitle: store.classNames[classId] ?? "Deine Klasse",
+                        systemImage: "checkmark.circle.fill",
+                        accent: .green
+                    ) {
+                        VStack(spacing: 16) {
+                            Text("Du bist der Klasse **\(store.classNames[classId] ?? classId)** erfolgreich beigetreten.")
+                                .multilineTextAlignment(.center)
+                                .foregroundStyle(.secondary)
+                            
+                            Button {
+                                Task {
+                                    await store.leaveClass(code: classId)
+                                    await MainActor.run {
+                                        mappedClassId = nil
+                                    }
+                                }
+                            } label: {
+                                Label("Klasse verlassen", systemImage: "rectangle.portrait.and.arrow.right")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.red)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 4)
+                    }
+                    .padding(.horizontal, 20)
+                } else {
+                    // INPUT STATE
+                    SettingsCard(
+                        title: "Klassencode",
+                        subtitle: "Optional",
+                        systemImage: "qrcode",
+                        accent: .indigo
+                    ) {
+                        VStack(spacing: 12) {
+                            TextField("Code eingeben", text: $onboardingClassCode)
+                                .font(.title3.monospaced())
+                                .multilineTextAlignment(.center)
+                                .textInputAutocapitalization(.characters)
+                                .padding(14)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .fill(Color.formInputBackground)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .stroke(Color.indigo.opacity(0.3), lineWidth: 1)
+                                )
+                            
+                            Button {
+                                showScanner = true
+                            } label: {
+                                Label("QR-Code scannen", systemImage: "viewfinder")
+                                    .font(.subheadline)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.indigo)
+                            
+                            if let err = classJoinError {
+                                Text(err)
+                                    .font(.footnote)
+                                    .foregroundStyle(.red)
+                                    .multilineTextAlignment(.center)
+                            }
+                            
+                            Text("Tipp: Du kannst deine Klasse auch später im Klassen-Tab hinzufügen.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.top, 4)
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                }
+                
+                Spacer(minLength: 120)
+            }
         }
     }
 
@@ -862,8 +1122,38 @@ extension OnboardingFunnelView {
                         subtitle: "Deine Noten auf iOS und Android.",
                         accent: .orange
                     )
+                    
+                    WelcomeFeatureCard(
+                        icon: "graduationcap.fill",
+                        title: "Abitur-Rechner",
+                        subtitle: "Smarte Prognosen für deinen Abschluss.",
+                        accent: .purple
+                    )
+
+                    WelcomeFeatureCard(
+                        icon: "wifi.slash",
+                        title: "Offline-Backup",
+                        subtitle: "Lerne überall – auch ohne Internet.",
+                        accent: .gray
+                    )
                 }
                 .padding(.horizontal, 20)
+                
+                Button {
+                    showFeatureBriefing = true
+                } label: {
+                    HStack {
+                        Image(systemName: "sparkles")
+                        Text("Alle Features entdecken")
+                        Image(systemName: "chevron.right")
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(accentPrimary)
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 16)
+                    .background(accentPrimary.opacity(0.1))
+                    .clipShape(Capsule())
+                }
 
                 if legacyStepRequired, let summary = store.legacyMigrationSummary {
                     SettingsCard(
@@ -938,6 +1228,44 @@ extension OnboardingFunnelView {
                     title: "Deine Fächer",
                     subtitle: "Wähle deine Fachrichtung für ein schnelles Setup."
                 )
+                
+                // Existing Subjects (from Class Join)
+                if !store.subjects.isEmpty {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("BEREITS EINGERICHTET (\(store.subjects.count))")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, 28)
+                        
+                        VStack(spacing: 12) {
+                            ForEach(store.subjects) { subject in
+                                HStack {
+                                    ZStack {
+                                        Circle()
+                                            .fill(Color.green.opacity(0.15))
+                                            .frame(width: 32, height: 32)
+                                        Image(systemName: "checkmark")
+                                            .font(.caption.weight(.bold))
+                                            .foregroundStyle(.green)
+                                    }
+                                    
+                                    Text(subject.name)
+                                        .font(.subheadline.weight(.semibold))
+                                    
+                                    Spacer()
+                                    
+                                    Image(systemName: "lock.fill")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary.opacity(0.5))
+                                }
+                                .padding(12)
+                                .background(Color.formCardBackground)
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                    }
+                }
                 
                 SettingsCard(
                     title: "Fachrichtung",
@@ -1207,5 +1535,122 @@ struct PremiumOnboardingButtonStyle: ButtonStyle {
                     shimmerOffset = 1
                 }
             }
+    }
+}
+
+// MARK: - Feature Briefing Sheet
+struct FeatureBriefingSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var store: GradesStore
+    @State private var showHelpCenter = false
+    
+    private var accentPrimary: Color {
+        store.theme == "feminine" ? Color(hex: "#ec4899") : .indigo
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 24) {
+                    VStack(spacing: 8) {
+                        Text("Deine Features")
+                            .font(.title.weight(.bold))
+                        Text("Alles, was du für deinen Abschluss brauchst.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 20)
+                    
+                    VStack(spacing: 16) {
+                        featureRow(icon: "chart.bar.fill", title: "Schnitt-Analyse", text: "Automatisches MSS-System für Bayern mit Block-Gewichtung und Rundung.", accent: .blue)
+                        featureRow(icon: "graduationcap.fill", title: "Abitur-Rechner", text: "Vorschau auf dein Abitur/Fachabitur basierend auf aktuellen Noten.", accent: .purple)
+                        featureRow(icon: "person.2.fill", title: "Klassen-Sync", text: "Tritt deiner Klasse bei, um Fächer, Hausaufgaben und Termine automatisch zu laden.", accent: .green)
+                        featureRow(icon: "bell.badge.fill", title: "Prüfungs-Timer & Hausaufgaben", text: "Verpasse nie wieder eine Abgabe oder Klausur durch intelligente Benachrichtigungen.", accent: .red)
+                        featureRow(icon: "cloud.fill", title: "Multi-Plattform Sync", text: "Deine Daten sind sicher in der Cloud und auf all deinen Geräten verfügbar.", accent: .orange)
+                        featureRow(icon: "wifi.slash", title: "Offline-Modus", text: "Alle Funktionen klappen auch ohne Internet. Sync erfolgt automatisch.", accent: .secondary)
+                        featureRow(icon: "lock.fill", title: "Privacy & Datenschutz", text: "Deine Noten gehören dir. Ende-zu-Ende Verschlüsselung für maximale Sicherheit.", accent: .indigo)
+                    }
+                    .padding(.horizontal, 20)
+                    
+                    VStack(spacing: 12) {
+                        Text("Noch Fragen?")
+                            .font(.headline)
+                        
+                        Button {
+                            showHelpCenter = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "questionmark.circle.fill")
+                                Text("Zum Help Center")
+                            }
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .padding(.vertical, 14)
+                            .frame(maxWidth: .infinity)
+                            .background(accentPrimary)
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        }
+                    }
+                    .padding(24)
+                    .background(accentPrimary.opacity(0.05))
+                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    .padding(.horizontal, 20)
+                    .padding(.top, 10)
+                }
+                .padding(.bottom, 40)
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        ToolbarIcon(symbol: "xmark", showDot: false)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .sheet(isPresented: $showHelpCenter) {
+                NavigationStack {
+                    HelpCenterView()
+                        .environmentObject(store)
+                        .toolbar {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button {
+                                    showHelpCenter = false
+                                } label: {
+                                    ToolbarIcon(symbol: "xmark", showDot: false)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                }
+            }
+            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
+        }
+    }
+    
+    private func featureRow(icon: String, title: String, text: String, accent: Color) -> some View {
+        HStack(alignment: .top, spacing: 16) {
+            ZStack {
+                Circle()
+                    .fill(accent.opacity(0.15))
+                    .frame(width: 40, height: 40)
+                Image(systemName: icon)
+                    .foregroundStyle(accent)
+                    .font(.headline)
+            }
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.headline)
+                Text(text)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+        }
     }
 }

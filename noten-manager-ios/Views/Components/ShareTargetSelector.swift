@@ -18,7 +18,7 @@ struct ShareTargetSelector: View {
     var body: some View {
         SettingsCard(
             title: "Sichtbarkeit & Teilen",
-            subtitle: shareWithGroup ? "Wird mit ausgewählten Kurse/Gruppen geteilt" : "Nur für dich sichtbar",
+            subtitle: shareWithGroup ? "Wird mit ausgewählten Klassen/Kursen geteilt" : "Nur für dich sichtbar",
             systemImage: shareWithGroup ? "person.3.fill" : "lock.fill",
             accent: shareWithGroup ? .indigo : .secondary
         ) {
@@ -27,7 +27,7 @@ struct ShareTargetSelector: View {
                     // Main Toggle
                     Toggle(isOn: $shareWithGroup.animation(.snappy)) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Mit Kursen/Gruppen teilen")
+                            Text("Mit Klassen/Kursen teilen")
                                 .font(.body)
                                 .foregroundStyle(.primary)
                             if !shareWithGroup {
@@ -40,16 +40,16 @@ struct ShareTargetSelector: View {
                     .tint(.indigo)
                     
                     if shareWithGroup {
-                        if store.courses.isEmpty && store.groupIds.isEmpty && store.classIds.isEmpty {
-                            // No groups available
+                        if store.courses.isEmpty && store.classIds.isEmpty {
+                            // No classes/courses available
                             HStack(spacing: 12) {
-                                Image(systemName: "person.3.slash.fill")
+                                Image(systemName: "person.2.slash.fill")
                                     .font(.largeTitle)
                                     .foregroundStyle(.secondary.opacity(0.5))
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text("Keine Kurse oder Gruppen")
+                                    Text("Keine Klassen oder Kurse")
                                         .font(.headline)
-                                    Text("Du bist noch keinen Kursen beigetreten.")
+                                    Text("Du bist noch keinen Klassen oder Kursen beigetreten.")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -89,7 +89,7 @@ struct ShareTargetSelector: View {
                                 // 2. Classes Section (Legacy/Groups)
                                 if !store.classIds.isEmpty {
                                     VStack(alignment: .leading, spacing: 10) {
-                                        Label("Klassen (Gruppen)", systemImage: "rectangle.stack.fill")
+                                        Label("Klassen", systemImage: "rectangle.stack.fill")
                                             .font(.footnote.weight(.semibold))
                                             .foregroundStyle(.secondary)
                                         
@@ -107,58 +107,6 @@ struct ShareTargetSelector: View {
                                         }
                                     }
                                 }
-                                
-                                // 3. Groups Section (Legacy & Social)
-                                 let classAssociatedGroupIds = Set(store.classDetails.values.flatMap(\.groupIds))
-                                 let hiddenGroupIds = store.migratedGroupIds.union(classAssociatedGroupIds)
-                                 let visibleGroupIds = store.groupIds.filter { !hiddenGroupIds.contains($0) }
-                                 
-                                 let socialGroupIds = visibleGroupIds.filter { store.groupTypes[$0] == "social" }
-                                 let legacyGroupIds = visibleGroupIds.filter { store.groupTypes[$0] != "social" }
-                                 
-                                 if !socialGroupIds.isEmpty {
-                                     VStack(alignment: .leading, spacing: 10) {
-                                         Label("Soziale Gruppen", systemImage: "person.2.fill")
-                                             .font(.footnote.weight(.semibold))
-                                             .foregroundStyle(.secondary)
-                                         
-                                         let sortedSocial = socialGroupIds.sorted { (store.groupNames[$0] ?? "").localizedCaseInsensitiveCompare(store.groupNames[$1] ?? "") == .orderedAscending }
-                                         FlowLayout(spacing: 8) {
-                                             ForEach(sortedSocial, id: \.self) { gid in
-                                                 GroupSelectionChip(
-                                                     groupId: gid,
-                                                     isSelected: selectedGroupIds.contains(gid),
-                                                     isAutoSelected: autoSelectedGroupIds.contains(gid),
-                                                     isImplicitlySelected: isGroupImplicitlySelected(gid)
-                                                 ) {
-                                                     toggleGroup(gid)
-                                                 }
-                                             }
-                                         }
-                                     }
-                                 }
-                                 
-                                 if !legacyGroupIds.isEmpty {
-                                     VStack(alignment: .leading, spacing: 10) {
-                                         Label("Themengruppen (Fächer)", systemImage: "person.3.fill")
-                                             .font(.footnote.weight(.semibold))
-                                             .foregroundStyle(.secondary)
-                                         
-                                         let sortedLegacy = legacyGroupIds.sorted { (store.groupNames[$0] ?? "").localizedCaseInsensitiveCompare(store.groupNames[$1] ?? "") == .orderedAscending }
-                                         FlowLayout(spacing: 8) {
-                                             ForEach(sortedLegacy, id: \.self) { gid in
-                                                 GroupSelectionChip(
-                                                     groupId: gid,
-                                                     isSelected: selectedGroupIds.contains(gid),
-                                                     isAutoSelected: autoSelectedGroupIds.contains(gid),
-                                                     isImplicitlySelected: isGroupImplicitlySelected(gid)
-                                                 ) {
-                                                     toggleGroup(gid)
-                                                 }
-                                             }
-                                         }
-                                     }
-                                 }
                                 
                                 // Info Footer
                                 HStack(alignment: .top, spacing: 8) {
@@ -198,33 +146,17 @@ struct ShareTargetSelector: View {
         }
     }
     
-    private func toggleGroup(_ gid: String) {
-        if selectedGroupIds.contains(gid) {
-            selectedGroupIds.remove(gid)
-        } else {
-            selectedGroupIds.insert(gid)
-        }
-    }
-    
-    private func isGroupImplicitlySelected(_ gid: String) -> Bool {
-        // Check if this group belongs to any selected class
-        for cid in selectedClassIds {
-             if let details = store.classDetails[cid], details.groupIds.contains(gid) {
-                 return true
-             }
-        }
-        return false
-    }
-    
     private func courseLabel(for course: Course) -> String {
-        if let classId = course.classId, let className = store.classNames[classId] {
-            switch course.type {
+        if let classId = course.classId, let className = store.classNames[classId], let type = course.type {
+            switch type {
             case .mandatory:
                 return className
             case .branch(let branchName):
                 return "\(className) (\(branchName))"
             case .elective:
                 return "\(course.name) (\(className))"
+            case .wahlpflicht(let groupId):
+                 return "\(store.wahlpflichtfachGroupNames[groupId] ?? "Wahlpflicht") (\(className))"
             }
         }
         return course.name

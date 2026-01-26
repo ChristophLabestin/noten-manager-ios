@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased] - 2026-01-26
+
+### Added
+- **Notification Overhaul**: Integrated `FcmTokenManager` for robust token handling and added `NotificationSettingsView` for granular control.
+- **Offline Support**: Implemented `OfflineSnapshot` and `PendingDataModels` to support robust data persistence during connection drops.
+- **Sync Status UI**: Added `SyncStatusView`, `EnhancedLoadingScreen`, and `MinimalLoadingIndicator` for better user feedback during data synchronization.
+- **Support System**: Introduced `SupportHistoryView` and related models for tracking support requests.
+
+### Changed
+- **Elective Integration**: Fully integrated elective subjects into the `ClassDetailView` and `CourseJoinView`, merging them into a unified "Branches" section.
+- **Onboarding Refinement**: Updated `OnboardingFunnelView` to support the new elective-aware joining flow.
+- **Settings UI**: Significantly refactored `AppSettingsView` and introduced `SettingsButtonLabel` for a more consistent and modular settings experience.
+- **State Management**: Refactored `GradesStore` and `AuthManager` to improve state cleanup (specifically addressing state leaks during logout) and data fetching efficiency.
+- **UI Polish**: Simplified `HomeView` by removing redundant loading cards and refined padding/alignment across several components.
+
+### Fixed
+- **State Leak**: Resolved issues where onboarding flags were not correctly reset on logout.
+- **Navigation Errors**: Fixed compilation and logic errors in `CourseJoinView` related to branch selection.
+
 ## [Unreleased] - 2026-01-19
 
 ### Added

@@ -249,7 +249,7 @@ struct ReportCardView: View {
         if v.truncatingRemainder(dividingBy: 1) == 0 {
             return String(format: "%.0f", v)
         } else {
-            return String(format: "%.2f", v)
+            return String(format: "%.\(data.mssDecimalPrecision)f", v)
         }
     }
     

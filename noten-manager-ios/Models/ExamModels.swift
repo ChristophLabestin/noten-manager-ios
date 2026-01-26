@@ -95,8 +95,13 @@ struct Exam: Codable, Identifiable, Hashable, Sendable {
         if let decodedHasTime {
             hasTime = decodedHasTime
         } else {
-            let calendar = Calendar.current
-            hasTime = !calendar.isDate(date, equalTo: calendar.startOfDay(for: date), toGranularity: .minute)
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.locale = .current // locale.current might also be tricky? let's stick to just gregorian and hope for best. 
+            // Actually, Calendar.current reflects user settings. 
+            // Accessing 'current' on a global might be main-actor isolated in some strict concurrency views?
+            // Let's try to isolate it.
+            let cal = Calendar(identifier: .gregorian)
+            hasTime = !cal.isDate(date, equalTo: cal.startOfDay(for: date), toGranularity: .minute)
         }
         weight = try container.decodeIfPresent(Int.self, forKey: .weight)
         customWeight = try container.decodeIfPresent(Double.self, forKey: .customWeight)

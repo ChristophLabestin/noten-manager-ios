@@ -10,6 +10,7 @@ struct ClassCourseCreationView: View {
     @State private var selectedType: CourseType = .mandatory
     @State private var selectedBranchName: String = ""
     @State private var availableBranches: [String] = []
+    @State private var gradingMode: GradingMode = .withSchulaufgaben
     @State private var isCreating: Bool = false
     @State private var errorMessage: String?
     
@@ -41,6 +42,16 @@ struct ClassCourseCreationView: View {
                     Text("Kurstyp")
                 } footer: {
                     Text("Pflichtfächer sind für alle sichtbar. Zweig-Kurse nur für Schüler des jeweiligen Zweigs.")
+                }
+                Section {
+                    Picker("Notensystem", selection: $gradingMode) {
+                        Text("Mit Schulaufgaben").tag(GradingMode.withSchulaufgaben)
+                        Text("Ohne Schulaufgaben").tag(GradingMode.withoutSchulaufgaben)
+                    }
+                } header: {
+                    Text("Bewertung")
+                } footer: {
+                    Text("Bestimmt, ob dieses Fach Schulaufgaben (große Leistungsnachweise) beinhaltet.")
                 }
                 
                 if let error = errorMessage {
@@ -74,7 +85,7 @@ struct ClassCourseCreationView: View {
         do {
             let info = try await store.fetchClassInfo(with: classId)
             if let config = info.config {
-                availableBranches = config.branches.map { $0.name }
+                availableBranches = config.branches?.map { $0.name } ?? []
             }
         } catch {
             print("Failed to load class config: \(error)")
@@ -93,7 +104,7 @@ struct ClassCourseCreationView: View {
         }
         
         do {
-            try await store.addCourseToClass(classId: classId, name: trimmedName, type: selectedType)
+            try await store.addCourseToClass(classId: classId, name: trimmedName, type: selectedType, gradingMode: gradingMode)
             let generator = UINotificationFeedbackGenerator()
             generator.notificationOccurred(.success)
             onCourseCreated()

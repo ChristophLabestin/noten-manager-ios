@@ -12,12 +12,56 @@ struct QuickAddSubjectPreferenceKey: PreferenceKey {
     }
 }
 
+enum SheetDestination: Identifiable {
+    case launchMessage
+    case subscriptionOffer
+    case examList
+    case homeworkList
+    case notifications
+    case groupJoin
+    case launchLaterReminder
+    case creationMenu
+    case addSubject
+    case addGrade
+    case addFachreferat
+    case fachreferatDetail
+    case addHomework
+    case addExam
+    case practical
+    case seminar
+    case groupCreation
+    case onboardingFunnel
+    
+    var id: String {
+        switch self {
+        case .launchMessage: return "launchMessage"
+        case .subscriptionOffer: return "subscriptionOffer"
+        case .examList: return "examList"
+        case .homeworkList: return "homeworkList"
+        case .notifications: return "notifications"
+        case .groupJoin: return "groupJoin"
+        case .launchLaterReminder: return "launchLaterReminder"
+        case .creationMenu: return "creationMenu"
+        case .addSubject: return "addSubject"
+        case .addGrade: return "addGrade"
+        case .addFachreferat: return "addFachreferat"
+        case .fachreferatDetail: return "fachreferatDetail"
+        case .addHomework: return "addHomework"
+        case .addExam: return "addExam"
+        case .practical: return "practical"
+        case .seminar: return "seminar"
+        case .groupCreation: return "groupCreation"
+        case .onboardingFunnel: return "onboardingFunnel"
+        }
+    }
+}
+
 struct MainView: View {
     let onLogout: () -> Void
     @Binding var incomingHomeworkShare: HomeworkShareLinkPayload?
     @Binding var incomingExamId: String?
     @Binding var deeplinkDestination: DeeplinkDestination?
-    @StateObject private var gradesStore = GradesStore()
+    @EnvironmentObject private var gradesStore: GradesStore
     @StateObject private var notificationInbox = NotificationInboxStore.shared
     @State private var currentTab: BottomNavView.Tab = .home
     @EnvironmentObject private var offlineManager: OfflineModeManager
@@ -31,7 +75,6 @@ struct MainView: View {
     @AppStorage("launchMessageSeen_2026_paid") private var launchMessageSeen = false
     @AppStorage("launchOfferPurchased") private var launchOfferPurchased = false
     @State private var navPath = NavigationPath()
-    @State private var showOnboardingFunnel: Bool = false
     @State private var offlineBannerVisible: Bool = false
     @State private var offlineBannerDismissTask: Task<Void, Never>?
     @State private var reconnectTask: Task<Void, Never>?
@@ -39,16 +82,15 @@ struct MainView: View {
     @State private var nextSchoolYearSuggestion: String?
     @State private var spinnerAnimating: Bool = false
     @State private var emailBannerVisible: Bool = false
+    @State private var emailVerificationError: Bool = false
+    @State private var isVerifyingEmail: Bool = false
     @State private var emailBannerDismissTask: Task<Void, Never>?
     @State private var needsEmailVerification: Bool = false
     @State private var scrollToAccountOnOpen: Bool = false
-    @State private var showNotificationsSheet: Bool = false
     @State private var pendingNotificationAction: NotificationInboxItem?
     @State private var pendingOpenLaunchMessageFromInbox: Bool = false
-    @State private var showLaunchMessage: Bool = false
     @State private var showLaunchLaterReminder: Bool = false
     @State private var pendingLaunchLaterReminder: Bool = false
-    @State private var showSubscriptionOffer: Bool = false
     @State private var showSubscriptionPurchaseSuccess: Bool = false
     @State private var pendingSubscriptionPurchaseSuccess: Bool = false
     @State private var subscriptionOfferShownThisSession: Bool = false
@@ -56,6 +98,7 @@ struct MainView: View {
     @State private var pendingLaunchPurchaseSuccess: Bool = false
     @State private var showGroupJoinSheet: Bool = false
     @State private var pendingGroupJoinCode: String = ""
+    @State private var activeSheet: SheetDestination?
 
     // Von SubjectDetail per Preference gemeldetes Fach für „Note hinzufügen“
     @State private var quickAddSubjectName: String? = nil
@@ -63,22 +106,9 @@ struct MainView: View {
     @State private var deeplinkExamId: String? = nil
     @State private var deeplinkExam: Exam? = nil
     @State private var deeplinkHomework: Homework? = nil
-    @State private var showExamListSheet: Bool = false
-    @State private var showHomeworkListSheet: Bool = false
-
-    // Sheet States (Migrated for iOS 26+ Native TabView support)
-    @State private var showCreationMenu: Bool = false
-    @State private var showAddSubject: Bool = false
-    @State private var showAddGrade: Bool = false
-    @State private var showAddFachreferat: Bool = false
-    @State private var showFachreferatDetail: Bool = false
-    @State private var showAddHomework: Bool = false
-    @State private var showAddExam: Bool = false
-    @State private var showPractical: Bool = false
-    @State private var showSeminar: Bool = false
-    @State private var showGroupCreation: Bool = false
     
     @AppStorage("showSpeedometerOnLaunch") private var showSpeedometerOnLaunch: Bool = false
+    @State private var isInitialLaunch: Bool = true // Force loading screen on start
     
     // Fancy Speedometer Cover State
     @State private var showSpeedometerCover: Bool = false
@@ -124,20 +154,12 @@ struct MainView: View {
             }
             .onAppear {
                 gradesStore.syncDarkModeWithSystem(colorScheme: colorScheme)
-                showLaunchMessageIfNeeded()
-                Task { await showSubscriptionOfferIfNeeded() }
                 notificationInbox.refreshFromDelivered()
                 scheduleLaunchOfferNotifications(purchased: launchOfferPurchased)
-                if LaunchOfferNotificationManager.consumePendingOpen() {
-                    handleOpenLaunchOfferNotification()
-                }
-                
+
                 if showSpeedometerOnLaunch {
                     showSpeedometerCover = true
                 }
-                
-                enforceSubscriptionGateIfNeeded()
-                attemptRequestReview()
                 
                 // Native TabBar Appearance (Liquid Glass)
                 let appearance = UITabBarAppearance()
@@ -162,11 +184,9 @@ struct MainView: View {
                 enforceSubscriptionGateIfNeeded()
             }
             .preferredColorScheme(gradesStore.preferredColorScheme)
+            .environmentObject(gradesStore) // Inject explicitly for overlay if needed
 
         let onboardingTracking = base
-            .onChange(of: gradesStore.onboardingRequired) { _, required in
-                showOnboardingFunnel = required
-            }
             .onChange(of: gradesStore.gradeYear) { _, _ in
                 Task { await evaluatePfingstferienPrompt() }
             }
@@ -175,10 +195,26 @@ struct MainView: View {
             }
             .onChange(of: gradesStore.isLoading) { _, loading in
                 spinnerAnimating = loading
-                if !loading {
-                    showOnboardingFunnel = gradesStore.onboardingRequired
-                } else if gradesStore.onboardingRequired {
-                    showOnboardingFunnel = true
+            }
+            .onChange(of: gradesStore.initialSyncSettled) { _, settled in
+                if settled {
+                    // First settlement: Decide between onboarding or other launch modals
+                    if gradesStore.onboardingRequired {
+                        // Handled by ContentView or separate flow if needed
+                    } else {
+                        // Priority 1: Mandatory subscription gate (if active)
+                        enforceSubscriptionGateIfNeeded()
+                        
+                        // Priority 2: Deferred Notification triggers (Launch Offer)
+                        if LaunchOfferNotificationManager.consumePendingOpen() {
+                            handleOpenLaunchOfferNotification()
+                        }
+                        
+                        // Priority 3: Non-destructive automated informational modals
+                        showLaunchMessageIfNeeded()
+                        Task { await showSubscriptionOfferIfNeeded() }
+                        attemptRequestReview()
+                    }
                 }
             }
 
@@ -202,13 +238,6 @@ struct MainView: View {
             }
 
         let lifecycle = deeplinkTracking
-            .sheet(isPresented: $showOnboardingFunnel) {
-                OnboardingFunnelView {
-                    showOnboardingFunnel = false
-                }
-                .environmentObject(gradesStore)
-                .environmentObject(authManager)
-                }
             .task {
                 await handleDataLoading()
                 await refreshEmailVerification()
@@ -234,7 +263,6 @@ struct MainView: View {
                     scrollToAccountOnOpen = false
                 }
                 if newTab == .home {
-                    showLaunchMessageIfNeeded()
                     Task { await showSubscriptionOfferIfNeeded() }
                 }
             }
@@ -243,8 +271,9 @@ struct MainView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .openGroupJoin)) { notification in
                 if let code = notification.object as? String {
+                    self.currentTab = .home
                     self.pendingGroupJoinCode = code
-                    self.showGroupJoinSheet = true
+                    self.activeSheet = .groupJoin
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .openSheet)) { notification in
@@ -257,18 +286,15 @@ struct MainView: View {
                     openInboxNotification(item)
                 }
             }
-
             .onChange(of: gradesStore.legacyMigrationSummary) { _, summary in
-                if summary != nil {
-                    showOnboardingFunnel = true
-                }
+                // Legacy migration handled via ContentView or Alert in future
             }
 
         let overlays = lifecycle
-            .overlay(alignment: .center) {
-                if gradesStore.isLoading {
-                    loadingOverlay
-                }
+            // Minimal Loading Indicator (Non-Blocking)
+            // Minimal Loading Indicator (Removed in favor of SyncStatusView in Home)
+            .overlay(alignment: .bottom) {
+                // Empty
             }
             .overlay(alignment: .top) {
                 VStack(spacing: 8) {
@@ -281,79 +307,24 @@ struct MainView: View {
             }
             // Fancy Speedometer Cover Layer
             .overlay {
-                if showSpeedometerCover && currentTab == .home && !showOnboardingFunnel {
+                if showSpeedometerCover && currentTab == .home {
                     FancyCoverView(isPresented: $showSpeedometerCover)
                         .transition(.move(edge: .bottom))
                         .zIndex(100)
                         .environmentObject(gradesStore)
                 }
             }
+            // Enhanced Loading Screen (Full Screen Cover)
+            .overlay {
+                if gradesStore.isLoading || isInitialLaunch {
+                    EnhancedLoadingScreen()
+                        .transition(.opacity.animation(.easeInOut(duration: 0.3)))
+                        .zIndex(200) // Ensure it sits above everything else, including Speedometer
+                        .environmentObject(gradesStore)
+                }
+            }
 
         overlays
-            .sheet(isPresented: $showExamListSheet, onDismiss: {
-                deeplinkDestination = nil
-            }) {
-                ExamListView()
-                    .environmentObject(gradesStore)
-            }
-            .sheet(isPresented: $showHomeworkListSheet, onDismiss: {
-                deeplinkDestination = nil
-            }) {
-                HomeworkListView()
-                    .environmentObject(gradesStore)
-            }
-            .sheet(isPresented: $showNotificationsSheet, onDismiss: handleNotificationsSheetDismiss) {
-                NotificationsInboxView(
-                    inbox: notificationInbox,
-                    onSelectNotification: { item in
-                        pendingNotificationAction = item
-                    },
-                    onOpenImportant: {
-                        pendingOpenLaunchMessageFromInbox = true
-                    }
-                )
-                .environmentObject(gradesStore)
-            }
-            .sheet(isPresented: $showLaunchMessage, onDismiss: {
-                launchMessageSeen = true
-                if pendingLaunchLaterReminder {
-                    showLaunchLaterReminder = true
-                    pendingLaunchLaterReminder = false
-                }
-                if pendingLaunchPurchaseSuccess {
-                    showLaunchPurchaseSuccess = true
-                    pendingLaunchPurchaseSuccess = false
-                }
-            }) {
-                LaunchMessageSheetView(
-                    onLater: { pendingLaunchLaterReminder = true },
-                    onPurchaseSuccess: {
-                        launchOfferPurchased = true
-                        pendingLaunchPurchaseSuccess = true
-                    }
-                )
-                .environmentObject(gradesStore)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.hidden)
-                .interactiveDismissDisabled(true)
-            }
-            .sheet(isPresented: $showSubscriptionOffer, onDismiss: {
-                if pendingSubscriptionPurchaseSuccess {
-                    showSubscriptionPurchaseSuccess = true
-                    pendingSubscriptionPurchaseSuccess = false
-                }
-            }) {
-                SubscriptionOfferSheetView(
-                    onLater: {},
-                    onPurchaseSuccess: {
-                        pendingSubscriptionPurchaseSuccess = true
-                    }
-                )
-                .environmentObject(gradesStore)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.hidden)
-                .interactiveDismissDisabled(true)
-            }
             .sheet(item: $deeplinkExam) { exam in
                 ExamDetailSheet(exam: exam, onEdit: { _ in })
                     .environmentObject(gradesStore)
@@ -362,13 +333,9 @@ struct MainView: View {
                 HomeworkDetailSheet(homework: homework, onEdit: { _ in })
                     .environmentObject(gradesStore)
             }
-                .sheet(isPresented: $showGroupJoinSheet) {
-                    GroupJoinView(initialCode: pendingGroupJoinCode)
-                        .environmentObject(gradesStore)
-                }
                 .toolbar {
                     ToolbarItemGroup(placement: .navigationBarLeading) {
-                        notificationsToolbarButton
+                        notificationsToolbarButton()
                         if offlineManager.isOfflineModeActive {
                             offlineToolbarButton
                         }
@@ -388,10 +355,6 @@ struct MainView: View {
                 }
             } message: { yearId in
                 Text("Die Pfingstferien sind vorbei. Möchtest du das neue Schuljahr \(yearId) jetzt anlegen?")
-            }
-            .sheet(isPresented: $showLaunchLaterReminder) {
-                ReminderConfirmationView()
-                    .environmentObject(gradesStore)
             }
             .alert("Kauf erfolgreich", isPresented: $showLaunchPurchaseSuccess) {
                 Button("Alles klar", role: .cancel) {}
@@ -420,38 +383,90 @@ struct MainView: View {
                 DailySummarySheet(data: data)
                     .environmentObject(gradesStore)
             }
+            .sheet(isPresented: $gradesStore.showSupportHistory) {
+                SupportHistoryView()
+                    .environmentObject(gradesStore)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .openSupportTicket)) { notification in
+                if let ticketId = notification.object as? String {
+                    gradesStore.pendingTicketId = ticketId
+                    gradesStore.showSupportHistory = true
+                }
+            }
+    }
+
+    private func handleNotificationsSheetDismiss() {
+        // Small delay to ensure sheet is fully dismissed before presenting next one
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            if self.pendingOpenLaunchMessageFromInbox {
+                self.pendingOpenLaunchMessageFromInbox = false
+                if !self.gradesStore.onboardingRequired && !self.gradesStore.schoolYears.isEmpty {
+                    self.activeSheet = .launchMessage
+                }
+                return
+            }
+            guard let item = self.pendingNotificationAction else { return }
+            self.pendingNotificationAction = nil
+            self.openInboxNotification(item)
+        }
     }
 
     @MainActor
     private func handleDataLoading() async {
-        if offlineManager.isOfflineModeActive {
-            if let snapshot = offlineManager.cachedSnapshot ?? offlineManager.availableSnapshot() {
-                gradesStore.loadOfflineSnapshot(snapshot)
+        // We do NOT set gradesStore.isLoading = true here anymore to avoid full blocking.
+        // Instead, the GradesStore handles isLoading internally, and we rely on the minimal indicator.
+        // We only trigger the actual fetch/sync here.
+        gradesStore.isLoading = true // Trigger the minimal indicator
+        
+        // 1. Always attempt to load cached content immediately for instant UI
+        // Use async loading to prevent UI freeze on startup (decoding JSON on main thread causes stutter)
+        let snapshot = await offlineManager.loadSnapshotAsync()
+        
+        if let snapshot {
+            gradesStore.loadOfflineSnapshot(snapshot)
+            // Fix: Force loading state to true again, because loadOfflineSnapshot sets it to false.
+            // We want the loading screen to remain visible while we check for online updates.
+            gradesStore.isLoading = true
+             
+            // Now that we have something to show (even if we are still loading online data),
+            // we can carefully disable the initial launch flag if we wanted to show data immediately.
+            // BUT user wants loading screen to persist. So we keep isLoading = true.
+            // We'll flip isInitialLaunch to false now so standard isLoading logic takes over.
+            withAnimation {
+                isInitialLaunch = false
             }
+        } else {
+             // No snapshot, so we are definitely loading from scratch
+             // Keep isInitialLaunch = true until we are done
+        }
+        
+        // 2. Determine if we should stay in Offline Mode
+        //    Either explicitly manual, or no internet + allowed offline login
+        //    IMPORTANT: We check isManualOfflinePinned instead of isOfflineModeActive,
+        //    because step 1 (loadOfflineSnapshot) sets isOfflineModeActive = true as a side effect.
+        var shouldStayOffline = offlineManager.isManualOfflinePinned
+        
+        if !shouldStayOffline && !offlineManager.isOnline {
+            if let snapshot, offlineManager.isOfflineLoginAllowed(for: snapshot.userId) {
+                shouldStayOffline = true
+            }
+        }
+        
+        if shouldStayOffline {
+            // Fix: Explicitly activate offline mode state so UI indicators (badge/toolbar) update.
+            // We previously assumed loadOfflineSnapshot did this, but it implies local usage, not mode activation.
+            offlineManager.activateOfflineMode(manual: offlineManager.isManualOfflinePinned)
+            
             showOfflineBannerTemporarily()
             await refreshEmailVerification()
             await evaluatePfingstferienPrompt()
-            if gradesStore.onboardingRequired {
-                showOnboardingFunnel = true
-            }
+            gradesStore.isLoading = false
+            gradesStore.initialSyncSettled = true
+            withAnimation { isInitialLaunch = false }
             return
         }
 
-        // Fallback: wenn kein Internet, aber ein Snapshot existiert und innerhalb 3 Tage ist, direkt offline laden
-        if !offlineManager.isOnline {
-            if let snapshot = offlineManager.availableSnapshot(),
-               offlineManager.isOfflineLoginAllowed(for: snapshot.userId) {
-                gradesStore.loadOfflineSnapshot(snapshot)
-                showOfflineBannerTemporarily()
-                await refreshEmailVerification()
-                await evaluatePfingstferienPrompt()
-                if gradesStore.onboardingRequired {
-                    showOnboardingFunnel = true
-                }
-                return
-            }
-        }
-
+        // 3. Proceed to Online Sync
         OfflineModeManager.shared.enableFirestoreNetworkIfNeeded()
         await gradesStore.syncOfflinePendingChanges(forceLocalOverride: true)
 
@@ -459,8 +474,10 @@ struct MainView: View {
         await gradesStore.startListening()
         hideOfflineBanner()
         await evaluatePfingstferienPrompt()
-        if gradesStore.onboardingRequired {
-            showOnboardingFunnel = true
+        
+        // Final cleanup
+        withAnimation {
+             isInitialLaunch = false
         }
     }
 
@@ -478,9 +495,6 @@ struct MainView: View {
                 gradesStore.leaveOfflineModePreservingState()
                 await gradesStore.startListening()
                 hideOfflineBanner()
-                if gradesStore.onboardingRequired {
-                    showOnboardingFunnel = true
-                }
             } else {
                 await attemptReconnectOrFallback()
             }
@@ -563,9 +577,9 @@ struct MainView: View {
         return formatter
     }()
 
-    private var notificationsToolbarButton: some View {
+    private func notificationsToolbarButton() -> some View {
         Button {
-            showNotificationsSheet = true
+            activeSheet = .notifications
         } label: {
             ToolbarIcon(
                 symbol: "bell.fill",
@@ -613,50 +627,97 @@ struct MainView: View {
     }
 
     private var emailVerificationBanner: some View {
-        VStack(spacing: 10) {
-        HStack(spacing: 10) {
-            Image(systemName: "info.circle.fill")
-                .font(.headline)
-                .foregroundStyle(.white)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("E-Mail noch nicht bestätigt")
-                    .font(.subheadline)
-                    .bold()
-                    .foregroundStyle(.white)
-                Text("Bitte bestätige deine Adresse über die E-Mail, die wir gesendet haben.")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(1))
-            }
-            Spacer()
+        VStack(spacing: 12) {
+            HStack(spacing: 12) {
+                if isVerifyingEmail {
+                    ProgressView()
+                        .tint(.white)
+                        .scaleEffect(0.8)
+                } else {
+                    Image(systemName: emailVerificationError ? "exclamationmark.triangle.fill" : "info.circle.fill")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                }
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    if emailVerificationError {
+                        Text("Verbindung fehlgeschlagen")
+                            .font(.subheadline.bold())
+                            .foregroundStyle(.white)
+                        Text("Bitte überprüfe deine Internetverbindung.")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.9))
+                    } else {
+                        Text("E-Mail noch nicht bestätigt")
+                            .font(.subheadline.bold())
+                            .foregroundStyle(.white)
+                        Text("Bitte bestätige deine Adresse über die E-Mail, die wir gesendet haben.")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.9))
+                    }
+                }
+                
+                Spacer()
 
-            Button {
-                hideEmailBanner()
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.headline)
-                    .foregroundStyle(.white.opacity(1))
+                Button {
+                    hideEmailBanner()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.headline)
+                        .foregroundStyle(.white.opacity(0.8))
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
-        }
-            Button {
-                scrollToAccountOnOpen = true
-                currentTab = .settings
-                hideEmailBanner()
-            } label: {
-                Label("Zu Einstellungen", systemImage: "arrow.right.circle")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white)
+            
+            HStack(spacing: 10) {
+                if emailVerificationError {
+                    Button {
+                        Task { await refreshEmailVerification() }
+                    } label: {
+                        Label("Erneut versuchen", systemImage: "arrow.clockwise")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color.red)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.white)
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Button {
+                        scrollToAccountOnOpen = true
+                        currentTab = .settings
+                        hideEmailBanner()
+                    } label: {
+                        Label("Zu Einstellungen", systemImage: "arrow.right.circle")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.white.opacity(0.25))
+                    .controlSize(.small)
+                }
+                
+                if !emailVerificationError {
+                    Button {
+                        Task { await refreshEmailVerification() }
+                    } label: {
+                        Text("Aktualisieren")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.white)
+                            .underline()
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-            .buttonStyle(.borderedProminent)
-            .tint(.white.opacity(0.25))
-            .controlSize(.small)
         }
-        .padding(12)
+        .padding(14)
         .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.red.opacity(1))
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(emailVerificationError ? Color.orange : Color.red)
         )
         .padding(.horizontal, 16)
+        .animation(.snappy, value: emailVerificationError)
     }
 
     private var emailVerificationToolbarButton: some View {
@@ -692,24 +753,39 @@ struct MainView: View {
     private func showLaunchMessageIfNeeded() {
         guard authManager.isAuthenticated else { return }
         guard currentTab == .home else { return }
+        guard !gradesStore.isLoading else { return }
+        guard !gradesStore.onboardingRequired else { return }
+        // New user safety guard: strictly no launch message if no years or no active year
+        guard !gradesStore.schoolYears.isEmpty else { return }
+        guard gradesStore.activeSchoolYearId != nil else { return }
+        
         guard !launchMessageSeen else { return }
+        
+        // Version-based guard: only show if user registered on an older version
+        if let regVersion = gradesStore.registeredInVersion {
+            // Very simple comparison for now (legacy or older strings)
+            guard regVersion != "1.3" else { return }
+        }
+        
         guard !launchOfferPurchased else { return }
         guard LaunchOfferNotificationManager.isOfferActive() else { return }
-        guard !showLaunchMessage else { return }
-        showLaunchMessage = true
+        guard activeSheet == nil else { return }
+        activeSheet = .launchMessage
     }
 
     @MainActor
     private func showSubscriptionOfferIfNeeded() async {
         guard authManager.isAuthenticated else { return }
         guard currentTab == .home else { return }
+        guard !gradesStore.isLoading else { return }
+        guard !gradesStore.onboardingRequired else { return }
         guard !LaunchOfferNotificationManager.isOfferActive() else { return }
         guard !launchOfferPurchased else { return }
-        guard !showSubscriptionOffer else { return }
+        guard activeSheet == nil else { return }
         guard !subscriptionOfferShownThisSession else { return }
         let isActive = await storeKit.refreshSubscriptionStatus()
         guard !isActive else { return }
-        showSubscriptionOffer = true
+        activeSheet = .subscriptionOffer
         subscriptionOfferShownThisSession = true
     }
 
@@ -724,13 +800,14 @@ struct MainView: View {
         guard authManager.isAuthenticated else { return }
         guard !launchOfferPurchased else { return }
         guard LaunchOfferNotificationManager.isOfferActive() else { return }
+        guard !gradesStore.onboardingRequired && !gradesStore.schoolYears.isEmpty else { return }
         currentTab = .home
         
-        if showNotificationsSheet {
+        if activeSheet == .notifications {
             pendingOpenLaunchMessageFromInbox = true
-            showNotificationsSheet = false
+            activeSheet = nil
         } else {
-            showLaunchMessage = true
+            activeSheet = .launchMessage
         }
     }
 
@@ -739,13 +816,13 @@ struct MainView: View {
         case "settings":
             currentTab = .settings
         case "notifications":
-            showNotificationsSheet = true
+            activeSheet = .notifications
         case "launch_offer":
             handleOpenLaunchOfferNotification()
         case "add_homework":
-            showAddHomework = true
+            activeSheet = .addHomework
         case "add_exam":
-            showAddExam = true
+            activeSheet = .addExam
         default:
             break
         }
@@ -755,19 +832,6 @@ struct MainView: View {
         }
     }
 
-    private func handleNotificationsSheetDismiss() {
-        // Small delay to ensure sheet is fully dismissed before presenting next one
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            if self.pendingOpenLaunchMessageFromInbox {
-                self.pendingOpenLaunchMessageFromInbox = false
-                self.showLaunchMessage = true
-                return
-            }
-            guard let item = self.pendingNotificationAction else { return }
-            self.pendingNotificationAction = nil
-            self.openInboxNotification(item)
-        }
-    }
 
     private func openInboxNotification(_ item: NotificationInboxItem) {
         currentTab = .home
@@ -777,7 +841,7 @@ struct MainView: View {
                let exam = gradesStore.allExams.first(where: { $0.id == examId }) {
                 deeplinkExam = exam
             } else {
-                showExamListSheet = true
+                activeSheet = .examList
             }
         case .homework:
             if let homeworkId = item.homeworkId {
@@ -791,10 +855,10 @@ struct MainView: View {
                 if let homework {
                     deeplinkHomework = homework
                 } else {
-                    showHomeworkListSheet = true
+                    activeSheet = .homeworkList
                 }
             } else {
-                showHomeworkListSheet = true
+                activeSheet = .homeworkList
             }
         case .daily:
             let examIds = item.examIds ?? (item.examId.map { [$0] } ?? [])
@@ -813,23 +877,73 @@ struct MainView: View {
 
     @MainActor
     private func refreshEmailVerification() async {
+        guard !offlineManager.isOfflineModeActive else { return }
         guard let user = Auth.auth().currentUser else {
             needsEmailVerification = false
             emailBannerVisible = false
             return
         }
-        do {
-            try await user.reload()
-            needsEmailVerification = !user.isEmailVerified
-            if !needsEmailVerification {
-                hideEmailBanner()
+        
+        isVerifyingEmail = true
+        emailVerificationError = false
+        
+        // Retry Loop Configuration
+        let maxRetries = 3
+        var currentAttempt = 0
+        var success = false
+        
+        while currentAttempt < maxRetries && !success {
+            do {
+                if currentAttempt > 0 {
+                    // Exponential backoff: 0.5s, 1s, 2s
+                    let delaySeconds = 0.5 * pow(2.0, Double(currentAttempt - 1))
+                    try await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
+                }
+                
+                try await user.reload()
+                success = true
+                
+                needsEmailVerification = !user.isEmailVerified
+                if !needsEmailVerification {
+                    hideEmailBanner()
+                }
+                
+            } catch let error as NSError {
+                currentAttempt += 1
+                
+                // Handle Network Errors specifically
+                let domain = error.domain
+                let code = error.code
+                
+                let isNetworkError = domain == NSURLErrorDomain && (
+                    code == NSURLErrorNotConnectedToInternet ||
+                    code == NSURLErrorTimedOut ||
+                    code == NSURLErrorNetworkConnectionLost
+                )
+                
+                if currentAttempt >= maxRetries {
+                    ErrorLoggingService.logErrorIfEnabled(error)
+                    if isNetworkError {
+                        emailVerificationError = true
+                        // Ensure banner is visible so user can see error and retry
+                        if !emailBannerVisible {
+                            showEmailBannerTemporarily()
+                        }
+                    } else {
+                        // For non-network errors, we might fail silently or hide banner
+                        hideEmailBanner() // Fallback to safe state
+                    }
+                }
+            } catch {
+                currentAttempt += 1
+                if currentAttempt >= maxRetries {
+                   ErrorLoggingService.logErrorIfEnabled(error)
+                   hideEmailBanner()
+                }
             }
-        } catch {
-            ErrorLoggingService.logErrorIfEnabled(error)
-            needsEmailVerification = false
-            hideEmailBanner()
-            hideEmailBanner()
         }
+        
+        isVerifyingEmail = false
     }
 
     private func attemptRequestReview() {
@@ -844,7 +958,14 @@ struct MainView: View {
         
         if now > (firstLaunchTimestamp + threeDaysCoords) {
             Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                // Delay to ensure UI has settled
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                
+                // Double check guards after sleep
+                guard !gradesStore.isLoading else { return }
+                guard !gradesStore.onboardingRequired else { return }
+                guard activeSheet == nil else { return }
+                
                 requestReview()
             }
         }
@@ -856,7 +977,10 @@ struct MainView: View {
             // Native TabView for all iOS versions with Liquid Glass System Style
             TabView(selection: $currentTab) {
                 NavigationStack {
-                    HomeView(onOpenCreationMenu: { showCreationMenu = true })
+                    HomeView(
+                        onOpenCreationMenu: { activeSheet = .creationMenu },
+                        onToggleOfflineBanner: { showOfflineBannerTemporarily() }
+                    )
                         .environmentObject(gradesStore)
                         .navigationDestination(for: Subject.self) { subject in
                             if subject.name == "Fachreferat" {
@@ -878,7 +1002,7 @@ struct MainView: View {
                 .tag(BottomNavView.Tab.home)
 
                 NavigationStack {
-                    GroupsListView(onOpenCreationMenu: { showCreationMenu = true })
+                    GroupsListView(onOpenCreationMenu: { activeSheet = .creationMenu })
                         .environmentObject(gradesStore)
 
                 }
@@ -889,7 +1013,7 @@ struct MainView: View {
 
                 if !isSubscriptionGateActive {
                     NavigationStack {
-                        InsightsView(onOpenCreationMenu: { showCreationMenu = true })
+                        InsightsView(onOpenCreationMenu: { activeSheet = .creationMenu })
                             .environmentObject(gradesStore)
                             .navigationDestination(for: Subject.self) { subject in
                                 if subject.name == "Fachreferat" {
@@ -910,7 +1034,7 @@ struct MainView: View {
                     .tag(BottomNavView.Tab.insights)
                     
                     NavigationStack {
-                        FinalGradeView(onOpenCreationMenu: { showCreationMenu = true })
+                        FinalGradeView(onOpenCreationMenu: { activeSheet = .creationMenu })
                             .environmentObject(gradesStore)
                             .navigationDestination(isPresented: $navigateToAbiturExam) {
                                 AbiturExamView().environmentObject(gradesStore)
@@ -925,7 +1049,7 @@ struct MainView: View {
                 NavigationStack {
                     AppSettingsView(
                         scrollToAccount: scrollToAccountOnOpen,
-                        onOpenCreationMenu: { showCreationMenu = true }
+                        onOpenCreationMenu: { activeSheet = .creationMenu }
                     )
                         .environmentObject(gradesStore)
                         .environmentObject(authManager)
@@ -944,46 +1068,119 @@ struct MainView: View {
 
         }
         // Attach Sheet Modifiers to the Group
-        .sheet(isPresented: $showCreationMenu) {
-            CreationMenuView(
-                onAction: handleCreationAction,
-                isFirstSubject: isFirstSubject,
-                disableAddGrade: disableAddGrade,
-                showPractical: showPracticalTab,
-                showFachreferat: showFachreferatAction,
-                hasFachreferat: hasFachreferat,
-                showSeminar: showSeminarAction,
-                encryptionKeyLoaded: gradesStore.encryptionKey != nil
-            )
-            .environmentObject(gradesStore)
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
-        }
-        .sheet(isPresented: $showAddSubject) { AddSubjectView().environmentObject(gradesStore) }
-        .sheet(isPresented: $showAddGrade) { AddGradeView(preselectedSubjectName: quickAddSubjectName).environmentObject(gradesStore) }
-        .sheet(isPresented: $showAddFachreferat) { AddFachreferatView(preselectedSubjectName: quickAddSubjectName).environmentObject(gradesStore) }
-        .sheet(isPresented: $showFachreferatDetail) {
-            NavigationStack {
-                FachreferatDetailView(subject: Subject(name: "Fachreferat", type: 0, date: Date()))
-                    .environmentObject(gradesStore)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button {
-                                showFachreferatDetail = false
-                            } label: {
-                                Image(systemName: "chevron.down")
-                                    .imageScale(.medium)
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .creationMenu:
+                CreationMenuView(
+                    onAction: handleCreationAction,
+                    isFirstSubject: isFirstSubject,
+                    disableAddGrade: disableAddGrade,
+                    showPractical: showPracticalTab,
+                    showFachreferat: showFachreferatAction,
+                    hasFachreferat: hasFachreferat,
+                    showSeminar: showSeminarAction,
+                    encryptionKeyLoaded: gradesStore.encryptionKey != nil
+                )
+                .environmentObject(gradesStore)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+            case .addSubject: AddSubjectView().environmentObject(gradesStore)
+            case .addGrade: AddGradeView(preselectedSubjectName: quickAddSubjectName).environmentObject(gradesStore)
+            case .addFachreferat: AddFachreferatView(preselectedSubjectName: quickAddSubjectName).environmentObject(gradesStore)
+            case .fachreferatDetail:
+                NavigationStack {
+                    FachreferatDetailView(subject: Subject(name: "Fachreferat", type: 0, date: Date()))
+                        .environmentObject(gradesStore)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button {
+                                    activeSheet = nil
+                                } label: {
+                                    Image(systemName: "chevron.down")
+                                        .imageScale(.medium)
+                                }
                             }
                         }
+                }
+            case .addHomework: AddHomeworkView(preselectedSubjectName: quickAddSubjectName).environmentObject(gradesStore)
+            case .addExam: AddExamView(preselectedSubjectName: quickAddSubjectName).environmentObject(gradesStore)
+            case .practical: NavigationStack { PraktikumDetailView().environmentObject(gradesStore) }
+            case .seminar: SeminarPerformanceView().environmentObject(gradesStore)
+            case .groupCreation: GroupCreationView().environmentObject(gradesStore)
+            case .examList: 
+                ExamListView()
+                    .environmentObject(gradesStore)
+                    .onDisappear { deeplinkDestination = nil }
+            case .homeworkList:
+                HomeworkListView()
+                    .environmentObject(gradesStore)
+                    .onDisappear { deeplinkDestination = nil }
+            case .notifications:
+                NotificationsInboxView(
+                    inbox: notificationInbox,
+                    onSelectNotification: { item in
+                        if item.kind == .support, let tId = item.ticketId {
+                            gradesStore.pendingTicketId = tId
+                            gradesStore.showSupportHistory = true
+                        } else {
+                            pendingNotificationAction = item
+                        }
+                    },
+                    onOpenImportant: {
+                        pendingOpenLaunchMessageFromInbox = true
                     }
+                )
+                .environmentObject(gradesStore)
+                .onDisappear { handleNotificationsSheetDismiss() }
+            case .launchMessage:
+                LaunchMessageSheetView(
+                    onLater: { pendingLaunchLaterReminder = true },
+                    onPurchaseSuccess: {
+                        launchOfferPurchased = true
+                        pendingLaunchPurchaseSuccess = true
+                    }
+                )
+                .environmentObject(gradesStore)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.hidden)
+                .interactiveDismissDisabled(true)
+                .onDisappear {
+                    launchMessageSeen = true
+                    if pendingLaunchLaterReminder {
+                        activeSheet = .launchLaterReminder
+                        pendingLaunchLaterReminder = false
+                    } else if pendingLaunchPurchaseSuccess {
+                        showLaunchPurchaseSuccess = true
+                        pendingLaunchPurchaseSuccess = false
+                    }
+                }
+            case .subscriptionOffer:
+                SubscriptionOfferSheetView(
+                    onLater: {},
+                    onPurchaseSuccess: {
+                        pendingSubscriptionPurchaseSuccess = true
+                    }
+                )
+                .environmentObject(gradesStore)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.hidden)
+                .interactiveDismissDisabled(true)
+                .onDisappear {
+                    if pendingSubscriptionPurchaseSuccess {
+                        showSubscriptionPurchaseSuccess = true
+                        pendingSubscriptionPurchaseSuccess = false
+                    }
+                }
+            case .groupJoin:
+                GroupJoinView(initialCode: pendingGroupJoinCode)
+                    .environmentObject(gradesStore)
+            case .launchLaterReminder:
+                ReminderConfirmationView()
+                    .environmentObject(gradesStore)
+            case .onboardingFunnel:
+                EmptyView() // Structural placement to satisfy exhaustiveness
             }
         }
-        .sheet(isPresented: $showAddHomework) { AddHomeworkView(preselectedSubjectName: quickAddSubjectName).environmentObject(gradesStore) }
-        .sheet(isPresented: $showAddExam) { AddExamView(preselectedSubjectName: quickAddSubjectName).environmentObject(gradesStore) }
-        .sheet(isPresented: $showPractical) { NavigationStack { PraktikumDetailView().environmentObject(gradesStore) } }
-        .sheet(isPresented: $showSeminar) { SeminarPerformanceView().environmentObject(gradesStore) }
-        .sheet(isPresented: $showGroupCreation) { GroupCreationView().environmentObject(gradesStore) }
-        
         // Retain NavigationDestinations logic by wrapping tabs as above.
     }
 
@@ -1022,9 +1219,8 @@ struct MainView: View {
 
     @MainActor
     private func presentSubscriptionGate() {
-        guard isSubscriptionGateActive else { return }
-        guard !showSubscriptionOffer else { return }
-        showSubscriptionOffer = true
+        guard activeSheet == nil else { return }
+        activeSheet = .subscriptionOffer
     }
 
     @MainActor
@@ -1041,7 +1237,8 @@ struct MainView: View {
                     gradesStore.leaveOfflineModePreservingState()
                     await gradesStore.startListening()
                     if gradesStore.onboardingRequired || gradesStore.activeSchoolYearId == nil {
-                        showOnboardingFunnel = true
+                        // Onboarding logic is now handled in ContentView or via specific alerts. 
+                        // For now we just log or ignore, ensuring we don't crash.
                     }
                     hideOfflineBanner()
                     gradesStore.isLoading = false
@@ -1194,13 +1391,20 @@ struct MainView: View {
     }
 
     private func handleDeeplinkDestination(_ destination: DeeplinkDestination?) {
-        guard let destination else { return }
-        currentTab = .home
-        switch destination {
+        guard let dest = destination else { return }
+        switch dest {
+        case .notifications:
+            activeSheet = .notifications
+        case .support:
+            gradesStore.showSupportHistory = true
+        case .launchMessage:
+            if !gradesStore.onboardingRequired && !gradesStore.schoolYears.isEmpty {
+                activeSheet = .launchMessage
+            }
         case .examList:
-            showExamListSheet = true
+            activeSheet = .examList
         case .homeworkList:
-            showHomeworkListSheet = true
+            activeSheet = .homeworkList
         }
         deeplinkDestination = nil
     }
@@ -1213,22 +1417,21 @@ struct MainView: View {
         )
     }
     private func handleCreationAction(_ action: CreationAction) {
-        showCreationMenu = false
+        activeSheet = nil
         if isSubscriptionGateActive {
             return
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             switch action {
-            case .homework: showAddHomework = true
-            case .grade: showAddGrade = true
-            case .exam: showAddExam = true
-            case .subject: showAddSubject = true
-            case .practical: 
-                showPractical = true
+            case .homework: activeSheet = .addHomework
+            case .grade: activeSheet = .addGrade
+            case .exam: activeSheet = .addExam
+            case .subject: activeSheet = .addSubject
+            case .practical: activeSheet = .practical
             case .fachreferat:
-                if hasFachreferat { showFachreferatDetail = true }
-                else { showAddFachreferat = true }
-            case .seminar: showSeminar = true
+                if hasFachreferat { activeSheet = .fachreferatDetail }
+                else { activeSheet = .addFachreferat }
+            case .seminar: activeSheet = .seminar
             case .abitur: 
                 if isSubscriptionGateActive {
                     presentSubscriptionGate()
@@ -1236,7 +1439,7 @@ struct MainView: View {
                 }
                 navigateToAbiturExam = true
             case .group:
-                showGroupCreation = true
+                activeSheet = .groupCreation
             }
         }
     }

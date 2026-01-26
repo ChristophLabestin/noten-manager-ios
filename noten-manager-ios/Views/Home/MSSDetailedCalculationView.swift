@@ -213,7 +213,7 @@ struct MSSDetailedCalculationView: View {
                             
                             Spacer()
                             
-                            Text(String(format: "%.1f", item.value))
+                            Text(String(format: "%.\(store.mssDecimalPrecision)f", item.value))
                                 .font(.system(.body, design: .rounded).weight(.semibold))
                                 .monospacedDigit()
                                 .foregroundStyle(.primary)

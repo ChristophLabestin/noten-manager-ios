@@ -6,9 +6,11 @@ import FirebaseFirestore
 struct HomeView: View {
     @EnvironmentObject var store: GradesStore
     @EnvironmentObject var biometricManager: BiometricAuthManager
+    @EnvironmentObject var offlineManager: OfflineModeManager
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var notificationInbox = NotificationInboxStore.shared
     var onOpenCreationMenu: () -> Void = {}
+    var onToggleOfflineBanner: () -> Void = {}
 
     enum HalfYearFilter: Hashable {
         case all
@@ -616,7 +618,7 @@ struct HomeView: View {
     private func pointsToGrade(_ points: Double?) -> String {
         guard let p = points else { return "-" }
         let grade = (17.0 - p) / 3.0
-        return String(format: "%.2f", grade)
+        return String(format: "%.\(store.mssDecimalPrecision)f", grade)
     }
 
     private var nextAppointmentView: some View {
@@ -881,24 +883,7 @@ struct HomeView: View {
         customOrderWorkingCopy = reordered.map { $0.name }
     }
 
-    @ViewBuilder
-    private var loadingSection: some View {
-        if store.isLoading {
-            Section {
-                SettingsCard(
-                    title: "Sync läuft...",
-                    subtitle: store.loadingLabel,
-                    systemImage: "arrow.triangle.2.circlepath",
-                    accent: .cyan
-                ) {
-                    ProgressView(value: store.progress, total: 100)
-                }
-                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                .listRowBackground(Color.clear)
-            }
-            .listSectionSeparator(.hidden)
-        }
-    }
+
 
     @ViewBuilder
     private var topContentSection: some View {
@@ -1010,9 +995,11 @@ struct HomeView: View {
         .listSectionSeparator(.hidden)
     }
 
+
+
     var body: some View {
         List {
-            loadingSection
+
             topContentSection
             subjectListSection
         }
@@ -1026,6 +1013,15 @@ struct HomeView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 HStack(spacing: 0) {
+                    if offlineManager.isOfflineModeActive {
+                        Button {
+                            onToggleOfflineBanner()
+                        } label: {
+                            ToolbarIcon(symbol: "wifi.slash", showDot: false)
+                        }
+                        .accessibilityLabel("Offline-Modus aktiv")
+                    }
+
                     Button {
                         showNotifications = true
                     } label: {
@@ -1125,24 +1121,44 @@ struct HomeView: View {
                 showMigrationInfoSheet = true
             }
 
-            // What's New Sheet logic (delayed to ensure view hierarchy is ready)
-            Task {
-                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s
-                let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
-                if !currentVersion.isEmpty && store.lastSeenVersion != currentVersion && !showMigrationInfoSheet {
-                    await MainActor.run {
-                        showWhatsNewSheet = true
-                    }
-                }
-            }
+
         }
         .sheet(isPresented: $showMigrationInfoSheet) {
             MigrationInfoSheet()
                 .environmentObject(store)
         }
-        .sheet(isPresented: $showWhatsNewSheet) {
+        .sheet(isPresented: $showWhatsNewSheet, onDismiss: {
+            // Log that it has been seen when dismissed (via swipe or button)
+            if let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
+                store.updateLastSeenVersion(to: currentVersion)
+            }
+        }) {
             WhatsNewSheet()
                 .environmentObject(store)
+        }
+        .onChange(of: store.initialSyncSettled) { settled in
+             if settled {
+                 let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+                 let versionMismatch = !currentVersion.isEmpty && store.lastSeenVersion != currentVersion
+                 // Logic to determine if user should see it
+                 // e.g. only if not a fresh install, or if we want to show it on fresh install too?
+                 // Existing logic had `isLegacyOrOlder`.
+                 // Assuming we want to show it if version changed.
+                 
+                 // If store.registeredInVersion is nil, it might be a fresh install.
+                 // Usually What's New is for updates.
+                 // Preserving existing logic:
+                 let isLegacyOrOlder = store.registeredInVersion == nil || store.registeredInVersion != "1.3" // This seems specific to a past migration?
+                 // Let's rely on version mismatch primarily.
+                 
+                 
+                 if versionMismatch && !showMigrationInfoSheet {
+                     // Don't show "What's New" if the user just registered in this version
+                     if store.registeredInVersion != currentVersion {
+                         showWhatsNewSheet = true
+                     }
+                 }
+             }
         }
         .sheet(isPresented: $showDailySummarySheet) {
             DailySummarySheet(data: tomorrowSummaryData)
@@ -2362,10 +2378,10 @@ struct SubjectRowView: View {
 
     private func fobosoValueText(_ comp: HalfYearComputation) -> String {
         if let raw = comp.rawFinal {
-            return String(format: "%.2f", raw)
+            return String(format: "%.\(store.mssDecimalPrecision)f", raw)
         }
         if let other = comp.otherAvg {
-            return String(format: "%.2f", other)
+            return String(format: "%.\(store.mssDecimalPrecision)f", other)
         }
         if let min = comp.pointsMin, let max = comp.pointsMax {
             return "\(min)–\(max)"
@@ -2379,7 +2395,7 @@ struct SubjectRowView: View {
 
     private func formatAverage(_ value: Double?) -> String {
         guard let v = value else { return "–" }
-        return String(format: "%.2f", v)
+        return String(format: "%.\(store.mssDecimalPrecision)f", v)
     }
 
     private func gradeClassColor(_ value: Double?) -> Color {
@@ -2517,23 +2533,23 @@ struct SubjectRowView: View {
                 return (nil, "–")
             }
             let value = halfValue(subject, half: 1)
-            return (value, value.map { String(format: "%.2f", $0) } ?? "–")
+            return (value, value.map { String(format: "%.\(store.mssDecimalPrecision)f", $0) } ?? "–")
         case .two:
             // If half-year 2 is dropped, show nil
             if droppedHalf == 2 {
                 return (nil, "–")
             }
             let value = halfValue(subject, half: 2)
-            return (value, value.map { String(format: "%.2f", $0) } ?? "–")
+            return (value, value.map { String(format: "%.\(store.mssDecimalPrecision)f", $0) } ?? "–")
         case .all:
             let v1 = droppedHalf == 1 ? nil : halfValue(subject, half: 1)
             let v2 = droppedHalf == 2 ? nil : halfValue(subject, half: 2)
             if let a = v1, let b = v2 {
                 let avg = (a + b) / 2.0
-                return (avg, String(format: "%.2f", avg))
+                return (avg, String(format: "%.\(store.mssDecimalPrecision)f", avg))
             }
             if let one = v1 ?? v2 {
-                return (one, String(format: "%.2f", one))
+                return (one, String(format: "%.\(store.mssDecimalPrecision)f", one))
             }
             return (nil, "–")
         }
@@ -2806,7 +2822,7 @@ struct SubjectGridItemView: View {
 
     private func formatAverage(_ value: Double?) -> String {
         guard let v = value else { return "–" }
-        return String(format: "%.1f", v)
+        return String(format: "%.\(store.mssDecimalPrecision)f", v)
     }
 
     private func gradeClassColor(_ value: Double?) -> Color {

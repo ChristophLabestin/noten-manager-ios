@@ -26,6 +26,7 @@ struct ReportCardData {
     let showPoints: Bool
     let showGrades: Bool
     let showIndividualGrades: Bool
+    let mssDecimalPrecision: Int
 }
 
 struct ReportCardSubject: Identifiable {

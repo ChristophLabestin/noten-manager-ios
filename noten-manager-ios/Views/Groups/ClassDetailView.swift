@@ -14,7 +14,10 @@ struct ClassDetailView: View {
     @State private var showAddGroupsSheet: Bool = false
     @State private var showAddBranchSheet: Bool = false
     @State private var showLinkClassSheet: Bool = false
+    @State private var showSubjectMapping: Bool = false
+
     @State private var classCourses: [Course] = []
+    @State private var linkedElectiveGroups: [WahlpflichtfachGroup] = []
     @State private var isLoadingCourses: Bool = true
     
     private var schoolClass: SchoolClass? {
@@ -55,15 +58,54 @@ struct ClassDetailView: View {
         classCourses.filter { !store.subscribedCourseIds.contains($0.id) }
     }
     
-    private var classBranches: [String] {
-        // Get unique branch names from courses with .branch type
-        var branches: [String] = []
-        for course in classCourses {
-            if case .branch(let name) = course.type, !branches.contains(name) {
-                branches.append(name)
+    fileprivate enum BranchItem: Hashable {
+        case mandatory
+        case standard(name: String)
+        case elective(group: WahlpflichtfachGroup)
+        
+        var name: String {
+            switch self {
+            case .mandatory: return "Gemeinsame Fächer"
+            case .standard(let name): return name
+            case .elective(let group): return group.name
             }
         }
-        return branches
+    }
+
+    private var allBranches: [BranchItem] {
+        var items: [BranchItem] = []
+        
+        // Mandatory (if any exist)
+        if classCourses.contains(where: { $0.type == .mandatory }) {
+            items.append(.mandatory)
+        }
+        
+        // Standard Branches
+        var branches: Set<String> = []
+        for course in classCourses {
+            if case .branch(let name) = course.type {
+                branches.insert(name)
+            }
+        }
+        items.append(contentsOf: branches.map { .standard(name: $0) })
+        
+        // Electives
+        items.append(contentsOf: linkedElectiveGroups.map { .elective(group: $0) })
+        
+        // Sort: Mandatory first, then Standard Branches, then Electives
+        return items.sorted { lhs, rhs in
+            func priority(_ item: BranchItem) -> Int {
+                switch item {
+                case .mandatory: return 0
+                case .standard: return 1
+                case .elective: return 2
+                }
+            }
+            let p1 = priority(lhs)
+            let p2 = priority(rhs)
+            if p1 != p2 { return p1 < p2 }
+            return lhs.name < rhs.name
+        }
     }
     
     var body: some View {
@@ -77,57 +119,37 @@ struct ClassDetailView: View {
                 statsRow
                     .softFadeIn(enabled: animationsOn, delay: 0.1, offset: 12)
                 
-                // My Courses Section
-                if !myCourses.isEmpty {
-                    myCoursesSection
-                        .softFadeIn(enabled: animationsOn, delay: 0.15, offset: 12)
-                }
-                
-                // Other Courses Section
-                if !otherCourses.isEmpty || isOwner {
-                    otherCoursesSection
-                        .softFadeIn(enabled: animationsOn, delay: 0.18, offset: 12)
-                }
+
                 
                 // Branches Section (groups merged as branches + add more)
-                if isOwner || !classBranches.isEmpty {
+                if isOwner || !allBranches.isEmpty {
                     branchesSection
                         .softFadeIn(enabled: animationsOn, delay: 0.2, offset: 12)
                 }
                 
-                // Warning hint
-                if store.classIds.contains(classId) {
-                    warningHint
-                        .softFadeIn(enabled: animationsOn, delay: 0.25, offset: 10)
-                }
+
                 
-                // Join All mandatory courses
-                let unjoinedMandatory = otherCourses.filter { $0.type == .mandatory }
-                if !unjoinedMandatory.isEmpty {
-                    VStack(spacing: 8) {
+
+
+                if store.classIds.contains(classId) {
+                    VStack(spacing: 12) {
+                        Divider()
+                            .padding(.vertical, 8)
+                        
                         Button {
-                            Task {
-                                isJoiningAll = true
-                                for course in unjoinedMandatory {
-                                    try? await store.subscribeToBranch(branchCourses: [course])
-                                }
-                                await loadCourses()
-                                isJoiningAll = false
-                            }
+                            showSubjectMapping = true
                         } label: {
-                            if isJoiningAll {
-                                ProgressView().tint(.white)
-                            } else {
-                                Label("Allen Pflichtfächern beitreten", systemImage: "person.badge.plus")
-                            }
+                            Label("Fach-Verknüpfungen verwalten", systemImage: "arrow.left.arrow.right")
                         }
                         .buttonStyle(SoftTintButtonStyle(accent: .indigo))
                         
-                        Text("Einige Pflichtfächer sind noch nicht abonniert.")
+                        Text("Hier kannst du einstellen, welche Kurse dieser Klasse mit deinen lokalen Fächern verknüpft sind.")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 20)
                     }
-                    .padding(.top, 8)
+                    .padding(.top, 16)
                 }
             }
             .padding()
@@ -157,7 +179,7 @@ struct ClassDetailView: View {
                     Button {
                         showLinkClassSheet = true
                     } label: {
-                        Label("Klasse verknüpfen", systemImage: "link")
+                        Label("Wahlpflichtfach verknüpfen", systemImage: "link")
                     }
                     
                     Divider()
@@ -219,12 +241,29 @@ struct ClassDetailView: View {
             LinkClassSheet(sourceClassId: classId)
                 .environmentObject(store)
         }
+        .sheet(isPresented: $showSubjectMapping) {
+            SubjectMappingView(classId: classId, courses: myCourses)
+                .environmentObject(store)
+        }
     }
     
     private func loadCourses() async {
         isLoadingCourses = true
         do {
             classCourses = try await store.fetchCoursesForClass(classId: classId)
+            
+            // Load electives if linked
+            if let linkedIds = store.classDetails[classId]?.linkedWahlpflichtfachGroupIds, !linkedIds.isEmpty {
+                var fetched: [WahlpflichtfachGroup] = []
+                for gid in linkedIds {
+                    if let group = try? await store.fetchWahlpflichtfachGroupInfo(with: gid) {
+                        fetched.append(group)
+                    }
+                }
+                self.linkedElectiveGroups = fetched
+            } else {
+                self.linkedElectiveGroups = []
+            }
         } catch {
             print("Failed to load courses: \(error)")
         }
@@ -340,18 +379,18 @@ struct ClassDetailView: View {
     
     private var branchesSection: some View {
         SettingsCard(
-            title: "Zweige",
-            subtitle: "\(classBranches.count) Zweige in dieser Klasse",
-            systemImage: "arrow.triangle.branch",
-            accent: .purple
+            title: "Kurs-Angebote",
+            subtitle: "\(allBranches.count) Gruppen verfügbar",
+            systemImage: "square.stack.3d.up.fill",
+            accent: .indigo
         ) {
             VStack(spacing: 16) {
-                if classBranches.isEmpty {
+                if allBranches.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Noch keine Zweige erstellt.")
+                        Text("Noch keine Fächer verfügbar.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
-                        Text("Füge eine bestehende Gruppe als Zweig hinzu.")
+                        Text("Füge Kurse, Zweige oder Wahlpflichtfächer hinzu.")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                     }
@@ -360,13 +399,20 @@ struct ClassDetailView: View {
                     .background(Color.formInputBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                 } else {
-                    ForEach(classBranches, id: \.self) { branchName in
+                    ForEach(allBranches, id: \.self) { item in
                         BranchDetailRow(
-                            branchName: branchName,
-                            courses: coursesForBranch(branchName),
+                            item: item,
+                            classCourses: classCourses,
                             store: store,
-                            onSubscriptionChange: {
-                                Task { await loadCourses() }
+                            classId: classId,
+                            onSubscriptionChange: { wasJoined in
+                                Task { 
+                                    await loadCourses() 
+                                    if wasJoined {
+                                        // If a group was joined, show mapping
+                                        self.showSubjectMapping = true
+                                    }
+                                }
                             }
                         )
                     }
@@ -424,24 +470,7 @@ struct ClassDetailView: View {
         }
     }
     
-    private var warningHint: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "info.circle.fill")
-                .foregroundColor(.indigo)
-            Text("Kurse sind der neue Weg, Inhalte zu teilen. Nutze 'Gruppen' nur für Kompatibilität mit älteren App-Versionen.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.indigo.opacity(0.06))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(Color.indigo.opacity(0.1), lineWidth: 1)
-        )
-    }
+
 }
 
 // MARK: - Course Row
@@ -455,18 +484,26 @@ struct CourseRow: View {
     @State private var showDeleteConfirmation = false
     
     private var typeLabel: String {
-        switch course.type {
+        guard let type = course.type else { return "Unbekannt" }
+        switch type {
         case .mandatory:
             return "Pflicht"
         case .branch(let name):
             return "Zweig: \(name)"
         case .elective:
             return "Wahlfach"
+        case .wahlpflicht(let groupId):
+            return "Wahlpflicht: \(store.wahlpflichtfachGroupNames[groupId] ?? "Unbenannt")"
         }
     }
     
+    private func hasLocalSubject(name: String) -> Bool {
+        store.subjects.contains { $0.name.lowercased() == name.lowercased() }
+    }
+    
     private var accentColor: Color {
-        isSubscribed ? .green : .cyan
+        if isSubscribed { return .green }
+        return hasLocalSubject(name: course.name) ? .cyan : .indigo
     }
     
     @EnvironmentObject var store: GradesStore
@@ -489,7 +526,8 @@ struct CourseRow: View {
                     if isProcessing {
                         ProgressView().scaleEffect(0.8)
                     } else {
-                        Image(systemName: isSubscribed ? "checkmark.circle.fill" : "circle")
+                        let existsLocally = hasLocalSubject(name: course.name)
+                        Image(systemName: isSubscribed ? "checkmark.circle.fill" : (existsLocally ? "circle" : "plus.circle.fill"))
                             .font(.system(size: 18))
                             .foregroundStyle(accentColor)
                     }
@@ -536,30 +574,104 @@ struct CourseRow: View {
 
 // MARK: - Branch Detail Row
 
+// MARK: - Branch/Elective Detail Row
+
 private struct BranchDetailRow: View {
-    let branchName: String
-    let courses: [Course]
+    let item: ClassDetailView.BranchItem
+    let classCourses: [Course]
     let store: GradesStore
-    let onSubscriptionChange: () -> Void
+    let classId: String
+    let onSubscriptionChange: (Bool) -> Void
     
-    @State private var isExpanded: Bool = true
+    @State private var isExpanded: Bool = false // Collapsed by default
     @State private var isProcessing: Bool = false
+    @State private var errorMessage: String?
     
-    private var subscribedCount: Int {
-        courses.filter { store.subscribedCourseIds.contains($0.id) }.count
+    // Computed props
+    private var coursesToDisplay: [Course] {
+        switch item {
+        case .mandatory:
+             return classCourses.filter { $0.type == .mandatory }
+        case .standard(let name):
+            return classCourses.filter {
+                if case .branch(let n) = $0.type { return n == name }
+                return false
+            }
+        case .elective(let group):
+            // Show actual courses if joined, otherwise dummy courses from metadata
+            let joinedCourses = classCourses.filter {
+                 if case .wahlpflicht(let gid) = $0.type { return gid == group.id }
+                 return false
+            }
+            if !joinedCourses.isEmpty { return joinedCourses }
+            
+            // Should show placeholders from metadata if not joined or no courses yet?
+            // "group.subjects" gives us names. We can simulate Course objects for display or just list names?
+            // To keep UI consistent, let's just use the names.
+            // But wait, the UI expects [Course].
+            // Let's create dummy courses for display if not joined.
+            return group.subjects.map { subjectName in
+                Course(
+                    id: UUID().uuidString,
+                    name: subjectName,
+                    subjectKey: nil,
+                    classId: nil,
+                    type: .wahlpflicht(group.id),
+                    gradingMode: nil,
+                    ownerId: nil,
+                    joinCode: nil,
+                    createdAt: Date()
+                )
+            }
+        }
     }
     
+    private var isJoined: Bool {
+        switch item {
+        case .mandatory:
+             // Mandatory is "joined" if any are subscribed? Or all?
+             // Let's use subscribedCount > 0
+             return subscribedCount > 0
+        case .standard:
+            // For branches, "joined" means at least one course subscribed?
+            // Or use the previous logic: isFullySubscribed / isPartiallySubscribed
+            return subscribedCount > 0
+        case .elective(let group):
+            return store.wahlpflichtfachGroupIds.contains(group.id)
+        }
+    }
+    
+    private var subscribedCount: Int {
+        switch item {
+        case .mandatory:
+            return coursesToDisplay.filter { store.subscribedCourseIds.contains($0.id) }.count
+        case .standard:
+            return coursesToDisplay.filter { store.subscribedCourseIds.contains($0.id) }.count
+        case .elective(let group):
+            return store.wahlpflichtfachGroupIds.contains(group.id) ? coursesToDisplay.count : 0
+        }
+    }
+    
+    // For standard branch logic
     private var isFullySubscribed: Bool {
-        subscribedCount == courses.count && !courses.isEmpty
+        subscribedCount == coursesToDisplay.count && !coursesToDisplay.isEmpty
     }
     
     private var isPartiallySubscribed: Bool {
-        subscribedCount > 0 && subscribedCount < courses.count
+        subscribedCount > 0 && subscribedCount < coursesToDisplay.count
+    }
+    
+    private func hasLocalSubject(name: String) -> Bool {
+        store.subjects.contains { $0.name.lowercased() == name.lowercased() }
+    }
+    
+    private var isAnySubjectMissingLocally: Bool {
+        coursesToDisplay.contains { !hasLocalSubject(name: $0.name) }
     }
     
     var body: some View {
         VStack(spacing: 0) {
-            // Branch Header
+            // Header
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     isExpanded.toggle()
@@ -568,26 +680,26 @@ private struct BranchDetailRow: View {
                 HStack(spacing: 12) {
                     ZStack {
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Color.purple.opacity(0.1))
+                            .fill(headerColor.opacity(0.1))
                             .frame(width: 42, height: 42)
-                        Image(systemName: "arrow.triangle.branch")
+                        Image(systemName: headerIcon)
                             .font(.system(size: 18))
-                            .foregroundStyle(.purple)
+                            .foregroundStyle(headerColor)
                     }
                     
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(branchName)
+                        Text(item.name)
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.primary)
                         
-                        Text("\(subscribedCount)/\(courses.count) Kurse abonniert")
+                        Text(subtitleText)
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(.secondary)
                     }
                     
                     Spacer()
                     
-                    // Subscribe/Unsubscribe toggle
+                    // Toggle Action
                     if isProcessing {
                         ProgressView()
                             .scaleEffect(0.8)
@@ -595,9 +707,7 @@ private struct BranchDetailRow: View {
                         Button {
                             Task { await toggleSubscription() }
                         } label: {
-                            Image(systemName: isFullySubscribed ? "checkmark.circle.fill" : (isPartiallySubscribed ? "minus.circle.fill" : "circle"))
-                                .font(.title2)
-                                .foregroundStyle(isFullySubscribed ? .green : (isPartiallySubscribed ? .orange : .secondary.opacity(0.5)))
+                            statusIcon
                         }
                         .buttonStyle(.plain)
                     }
@@ -611,53 +721,170 @@ private struct BranchDetailRow: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             
-            // Expanded Course List
-            if isExpanded && !courses.isEmpty {
+            // Expanded List
+            if isExpanded {
                 VStack(spacing: 0) {
                     Divider()
                         .padding(.horizontal, 12)
                     
-                    ForEach(courses, id: \.id) { course in
-                        HStack(spacing: 10) {
-                            Image(systemName: store.subscribedCourseIds.contains(course.id) ? "checkmark.circle.fill" : "circle")
-                                .font(.body)
-                                .foregroundStyle(store.subscribedCourseIds.contains(course.id) ? .green : .secondary.opacity(0.4))
-                            
-                            Text(course.name)
-                                .font(.subheadline)
-                                .foregroundStyle(store.subscribedCourseIds.contains(course.id) ? .primary : .secondary)
-                            
-                            Spacer()
+                    if coursesToDisplay.isEmpty {
+                        Text("Keine Kurse verfügbar")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding()
+                    } else {
+                        ForEach(coursesToDisplay, id: \.self) { course in
+                            HStack(spacing: 11) {
+                                let active = isCourseActive(course)
+                                let existsLocally = hasLocalSubject(name: course.name)
+                                
+                                Image(systemName: active ? "checkmark.circle.fill" : (existsLocally ? "circle" : "plus.circle.fill"))
+                                    .font(.system(size: 16))
+                                    .foregroundStyle(active ? .green : (existsLocally ? .secondary.opacity(0.4) : headerColor))
+                                
+                                Text(course.name)
+                                    .font(.subheadline)
+                                    .foregroundStyle(active ? .primary : .secondary)
+                                
+                                Spacer()
+                            }
+                            .padding(.horizontal, 22)
+                            .padding(.leading, 34)
+                            .padding(.vertical, 8)
                         }
-                        .padding(.horizontal, 20)
-                        .padding(.leading, 34)
-                        .padding(.vertical, 8)
                     }
                 }
             }
         }
         .background(Color.formInputBackground.opacity(0.3))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            if let error = errorMessage {
+                Text(error)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+                    .padding(4)
+                    .background(Color.black.opacity(0.8))
+                    .cornerRadius(4)
+                    .padding(.bottom, 40)
+            }
+        }
     }
     
+    private var headerColor: Color {
+        switch item {
+        case .mandatory: return .indigo
+        case .standard: return .purple
+        case .elective: return .teal
+        }
+    }
+    
+    private var headerIcon: String {
+        switch item {
+        case .mandatory: return "person.3.fill"
+        case .standard: return "arrow.triangle.branch"
+        case .elective: return "star.fill"
+        }
+    }
+    
+    private var subtitleText: String {
+        switch item {
+        case .mandatory, .standard:
+            return "\(subscribedCount)/\(coursesToDisplay.count) Kurse abonniert"
+        case .elective(let group):
+            let subjects = group.subjects.joined(separator: ", ")
+            return subjects.isEmpty ? "\(coursesToDisplay.count) Fächer" : subjects
+        }
+    }
+    
+    @ViewBuilder
+    private var statusIcon: some View {
+        switch item {
+        case .mandatory, .standard:
+            if isFullySubscribed {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(.green)
+            } else if isPartiallySubscribed {
+                Image(systemName: "minus.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(.orange)
+            } else {
+                Image(systemName: isAnySubjectMissingLocally ? "plus.circle.fill" : "circle")
+                    .font(.title2)
+                    .foregroundStyle(isAnySubjectMissingLocally ? headerColor : .secondary.opacity(0.5))
+            }
+        case .elective:
+             if isJoined {
+                 Image(systemName: "checkmark.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(.green)
+             } else {
+                 Image(systemName: isAnySubjectMissingLocally ? "plus.circle.fill" : "circle")
+                    .font(.title2)
+                    .foregroundStyle(isAnySubjectMissingLocally ? headerColor : .secondary.opacity(0.5))
+             }
+        }
+    }
+    
+    private func isCourseActive(_ course: Course) -> Bool {
+        switch item {
+        case .mandatory, .standard:
+            return store.subscribedCourseIds.contains(course.id)
+        case .elective:
+            // If the group is joined, we assume all subjects in it are "active" conceptually,
+            // or we check if we actually subscribed to them.
+            // In the "elective" model, joining the group usually subscribes to the courses.
+            // If we are just showing dummy courses from metadata, they aren't in subscribedCourseIds.
+            // If we are showing real courses, we check subscription.
+            if store.wahlpflichtfachGroupIds.contains(course.type?.associatedId ?? "") {
+                 // For display purposes, if the group is joined, show checkmark?
+                 // Real check:
+                 return store.subscribedCourseIds.contains(course.id) || isJoined
+            }
+            return false
+        }
+    }
+    
+    private var associatedId: String? {
+        if case .wahlpflicht(let id) = coursesToDisplay.first?.type { return id }
+        return nil
+    }
+
     @MainActor
     private func toggleSubscription() async {
         isProcessing = true
-        
-        do {
-            if isFullySubscribed {
-                // Unsubscribe from all
-                try await store.unsubscribeFromBranch(branchCourses: courses)
-            } else {
-                // Subscribe to all
-                try await store.subscribeToBranch(branchCourses: courses)
-            }
-            onSubscriptionChange()
-        } catch {
-            print("Subscription toggle failed: \(error)")
+        var wasJoined = false
+        defer { 
+            isProcessing = false 
+            onSubscriptionChange(wasJoined)
         }
         
-        isProcessing = false
+        do {
+            switch item {
+            case .mandatory, .standard:
+                if isFullySubscribed {
+                    try await store.unsubscribeFromBranch(branchCourses: coursesToDisplay)
+                } else {
+                    try await store.subscribeToBranch(branchCourses: coursesToDisplay)
+                    wasJoined = true
+                }
+                
+            case .elective(let group):
+                if isJoined {
+                    await store.leaveWahlpflichtfachGroup(code: group.id, inClass: classId)
+                } else {
+                    try await store.joinWahlpflichtfachGroup(with: group.id, inClass: classId)
+                    wasJoined = true
+                }
+            }
+        } catch {
+            errorMessage = "Fehler: \(error.localizedDescription)"
+            Task {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                errorMessage = nil
+            }
+        }
     }
 }
 
@@ -1226,13 +1453,13 @@ struct LinkClassSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Klassencode (Ziel)", text: $targetCode)
+                    TextField("Wahlpflichtfach-Code", text: $targetCode)
                         .textInputAutocapitalization(.characters)
                         .font(.body.monospaced())
                 } header: {
-                    Text("Andere Klasse verknüpfen")
+                    Text("Wahlpflichtfach verknüpfen")
                 } footer: {
-                    Text("Nutzer, die deiner Klasse beitreten, bekommen die Option, auch dieser verknüpften Klasse beizutreten.")
+                    Text("Füge ein bestehendes Wahlpflichtfach per Code zu dieser Klasse hinzu.")
                 }
                 
                 if let error = errorMessage {
@@ -1242,7 +1469,7 @@ struct LinkClassSheet: View {
                     }
                 }
             }
-            .navigationTitle("Klasse verknüpfen")
+            .navigationTitle("Wahlpflichtfach verknüpfen")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -1266,7 +1493,7 @@ struct LinkClassSheet: View {
         errorMessage = nil
         
         do {
-            try await store.linkClass(sourceId: sourceClassId, targetCode: targetCode)
+            try await store.linkWahlpflichtfachToClass(classId: sourceClassId, wahlpflichtfachGroupId: targetCode)
             dismiss()
         } catch {
             errorMessage = error.localizedDescription

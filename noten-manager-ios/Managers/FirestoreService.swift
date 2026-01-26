@@ -14,10 +14,20 @@ final class FirestoreService {
             "name": profile.name,
             "email": profile.email,
             "encryptionSalt": profile.encryptionSalt,
-            "onboardingCompleted": onboardingCompleted
+            "onboardingCompleted": onboardingCompleted,
+            "registeredInVersion": profile.registeredInVersion,
+            "registrationPlatform": profile.registrationPlatform,
+            "purchaseType": profile.purchaseType,
+            "subscriptionTier": profile.subscriptionTier
         ], merge: true)
     }
-
+    
+    func updateUserProfileField(userId: String, field: String, value: Any) async throws {
+        try await db.collection("users").document(userId).updateData([
+            field: value
+        ])
+    }
+    
     func getUserProfile(uid: String) async throws -> UserProfile? {
         let snap = try await db.collection("users").document(uid).getDocument()
         guard let data = snap.data(),
@@ -34,7 +44,12 @@ final class FirestoreService {
             email: email,
             encryptionSalt: encryptionSalt,
             activeClassId: data["activeClassId"] as? String,
-            subscribedCourseIds: data["subscribedCourseIds"] as? [String]
+            subscribedCourseIds: data["subscribedCourseIds"] as? [String],
+            hasSeenMigrationInfo: data["hasSeenMigrationInfo"] as? Bool,
+            registeredInVersion: data["registeredInVersion"] as? String,
+            registrationPlatform: data["registrationPlatform"] as? String,
+            purchaseType: data["purchaseType"] as? String,
+            subscriptionTier: data["subscriptionTier"] as? String
         )
     }
 
@@ -50,6 +65,46 @@ final class FirestoreService {
             data["email"] = email
         }
         try await db.collection("supportTickets").addDocument(data: data)
+    }
+
+    func getUserSupportTickets(userId: String) async throws -> [SupportTicket] {
+        let snap = try await db.collection("supportTickets")
+            .whereField("userId", isEqualTo: userId)
+            .order(by: "createdAt", descending: true)
+            .getDocuments()
+        
+        return snap.documents.compactMap { doc in
+            let data = doc.data()
+            guard let userId = data["userId"] as? String,
+                  let subject = data["subject"] as? String,
+                  let message = data["message"] as? String,
+                  let createdAt = (data["createdAt"] as? Timestamp)?.dateValue(),
+                  let status = data["status"] as? String else {
+                return nil
+            }
+            
+            let rawReplies = data["replies"] as? [[String: Any]] ?? []
+            let replies: [SupportReply] = rawReplies.compactMap { r in
+                guard let rMsg = r["message"] as? String,
+                      let rDate = (r["createdAt"] as? Timestamp)?.dateValue(),
+                      let rAdminId = r["adminId"] as? String,
+                      let rAdminEmail = r["adminEmail"] as? String else {
+                    return nil
+                }
+                return SupportReply(message: rMsg, createdAt: rDate, adminId: rAdminId, adminEmail: rAdminEmail)
+            }
+            
+            return SupportTicket(
+                id: doc.documentID,
+                userId: userId,
+                email: data["email"] as? String,
+                subject: subject,
+                message: message,
+                createdAt: createdAt,
+                status: status,
+                replies: replies.isEmpty ? nil : replies
+            )
+        }
     }
 
     func createAnonymousErrorLog(payload: AnonymousErrorLogPayload) {
@@ -106,21 +161,82 @@ final class FirestoreService {
             ], merge: true)
     }
 
+    /// Fetches all support access requests for a user
+    func getUserSupportAccessRequests(userId: String) async throws -> [SupportAccessRequest] {
+        let snap = try await db.collection("users").document(userId)
+            .collection("supportAccessRequests")
+            .order(by: "createdAt", descending: true)
+            .getDocuments()
+        
+        return snap.documents.compactMap { doc in
+            let data = doc.data()
+            guard let message = data["message"] as? String,
+                  let createdAt = (data["createdAt"] as? Timestamp)?.dateValue(),
+                  let status = data["status"] as? String else {
+                return nil
+            }
+            
+            return SupportAccessRequest(
+                id: doc.documentID,
+                message: message,
+                createdAt: createdAt,
+                status: status,
+                resolvedAt: (data["resolvedAt"] as? Timestamp)?.dateValue()
+            )
+        }
+    }
+
     // MARK: - Notification Tokens
 
     func updateFcmToken(userId: String, token: String) async {
         do {
             try await db.collection("users").document(userId).updateData([
                 "fcmTokens": FieldValue.arrayUnion([token]),
-                "lastTokenUpdate": Timestamp(date: Date())
+                "lastTokenUpdate": Timestamp(date: Date()),
+                "lastPlatform": "ios"
             ])
         } catch {
             print("Error updating FCM token: \(error)")
             // If document doesn't exist, create it (partially)
             try? await db.collection("users").document(userId).setData([
                 "fcmTokens": [token],
-                "lastTokenUpdate": Timestamp(date: Date())
+                "lastTokenUpdate": Timestamp(date: Date()),
+                "lastPlatform": "ios"
             ], merge: true)
+        }
+    }
+
+    // MARK: - Broadcast Notifications
+
+    func getActiveBroadcastNotifications() async throws -> [BroadcastNotification] {
+        let snap = try await db.collection("broadcastNotifications")
+            .whereField("isActive", isEqualTo: true)
+            .order(by: "priority", descending: true)
+            .order(by: "createdAt", descending: true)
+            .getDocuments()
+        
+        return snap.documents.compactMap { doc in
+            let data = doc.data()
+            guard let title = data["title"] as? String,
+                  let body = data["body"] as? String,
+                  let createdAt = (data["createdAt"] as? Timestamp)?.dateValue(),
+                  let platforms = data["platforms"] as? String,
+                  let isActive = data["isActive"] as? Bool else {
+                return nil
+            }
+            
+            return BroadcastNotification(
+                id: doc.documentID,
+                title: title,
+                body: body,
+                createdAt: createdAt,
+                platforms: platforms,
+                isActive: isActive,
+                priority: data["priority"] as? Int ?? 0,
+                type: data["type"] as? String ?? "important"
+            )
+        }.filter { broadcast in
+            broadcast.platforms == "all" || broadcast.platforms == "ios"
         }
     }
 
@@ -139,5 +255,15 @@ final class FirestoreService {
         // Preparation: In the future, this could go into a dedicated analytics collection
         // For now, we log it to a debug collection as requested
         _ = try? await db.collection("featureOnboardingLogs").addDocument(data: logData)
+    }
+    
+    // MARK: - Purchase Tracking
+    
+    func updateUserPurchaseMetadata(uid: String, type: String, tier: String?) async {
+        var data: [String: Any] = ["purchaseType": type]
+        if let tier {
+            data["subscriptionTier"] = tier
+        }
+        try? await db.collection("users").document(uid).setData(data, merge: true)
     }
 }

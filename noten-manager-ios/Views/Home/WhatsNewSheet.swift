@@ -15,28 +15,28 @@ struct WhatsNewSheet: View {
     
     private let features: [Feature] = [
         Feature(
+            title: "NEU: Soziale Gruppen",
+            description: "Teile Hausaufgaben & Termine ohne festen Kursplan. Ideal für Lerngruppen.",
+            systemImage: "person.2.fill",
+            accent: .blue
+        ),
+        Feature(
+            title: "Halbjahr-Streichens-Planer",
+            description: "Lasse dir intelligent vorschlagen, welche Halbjahre du nach FOBOSO-Regeln am besten streichen solltest.",
+            systemImage: "wand.and.rays",
+            accent: .purple
+        ),
+        Feature(
+            title: "Performance & Stabilität",
+            description: "Schnellere Ladezeiten und verbesserte Cloud-Synchronisierung für deine Noten.",
+            systemImage: "bolt.fill",
+            accent: .orange
+        ),
+        Feature(
             title: "Das neue Klassen-System",
             description: "Wechsle nahtlos von Gruppen zu Klassen für eine bessere Zusammenarbeit.",
             systemImage: "graduationcap.fill",
             accent: .indigo
-        ),
-        Feature(
-            title: "Offizielle Notenlogik",
-            description: "Präzise Berechnungen und Abitur-Prognosen nach offiziellen FOBOSO-Regeln.",
-            systemImage: "divide.circle.fill",
-            accent: .orange
-        ),
-        Feature(
-            title: "Detaillierte Berechnung",
-            description: "Tippe auf die Gesamtschnitt-Karte im Home-Screen, um die exakte MSS-Berechnung zu sehen.",
-            systemImage: "function",
-            accent: .purple
-        ),
-        Feature(
-            title: "Kalender & Termine",
-            description: "Behalte den Überblick über deine Prüfungen und Hausaufgaben in der neuen Kalenderansicht.",
-            systemImage: "calendar",
-            accent: .blue
         ),
         Feature(
             title: "Neu: Privacy Mode",

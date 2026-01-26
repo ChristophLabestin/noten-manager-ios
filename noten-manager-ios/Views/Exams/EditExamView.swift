@@ -440,7 +440,7 @@ struct EditExamView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
-                    if !exam.isShared && (!store.groupIds.isEmpty || !store.classIds.isEmpty || !store.courses.isEmpty) {
+                    if !exam.isShared && (!store.classIds.isEmpty || !store.courses.isEmpty) {
                         // For General Events, show ALL courses since there's no subject to filter by
                         let availableCourses: [Course] = {
                             if isGeneralEvent {
@@ -469,12 +469,12 @@ struct EditExamView: View {
                                     if isSharing {
                                         ProgressView()
                                     } else {
-                                        Text("In Gruppe teilen")
+                                        Text("Teilen")
                                             .frame(maxWidth: .infinity)
                                     }
                                 }
                                 .buttonStyle(SoftTintButtonStyle(accent: .blue))
-                                .disabled(isSharing || (selectedGroupIds.isEmpty && selectedClassIds.isEmpty && selectedCourseIds.isEmpty))
+                                .disabled(isSharing || (selectedClassIds.isEmpty && selectedCourseIds.isEmpty))
                             }
                             .padding(.top, -8)
                         }
@@ -638,7 +638,11 @@ struct EditExamView: View {
             }
             .onAppear {
                 updateSelectedGroupsForSubject(subjectName)
-                shareWithGroup = !selectedGroupIds.isEmpty && !exam.isShared
+                if exam.groupId != nil {
+                    shareWithGroup = true
+                } else {
+                    shareWithGroup = (!selectedClassIds.isEmpty || !selectedCourseIds.isEmpty) && !exam.isShared
+                }
             }
             .onChange(of: subjectName) { _, newSubject in
                 updateSelectedGroupsForSubject(newSubject)
@@ -842,16 +846,6 @@ struct EditExamView: View {
             }
         }
         
-        // 3. Share to Legacy Groups (from selected groups + classes with groupIds)
-        let targetGroups = Array(selectedGroupIds.union(selectedClassIds.flatMap { store.classDetails[$0]?.groupIds ?? [] }))
-        if !targetGroups.isEmpty {
-            let success = await store.shareExamToGroups(
-                examId: exam.id,
-                targetGroupIds: targetGroups
-            )
-            if success { createdAny = true }
-        }
-        
         await MainActor.run {
             isSharing = false
             if createdAny {
@@ -884,12 +878,6 @@ struct EditExamView: View {
         guard let currentId = currentUserId, exam.creatorId == currentId else { return }
         
         // 1. Check if the current source was deselected
-        // If the exam is from a group (exam.groupId) and that group is NOT in selectedGroupIds:
-        if let gid = exam.groupId, !selectedGroupIds.contains(gid) {
-            // Unshare (delete) from this group
-            _ = await store.stopSharingExam(groupId: gid, examId: exam.id)
-        }
-        
         // If the exam is from a course (exam.courseId) and that course is NOT in selectedCourseIds:
         if let cid = exam.courseId, !selectedCourseIds.contains(cid) {
              // Unshare (delete) from this course
@@ -905,7 +893,6 @@ struct EditExamView: View {
         // To avoid creating duplicates in the CURRENT source, filter it out.
         
         let targetCourseIds = selectedCourseIds.filter { $0 != exam.courseId }
-        let targetGroupIds = selectedGroupIds.filter { $0 != exam.groupId }
         // Classes logic for new targets
         // Add course IDs from selected classes
         var finalCourseIds = targetCourseIds
@@ -944,22 +931,6 @@ struct EditExamView: View {
              }
         }
         
-        if !targetGroupIds.isEmpty {
-            _ = try? await store.addExamToGroups(
-                subjectName: overrideSubjectName ?? subjectName, // Groups mostly use legacy subjectName, but check logic
-                subjectKey: nil,
-                title: title,
-                notes: notes,
-                date: combinedExamDate(),
-                hasTime: includeTime,
-                weight: useCustomWeight ? nil : examWeight,
-                customWeight: useCustomWeight ? parsedCustomWeight() : nil,
-                assessmentType: useCustomWeight ? nil : examAssessmentType,
-                reminderAt: hasReminder ? reminderDate : nil,
-                requiresGrade: requiresGrade,
-                targetGroupIds: Array(targetGroupIds)
-            )
-        }
     }
 
     private func updateSelectedGroupsForSubject(_ subject: String) {
@@ -967,20 +938,12 @@ struct EditExamView: View {
         // (If editing, we want to respect the user's explicit choices or the exam's current state)
         if exam.isShared { return }
 
-        // 1. Remove previously auto-selected groups & courses
-        selectedGroupIds.subtract(autoSelectedGroupIds)
-        autoSelectedGroupIds.removeAll()
+        // 1. Remove previously auto-selected courses
         selectedCourseIds.subtract(autoSelectedCourseIds)
         autoSelectedCourseIds.removeAll()
         
         // 2. If subject is valid, find new matches
         if !subject.isEmpty {
-            let matchedGroups = Set(store.targetGroupIds(forLocalSubject: subject))
-            if !matchedGroups.isEmpty {
-                selectedGroupIds.formUnion(matchedGroups)
-                autoSelectedGroupIds = matchedGroups
-            }
-            
             let matchedCourses = Set(store.targetCourseIds(forLocalSubject: subject))
             if !matchedCourses.isEmpty {
                 selectedCourseIds.formUnion(matchedCourses)

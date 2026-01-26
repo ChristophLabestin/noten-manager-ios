@@ -78,7 +78,7 @@ struct SubjectCalculationView: View {
                                 Text("Mündlich (Ø)")
                                     .font(.caption2.weight(.bold))
                                     .foregroundStyle(.secondary)
-                                Text(String(format: "%.2f", other))
+                                Text(String(format: "%.\(store.mssDecimalPrecision)f", other))
                                     .font(.subheadline.monospacedDigit())
                             }
                             .frame(maxWidth: .infinity)
@@ -93,7 +93,7 @@ struct SubjectCalculationView: View {
                             Text("Schnitt")
                                 .font(.caption2.weight(.bold))
                                 .foregroundStyle(.secondary)
-                            Text(average != nil ? String(format: "%.2f", average!) : "-")
+                            Text(average != nil ? String(format: "%.\(store.mssDecimalPrecision)f", average!) : "-")
                                 .font(.headline.monospacedDigit())
                                 .foregroundStyle(.blue)
                         }
@@ -129,13 +129,13 @@ struct SubjectCalculationView: View {
                     Text("Berechnung")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text("(\(v1 != nil ? String(format: "%.1f", v1!) : "-") + \(v2 != nil ? String(format: "%.1f", v2!) : "-")) ÷ 2")
+                    Text("(\(v1 != nil ? String(format: "%.\(store.mssDecimalPrecision)f", v1!) : "-") + \(v2 != nil ? String(format: "%.\(store.mssDecimalPrecision)f", v2!) : "-")) ÷ 2")
                         .font(.subheadline.monospacedDigit())
                 }
                 Spacer()
                 
                 let avg = ((v1 ?? 0) + (v2 ?? 0)) / ((v1 != nil ? 1 : 0) + (v2 != nil ? 1 : 0))
-                Text(String(format: "%.2f", avg))
+                Text(String(format: "%.\(store.mssDecimalPrecision)f", avg))
                     .font(.title2.bold().monospacedDigit())
                     .foregroundStyle(.indigo)
             }

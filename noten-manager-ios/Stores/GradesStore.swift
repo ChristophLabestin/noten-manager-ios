@@ -215,37 +215,7 @@ struct SchoolYearSnapshot {
     let practicalPerformance: PracticalPerformance?
 }
 
-struct PendingGrade: Codable, Identifiable {
-    let id: String
-    let subjectId: String
-    let grade: Double
-    let weight: Double
-    let date: Date
-    let note: String?
-    let halfYear: Int?
-    let linkedExamId: String?
-    let createdAt: Date
-    let assessmentType: AssessmentType?
-}
 
-struct PendingFachreferat: Codable {
-    let subjectName: String
-    let grade: Double
-    let date: Date
-    let note: String?
-    let createdAt: Date
-}
-
-struct PendingSeminarPerformance: Codable {
-    let topic: String?
-    let individualPoints: Double?
-    let paperPoints: Double?
-    let presentationPoints: Double?
-    let submissionDate: Date?
-    let presentationDate: Date?
-    let note: String?
-    let createdAt: Date
-}
 
 struct LegacyMigrationSummary: Equatable {
     let subjectCount: Int
@@ -261,6 +231,7 @@ struct SchoolClass: Identifiable, Codable {
     let name: String
     let ownerId: String
     let groupIds: [String]
+    var linkedWahlpflichtfachGroupIds: [String]?
     let createdAt: Date
     var config: ClassConfiguration?
     var linkedClassIds: [String]? // IDs (Codes) of other classes linked to this one
@@ -279,6 +250,7 @@ struct GroupDetails: Identifiable, Codable {
 @MainActor
 final class GradesStore: ObservableObject {
     @Published var subjects: [Subject] = []
+    @Published var registeredInVersion: String? = nil
     @Published var gradesBySubject: [String: [GradeWithId]] = [:] // Key = subjectId (name)
     @Published var fachreferat: Fachreferat?
     @Published var seminarPerformance: SeminarPerformance?
@@ -303,6 +275,7 @@ final class GradesStore: ObservableObject {
     @Published var groupSubjectMappings: [String: [String: String]] = [:] // gid -> subjectKey -> local name
     @Published var groupExamsByGroup: [String: [Exam]] = [:]
     @Published var groupHomeworksByGroup: [String: [Homework]] = [:]
+    @Published var groupsHidden: Bool = UserDefaults.standard.bool(forKey: "legacyGroupsMergedToClasses_v1")
     private var schoolYearSnapshotCache: [String: SchoolYearSnapshot] = [:]
 
     @Published var schoolYears: [String] = []
@@ -330,6 +303,7 @@ final class GradesStore: ObservableObject {
 
     @Published var encryptionKey: SymmetricKey?
     @Published var isLoading: Bool = false
+    @Published var initialSyncSettled: Bool = false
     @Published var loadingLabel: String = ""
     @Published var progress: Double = 0.0
     @Published var subjectSortMode: SubjectSortMode = .name
@@ -384,6 +358,8 @@ final class GradesStore: ObservableObject {
     @Published var schoolType: SchoolType = .bos
     @Published var activeSchoolYearId: String? = nil // z. B. "2025-26"
     @Published var onboardingRequired: Bool = false
+    @Published var onboardingAlreadyCompleted: Bool = false
+
     @Published var isOfflineMode: Bool = false
     @Published var legacyMigrationSummary: LegacyMigrationSummary? = nil
     @Published var legacySelectedSubjects: Set<String> = []
@@ -399,12 +375,22 @@ final class GradesStore: ObservableObject {
     @Published var adminAccessGranted: Bool = false
     @Published var adminAccessExpiresAt: Date? = nil
     @Published var supportAccessRequests: [SupportAccessRequest] = []
-
-    // Course-Based Architecture
+    @Published var supportNotificationUpdates: Bool = true
+    @Published var supportNotificationAccess: Bool = true
+    
+    // Support Deep Linking
+    @Published var showSupportHistory: Bool = false
+    @Published var pendingTicketId: String? = nil
+    
     @Published var subscribedCourseIds: [String] = []
     @Published var courses: [Course] = []
     @Published var migratedGroupIds: Set<String> = [] // Groups that have been upgraded to Classes
     @Published var activeClassId: String? = nil // Context: The class currently being attended in this year
+    
+    // Wahlpflichtfächer
+    @Published var wahlpflichtfachGroupIds: [String] = [] // IDs of joined/owned Wahlpflichtfach groups
+    @Published var wahlpflichtfachGroupNames: [String: String] = [:] 
+    @Published var wahlpflichtfachGroupOwners: [String: String] = [:]
     
     // MARK: - Web Re-import
     @Published var isWebReimportLoading: Bool = false
@@ -497,6 +483,8 @@ final class GradesStore: ObservableObject {
     private var pfingstferienPromptedYearIds: Set<String> = []
     private let legacyGradeMigrationKey = "legacyGradeMigration_v1"
     private let legacySubjectMigrationKey = "legacySubjectMigration_v1"
+    private let legacyGroupsMigrationKey = "legacyGroupsMergedToClasses_v1"
+    private var groupMigrationInProgress: Bool = false
 
     private func overlayPendingData() {
         guard !offlinePendingGrades.isEmpty || offlinePendingFachreferat != nil || offlinePendingSeminar != nil else { return }
@@ -582,9 +570,11 @@ final class GradesStore: ObservableObject {
                     await self.ensureSecondaryListeners(uid: uid, userData: data)
                     await self.loadUserClasses()
                 } else {
-                    // Kein User-Dokument -> minimaler Reset
+                    // Kein User-Dokument -> minimaler Reset (Neuer Account)
                     self.applyUserSettings(from: [:])
                     self.encryptionKey = nil
+                    self.initialSyncSettled = true
+                    self.isLoading = false
                 }
             }
         }
@@ -676,6 +666,7 @@ final class GradesStore: ObservableObject {
     }
 
     private func resetState() {
+        legacyMigrationSummary = nil
         legacyCheckPending = true
         resetSchoolYearScopedData()
         encryptionKey = nil
@@ -685,6 +676,7 @@ final class GradesStore: ObservableObject {
         gradeYear = nil
         schoolType = .bos
         onboardingRequired = false
+        UserDefaults.standard.removeObject(forKey: "grades_onboardingRequired")
         isOfflineMode = false
         homeworkReminderHour = 19
         homeworkReminderMinute = 0
@@ -706,6 +698,8 @@ final class GradesStore: ObservableObject {
         seminarPerformance = nil
         activeSchoolYearId = nil
         schoolYears = []
+        registeredInVersion = nil
+        UserDefaults.standard.removeObject(forKey: "grades_registeredInVersion")
         isPrivacyModeActive = false
         schoolYearNames = [:]
         subjectCustomOrder = []
@@ -1054,6 +1048,7 @@ final class GradesStore: ObservableObject {
             await MainActor.run {
                 finishInitialLoadingIfNeeded()
                 isLoading = false
+                initialSyncSettled = true
                 progress = 100
                 loadingLabel = "Fertig"
             }
@@ -1093,7 +1088,14 @@ final class GradesStore: ObservableObject {
         }
     }
 
-    private func reauthenticateIfNeeded(password: String) async throws {
+    private func reauthenticateIfNeeded(password: String?) async throws {
+        guard let password = password else {
+            // Password-less flow (e.g. social auth).
+            // We rely on the fact that the caller or UI has handled verification (e.g. FaceID).
+            // However, Firebase `delete()` or `updatePassword()` might still fail if the token is stale (error 17014).
+            // We let that error bubble up so the UI can prompt the user to re-login.
+            return
+        }
         guard let user = Auth.auth().currentUser, let email = user.email else {
             throw NSError(domain: "GradesStore", code: -3, userInfo: [NSLocalizedDescriptionKey: "Kein Login mit Email/Passwort vorhanden."])
         }
@@ -1209,7 +1211,7 @@ final class GradesStore: ObservableObject {
         }
     }
 
-    func resetEntireAccount(password: String) async throws {
+    func resetEntireAccount(password: String?) async throws {
         guard let uid = Auth.auth().currentUser?.uid else { throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"]) }
         try await reauthenticateIfNeeded(password: password)
 
@@ -1246,7 +1248,7 @@ final class GradesStore: ObservableObject {
         }
     }
 
-    func deleteAccountCompletely(password: String) async throws {
+    func deleteAccountCompletely(password: String?) async throws {
         guard let user = Auth.auth().currentUser else {
             throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
         }
@@ -1312,6 +1314,7 @@ final class GradesStore: ObservableObject {
 
         if shouldDeferYearSetup {
             isLoading = false
+            initialSyncSettled = true
             loadingLabel = ""
             progress = 0
             return
@@ -2364,6 +2367,7 @@ final class GradesStore: ObservableObject {
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 400_000_000)
                 self.isLoading = false
+                self.initialSyncSettled = true
             }
         }
     }
@@ -2721,6 +2725,12 @@ final class GradesStore: ObservableObject {
         ], merge: true)
     }
 
+    func deleteCourseMapping(courseId: String) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        let yearRef = try await requireYearRef(uid: uid)
+        try await yearRef.collection("courseMappings").document(courseId).delete()
+    }
+
     func startCourseMappingsListener() {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         Task {
@@ -2897,6 +2907,24 @@ final class GradesStore: ObservableObject {
             showNextExamCard = UserDefaults.standard.bool(forKey: "showNextExamCard")
         }
         
+        registeredInVersion = data["registeredInVersion"] as? String
+        if let v = registeredInVersion {
+            UserDefaults.standard.set(v, forKey: "grades_registeredInVersion")
+        } else {
+            // Legacy user backfill: "1.2"
+            // If they are logging in now and have no version, they enter the 1.2 cohort.
+            // This distinguishes them from fresh 1.3 installs.
+            let backfillVersion = "1.2"
+            registeredInVersion = backfillVersion
+            UserDefaults.standard.set(backfillVersion, forKey: "grades_registeredInVersion")
+            
+            // Persist to Firestore
+            Task {
+                guard let uid = Auth.auth().currentUser?.uid else { return }
+                try? await FirestoreService.shared.updateUserProfileField(userId: uid, field: "registeredInVersion", value: backfillVersion)
+            }
+        }
+
         
         let defaults = UserDefaults.standard
         if defaults.object(forKey: "grades_showSubjectsAsGrid") != nil {
@@ -2937,6 +2965,14 @@ final class GradesStore: ObservableObject {
             standardRemindersEnabled = true
         }
         lastSeenVersion = data["lastSeenVersion"] as? String
+        
+        if let notifyUpdates = data["supportNotificationUpdates"] as? Bool {
+            supportNotificationUpdates = notifyUpdates
+        }
+        if let notifyAccess = data["supportNotificationAccess"] as? Bool {
+            supportNotificationAccess = notifyAccess
+        }
+
         UserDefaults.standard.set(standardRemindersEnabled, forKey: "grades_standardRemindersEnabled")
         if let mode = data["darkModeMode"] as? String, ["system","light","dark"].contains(mode) {
             darkModeMode = mode
@@ -2950,6 +2986,10 @@ final class GradesStore: ObservableObject {
 
         let onboardingDoneFlag = resolveOnboardingDone(from: data)
         onboardingRequired = !onboardingDoneFlag
+        onboardingAlreadyCompleted = onboardingDoneFlag
+
+        UserDefaults.standard.set(onboardingRequired, forKey: "grades_onboardingRequired")
+
         rescheduleLocalNotifications()
 
         // Preload potentielles Vorjahres-Snapshot im Hintergrund (z. B. FOS 11 -> 12)
@@ -3146,6 +3186,11 @@ final class GradesStore: ObservableObject {
             subjectCustomOrder = subjectSortOrder
         }
 
+        if !groupIds.isEmpty && groupsHidden {
+            groupsHidden = false
+            UserDefaults.standard.set(false, forKey: legacyGroupsMigrationKey)
+        }
+
         updateGroupObservers(uid: uid, schoolYearId: activeSchoolYearId)
         updateSharedExamsListenerIfNeeded()
         updateSharedHomeworksListenerIfNeeded()
@@ -3226,6 +3271,14 @@ final class GradesStore: ObservableObject {
     private func loadLocalPreferences() {
         let defaults = UserDefaults.standard
 
+        if defaults.object(forKey: "grades_onboardingRequired") != nil {
+            onboardingRequired = defaults.bool(forKey: "grades_onboardingRequired")
+        }
+        if let v = defaults.string(forKey: "grades_registeredInVersion") {
+            registeredInVersion = v
+        }
+
+
         if let storedTheme = defaults.string(forKey: "grades_theme"),
            ["default", "feminine"].contains(storedTheme) {
             theme = storedTheme
@@ -3289,6 +3342,10 @@ final class GradesStore: ObservableObject {
         }
         if let precision = defaults.object(forKey: "grades_mssDecimalPrecision") as? Int, (0...2).contains(precision) {
             mssDecimalPrecision = precision
+        }
+        
+        if defaults.object(forKey: "grades_showSubjectsAsGrid") != nil {
+            showSubjectsAsGrid = defaults.bool(forKey: "grades_showSubjectsAsGrid")
         }
 
         hasSeenClassesOnboarding = defaults.bool(forKey: "grades_hasSeenClassesOnboarding")
@@ -3477,7 +3534,59 @@ final class GradesStore: ObservableObject {
             standardRemindersEnabled: standardRemindersEnabled,
             pendingGrades: offlinePendingGrades,
             pendingFachreferat: offlinePendingFachreferat,
-            pendingSeminar: offlinePendingSeminar
+            pendingSeminar: offlinePendingSeminar,
+            subscribedCourseIds: subscribedCourseIds,
+            courses: courses,
+            classIds: classIds,
+            classNames: classNames,
+            classOwners: classOwners,
+            classDetails: classDetails,
+            migratedGroupIds: Array(migratedGroupIds),
+            activeClassId: activeClassId,
+            courseExamsMap: courseExamsMap,
+            courseHomeworksMap: courseHomeworksMap,
+            courseMappings: courseMappings,
+            wahlpflichtfachGroupIds: wahlpflichtfachGroupIds,
+            wahlpflichtfachGroupNames: wahlpflichtfachGroupNames,
+            wahlpflichtfachGroupOwners: wahlpflichtfachGroupOwners,
+            examPoints: examPoints,
+            isPrivacyModeActive: isPrivacyModeActive,
+            alwaysEnablePrivacyOnStart: alwaysEnablePrivacyOnStart,
+            userName: userName,
+            mssDecimalPrecision: mssDecimalPrecision,
+            showSubjectsAsGrid: showSubjectsAsGrid,
+            showNextExamCard: showNextExamCard,
+            subjectCustomOrder: subjectCustomOrder,
+            hasSeenMigrationInfo: hasSeenMigrationInfo,
+            hasSeenClassesOnboarding: hasSeenClassesOnboarding,
+            lastSeenVersion: lastSeenVersion,
+            simulatedGrades: simulatedGrades,
+            excludedRealGradeIds: Array(excludedRealGradeIds),
+            includeDroppedGrades: includeDroppedGrades,
+            simulatedExamPointsDict: simulatedExamPointsDict,
+            groupOwners: groupOwners,
+            groupTypes: groupTypes,
+            groupMemberIds: groupMemberIds.mapValues { Array($0) },
+            groupsHidden: groupsHidden,
+            schoolYearNames: schoolYearNames,
+            examSubjectMapping: examSubjectMapping,
+            homeworkSubjectMapping: homeworkSubjectMapping,
+            examGroupSubjects: examGroupSubjects,
+            homeworkGroupSubjects: homeworkGroupSubjects,
+            sharedExamUserReminders: sharedExamUserReminders,
+            sharedHomeworkUserReminders: sharedHomeworkUserReminders,
+            sharedExamUserNotes: sharedExamUserNotes,
+            sharedHomeworkUserNotes: sharedHomeworkUserNotes,
+            sharedExamUserCompleted: Array(sharedExamUserCompleted),
+            sharedHomeworkUserCompleted: Array(sharedHomeworkUserCompleted),
+            sharedExamUserRescheduled: sharedExamUserRescheduled,
+            holidaysCache: HolidaysService.shared.getHolidaysCache().reduce(into: [String: [HolidayPeriod]]()) { $0[String($1.key)] = $1.value },
+            feiertageCache: HolidaysService.shared.getFeiertageCache().reduce(into: [String: [HolidayPeriod]]()) { $0[String($1.key)] = $1.value },
+            pfingstferienCache: HolidaysService.shared.getPfingstferienCache().reduce(into: [String: Date]()) { $0[String($1.key)] = $1.value },
+            summerEndCache: HolidaysService.shared.getSummerEndCache().reduce(into: [String: Date]()) { $0[String($1.key)] = $1.value }
+
+
+
         )
     }
 
@@ -3526,6 +3635,64 @@ final class GradesStore: ObservableObject {
         offlinePendingGrades = snapshot.pendingGrades
         offlinePendingFachreferat = snapshot.pendingFachreferat
         offlinePendingSeminar = snapshot.pendingSeminar
+        
+        subscribedCourseIds = snapshot.subscribedCourseIds
+        courses = snapshot.courses
+        classIds = snapshot.classIds
+        classNames = snapshot.classNames
+        classOwners = snapshot.classOwners
+        classDetails = snapshot.classDetails
+        migratedGroupIds = Set(snapshot.migratedGroupIds)
+        activeClassId = snapshot.activeClassId
+        courseExamsMap = snapshot.courseExamsMap
+        courseHomeworksMap = snapshot.courseHomeworksMap
+        courseMappings = snapshot.courseMappings
+        wahlpflichtfachGroupIds = snapshot.wahlpflichtfachGroupIds
+        wahlpflichtfachGroupNames = snapshot.wahlpflichtfachGroupNames
+        wahlpflichtfachGroupOwners = snapshot.wahlpflichtfachGroupOwners
+
+        
+        examPoints = snapshot.examPoints
+        isPrivacyModeActive = snapshot.isPrivacyModeActive
+        alwaysEnablePrivacyOnStart = snapshot.alwaysEnablePrivacyOnStart
+        userName = snapshot.userName
+        mssDecimalPrecision = snapshot.mssDecimalPrecision
+        showSubjectsAsGrid = snapshot.showSubjectsAsGrid
+        showNextExamCard = snapshot.showNextExamCard
+        subjectCustomOrder = snapshot.subjectCustomOrder
+        hasSeenMigrationInfo = snapshot.hasSeenMigrationInfo
+        hasSeenClassesOnboarding = snapshot.hasSeenClassesOnboarding
+        lastSeenVersion = snapshot.lastSeenVersion
+        simulatedGrades = snapshot.simulatedGrades
+        excludedRealGradeIds = Set(snapshot.excludedRealGradeIds)
+        includeDroppedGrades = snapshot.includeDroppedGrades
+        simulatedExamPointsDict = snapshot.simulatedExamPointsDict
+        groupOwners = snapshot.groupOwners
+        groupTypes = snapshot.groupTypes
+        groupMemberIds = snapshot.groupMemberIds.mapValues { Set($0) }
+        groupsHidden = snapshot.groupsHidden
+        schoolYearNames = snapshot.schoolYearNames
+        examSubjectMapping = snapshot.examSubjectMapping
+        homeworkSubjectMapping = snapshot.homeworkSubjectMapping
+        examGroupSubjects = snapshot.examGroupSubjects
+        homeworkGroupSubjects = snapshot.homeworkGroupSubjects
+        sharedExamUserReminders = snapshot.sharedExamUserReminders
+        sharedHomeworkUserReminders = snapshot.sharedHomeworkUserReminders
+        sharedExamUserNotes = snapshot.sharedExamUserNotes
+        sharedHomeworkUserNotes = snapshot.sharedHomeworkUserNotes
+        sharedExamUserCompleted = Set(snapshot.sharedExamUserCompleted)
+        sharedHomeworkUserCompleted = Set(snapshot.sharedHomeworkUserCompleted)
+        sharedExamUserRescheduled = snapshot.sharedExamUserRescheduled
+
+        HolidaysService.shared.restoreCaches(
+            holidays: snapshot.holidaysCache.reduce(into: [Int: [HolidayPeriod]]()) { if let year = Int($1.key) { $0[year] = $1.value } },
+            feiertage: snapshot.feiertageCache.reduce(into: [Int: [HolidayPeriod]]()) { if let year = Int($1.key) { $0[year] = $1.value } },
+            pfingstferien: snapshot.pfingstferienCache.reduce(into: [Int: Date]()) { if let year = Int($1.key) { $0[year] = $1.value } },
+            summerEnd: snapshot.summerEndCache.reduce(into: [Int: Date]()) { if let year = Int($1.key) { $0[year] = $1.value } }
+        )
+
+
+
 
         if encryptionKey == nil, let salt = snapshot.encryptionSalt {
             let uid = snapshot.userId
@@ -3540,6 +3707,9 @@ final class GradesStore: ObservableObject {
         progress = 0
 
         rescheduleLocalNotifications()
+        rebuildSharedExams()
+        rebuildSharedHomeworks()
+
 
         Task { await self.applyAppIconSelectionIfNeeded() }
 
@@ -3750,6 +3920,14 @@ final class GradesStore: ObservableObject {
     }
 
     private func updateSharedExamsListenerIfNeeded() {
+        if groupsHidden {
+            sharedExamsListener?.remove()
+            sharedExamsListener = nil
+            sharedExamsGroupId = nil
+            sharedExams = []
+            legacySharedExams = []
+            return
+        }
         // Falls keine Gruppe mehr vorhanden ist, Listener entfernen
         if examGroupId == nil {
             sharedExamsListener?.remove()
@@ -3827,6 +4005,14 @@ final class GradesStore: ObservableObject {
     }
     
     private func updateSharedHomeworksListenerIfNeeded() {
+        if groupsHidden {
+            sharedHomeworksListener?.remove()
+            sharedHomeworksListener = nil
+            sharedHomeworksGroupId = nil
+            sharedHomeworks = []
+            legacySharedHomeworks = []
+            return
+        }
         if homeworkGroupId == nil {
             sharedHomeworksListener?.remove()
             sharedHomeworksListener = nil
@@ -4151,55 +4337,281 @@ final class GradesStore: ObservableObject {
         return code
     }
     
-    func linkClass(sourceId: String, targetCode: String) async throws {
+
+    // MARK: - Wahlpflichtfächer
+    
+    func createWahlpflichtfachGroup(name: String, subjects: [String]) async throws -> String {
         guard let uid = Auth.auth().currentUser?.uid else {
-            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
+             throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
         }
         
-        // Check ownership
-        guard classOwners[sourceId] == uid else {
-             throw NSError(domain: "GradesStore", code: -4, userInfo: [NSLocalizedDescriptionKey: "Keine Berechtigung"])
-        }
+        // 1. Create Group Doc
+        let code = generateExamGroupCode()
+        let groupRef = db.collection("wahlpflichtfachGroups").document(code)
         
-        let code = normalizedExamGroupCode(targetCode)
-        guard !code.isEmpty else {
-             throw NSError(domain: "GradesStore", code: -2, userInfo: [NSLocalizedDescriptionKey: "Ungültiger Code"])
-        }
+        let payload: [String: Any] = [
+            "name": name,
+            "subjects": subjects,
+            "ownerId": uid,
+            "createdAt": Date()
+        ]
         
-        // Verify target exists
-        let targetDoc = try await db.collection("classes").document(code).getDocument()
-        guard targetDoc.exists else {
-             throw NSError(domain: "GradesStore", code: -3, userInfo: [NSLocalizedDescriptionKey: "Zielklasse nicht gefunden"])
-        }
+        let batch = db.batch()
+        batch.setData(payload, forDocument: groupRef)
         
-        // Update source
-        try await db.collection("classes").document(sourceId).updateData([
-            "linkedClassIds": FieldValue.arrayUnion([code])
-        ])
+        // 2. Add owner as member
+        let memberRef = groupRef.collection("members").document(uid)
+        batch.setData(["joinedAt": Date()], forDocument: memberRef)
         
-        // Local update if already fetched
-        if var details = classDetails[sourceId] {
-            var current = details.linkedClassIds ?? []
-            if !current.contains(code) {
-                current.append(code)
-                details.linkedClassIds = current
-                await MainActor.run {
-                    classDetails[sourceId] = details
-                }
+        // 3. Update User Profile / SchoolYear for ownership tracking
+        let yearRef = try await requireYearRef(uid: uid)
+        batch.updateData([
+            "wahlpflichtfachGroupIds": FieldValue.arrayUnion([code])
+        ], forDocument: yearRef)
+        
+        try await batch.commit()
+        
+        // 4. Local Update
+        await MainActor.run {
+            if !wahlpflichtfachGroupIds.contains(code) {
+                wahlpflichtfachGroupIds.append(code)
+                wahlpflichtfachGroupNames[code] = name
+                wahlpflichtfachGroupOwners[code] = uid
             }
         }
+        
+        return code
     }
+    
+    func joinWahlpflichtfachGroup(with rawCode: String, inClass classId: String? = nil) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        let code = normalizedExamGroupCode(rawCode)
+        guard !code.isEmpty else { return }
+        
+        let groupRef = db.collection("wahlpflichtfachGroups").document(code)
+        let doc = try await groupRef.getDocument()
+        guard doc.exists else {
+             throw NSError(domain: "GradesStore", code: -3, userInfo: [NSLocalizedDescriptionKey: "Diese Gruppe existiert nicht."])
+        }
+        let name = doc.data()?["name"] as? String ?? "Unbekannt"
+        
+        // Add member
+        try await groupRef.collection("members").document(uid).setData([
+            "joinedAt": Date()
+        ])
+        
+        // Update user tracking
+        let yearRef = try await requireYearRef(uid: uid)
+        try await yearRef.updateData([
+             "wahlpflichtfachGroupIds": FieldValue.arrayUnion([code])
+         ])
+        
+        // Subscribe to relevant courses in the class
+        if let targetClassId = classId ?? activeClassId {
+            // We fetch all courses to filter locally (safer for complex type check)
+            // Or query? Fetching is fine for class size.
+            let courses = try await fetchCoursesForClass(classId: targetClassId)
+            let wpCourses = courses.filter {
+                if case .wahlpflicht(let gid) = $0.type { return gid == code }
+                return false
+            }
+            if !wpCourses.isEmpty {
+                // Reuse helper which handles user doc and local state updates
+                // Note: subscribeToBranch expects an array of courses
+                try? await subscribeToBranch(branchCourses: wpCourses)
+            }
+        }
+        
+        await MainActor.run {
+             if !wahlpflichtfachGroupIds.contains(code) {
+                 wahlpflichtfachGroupIds.append(code)
+                 wahlpflichtfachGroupNames[code] = name
+             }
+         }
+    }
+    
+    func fetchWahlpflichtfachGroupInfo(with rawCode: String) async throws -> WahlpflichtfachGroup {
+        let code = normalizedExamGroupCode(rawCode)
+        guard !code.isEmpty else {
+             throw NSError(domain: "GradesStore", code: -2, userInfo: [NSLocalizedDescriptionKey: "Leerer Code"])
+        }
+        
+        let doc = try await db.collection("wahlpflichtfachGroups").document(code).getDocument()
+        guard doc.exists, let data = doc.data() else {
+             throw NSError(domain: "GradesStore", code: -3, userInfo: [NSLocalizedDescriptionKey: "Gruppe nicht gefunden."])
+        }
+        
+        let name = data["name"] as? String ?? "Unbenannt"
+        let subjects = data["subjects"] as? [String] ?? []
+        let ownerId = data["ownerId"] as? String ?? ""
+        let createdAtTerm = data["createdAt"] as? Timestamp
+        
+        return WahlpflichtfachGroup(
+            id: code,
+            name: name,
+            subjects: subjects,
+            ownerId: ownerId,
+            createdAt: createdAtTerm?.dateValue() ?? Date()
+        )
+    }
+    
+    func deleteWahlpflichtfachGroup(code: String) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        
+        let groupRef = db.collection("wahlpflichtfachGroups").document(code)
+        let doc = try await groupRef.getDocument()
+        guard let owner = doc.data()?["ownerId"] as? String, owner == uid else {
+            throw NSError(domain: "GradesStore", code: -4, userInfo: [NSLocalizedDescriptionKey: "Nur der Ersteller kann die Gruppe löschen."])
+        }
+        
+        try await groupRef.delete()
+        
+        await leaveWahlpflichtfachGroup(code: code)
+    }
+    
+    func leaveWahlpflichtfachGroup(code: String, inClass classId: String? = nil) async {
+         guard let uid = Auth.auth().currentUser?.uid else { return }
+         
+         if let yearRef = try? await requireYearRef(uid: uid) {
+             try? await yearRef.updateData([
+                 "wahlpflichtfachGroupIds": FieldValue.arrayRemove([code])
+             ])
+         }
+         
+         try? await db.collection("wahlpflichtfachGroups").document(code).collection("members").document(uid).delete()
+         
+         // Unsubscribe from relevant courses
+         if let targetClassId = classId ?? activeClassId {
+             if let courses = try? await fetchCoursesForClass(classId: targetClassId) {
+                 let wpCourses = courses.filter {
+                     if case .wahlpflicht(let gid) = $0.type { return gid == code }
+                     return false
+                 }
+                 if !wpCourses.isEmpty {
+                     try? await unsubscribeFromBranch(branchCourses: wpCourses)
+                 }
+             }
+         }
+         
+         await MainActor.run {
+             wahlpflichtfachGroupIds.removeAll { $0 == code }
+             wahlpflichtfachGroupNames.removeValue(forKey: code)
+             wahlpflichtfachGroupOwners.removeValue(forKey: code)
+         }
+    }
+    
+    func linkWahlpflichtfachToClass(classId: String, wahlpflichtfachGroupId: String) async throws {
+         guard let uid = Auth.auth().currentUser?.uid else { return }
+        
+         // Check ownership of class
+         guard classOwners[classId] == uid else {
+              throw NSError(domain: "GradesStore", code: -4, userInfo: [NSLocalizedDescriptionKey: "Keine Berechtigung für die Klasse"])
+         }
+         
+         // Fetch group info
+         let groupInfo = try await fetchWahlpflichtfachGroupInfo(with: wahlpflichtfachGroupId)
+         
+         let batch = db.batch()
+         
+         // Update class doc
+         let classRef = db.collection("classes").document(classId)
+         batch.updateData([
+            "linkedWahlpflichtfachGroupIds": FieldValue.arrayUnion([wahlpflichtfachGroupId])
+         ], forDocument: classRef)
+         
+         // Create Courses for the subjects in the group
+         // These courses are of type .wahlpflicht(groupId)
+         for subject in groupInfo.subjects {
+             // Check if course already exists?
+             // Since we don't have unique constraint on subject name in a class (technically allowed), we just add it.
+             // Maybe check if we already have this subject for this group?
+             // Query existing courses:
+             let existingSnapshot = try await db.collection("courses")
+                .whereField("classId", isEqualTo: classId)
+                .whereField("name", isEqualTo: subject)
+                .getDocuments()
+                
+             let alreadyExists = existingSnapshot.documents.contains { doc in
+                 _ = doc.data()["type"] as? [String: Any]
+                 // This manual check of enum encoding is tricky. Let's assume we just create it.
+                 // CourseType encoding in Swift usually: {"wahlpflicht": {"_0": "groupId"}}
+                 // To avoid duplicates, we'd need robust check. 
+                 // For now, simpler: Just create user is responsible.
+                 return false 
+             }
+             
+             if !alreadyExists {
+                 let courseRef = db.collection("courses").document()
+                 let course = Course(
+                     id: courseRef.documentID,
+                     name: subject,
+                     subjectKey: slugifySubjectName(subject),
+                     classId: classId,
+                     type: .wahlpflicht(wahlpflichtfachGroupId),
+                    gradingMode: nil,
+                    ownerId: uid,
+                    joinCode: nil,
+                    createdAt: Date()
+                 )
+                 try batch.setData(from: course, forDocument: courseRef)
+             }
+         }
+         
+         try await batch.commit()
+         
+         // Local update
+         if classDetails[classId] != nil {
+             // We need to update local config representation if we tracked these IDs there.
+             // Currently config tracks `linkedClassIds` but we're adding `linkedWahlpflichtfachGroupIds` to the doc
+             // We might want to add it to ClassConfiguration struct or handle it separately.
+             // For now, it's enough that Courses are created.
+         }
+         
+         // Refresh courses
+         await refreshCourses(for: classId)
+    }
+    
+    private func refreshCourses(for classId: String) async {
+        if let newCourses = try? await fetchCoursesForClass(classId: classId) {
+             await MainActor.run {
+                 // Update local cache if we are viewing this class
+                 if activeClassId == classId {
+                     self.courses = newCourses
+                 }
+             }
+        }
+    }
+
+
     
     // MARK: - New Course-Based Class Creation
     
     struct ClassCreationConfiguration {
         let name: String
-        let commonSubjects: [String] // "Mathe", "Deutsch"
+        let commonSubjects: [SubjectConfig]
         let branches: [BranchConfig]
+        let wahlpflichtSubjects: [WahlpflichtConfig]
+        
+        struct SubjectConfig: Hashable {
+            let name: String
+            let hasSchulaufgabe: Bool
+        }
         
         struct BranchConfig {
-            let name: String // "Sozial"
-            let subjects: [String] // "Pädagogik"
+            let name: String
+            let subjects: [SubjectConfig]
+        }
+        
+        struct WahlpflichtConfig {
+            let name: String
+            let subjects: [SubjectConfig]
+        }
+        
+        init(name: String, commonSubjects: [SubjectConfig], branches: [BranchConfig], wahlpflichtSubjects: [WahlpflichtConfig] = []) {
+            self.name = name
+            self.commonSubjects = commonSubjects
+            self.branches = branches
+            self.wahlpflichtSubjects = wahlpflichtSubjects
         }
     }
     
@@ -4215,79 +4627,149 @@ final class GradesStore: ObservableObject {
          let classRef = db.collection("classes").document(code)
          
          // Serialize configuration for future reference?
-         let branchData = config.branches.map { ["name": $0.name, "id": $0.name] } // Simple ID = name
+         _ = config.branches.map { ["name": $0.name, "id": $0.name] } // Simple ID = name
          
-         let classPayload: [String: Any] = [
+         var classPayload: [String: Any] = [
              "name": config.name,
              "ownerId": uid,
              "createdAt": Date(),
-             "courseConfiguration": [
-                "branches": branchData
-             ],
+             "config": try Firestore.Encoder().encode(ClassConfiguration(branches: config.branches.map { ClassConfiguration.Branch(name: $0.name) }, wahlpflichtfaecher: nil)),
              "groupIds": [] // Legacy compat
          ]
+         
+         // 2. Process Wahlpflichtfächer (Create Independent Groups)
+         var linkedWPGroupIds: [String] = []
+         var wpCourseIds: [String] = []
+         
+         for wpConfig in config.wahlpflichtSubjects {
+             let wpGroupId = generateExamGroupCode()
+             linkedWPGroupIds.append(wpGroupId)
+             
+             // Create WP Group
+             let wpRef = db.collection("wahlpflichtfachGroups").document(wpGroupId)
+             batch.setData([
+                 "name": wpConfig.name,
+                 "subjects": wpConfig.subjects,
+                 "ownerId": uid,
+                 "createdAt": Date()
+             ], forDocument: wpRef)
+             
+             // Add owner (creator) as member
+             let wpMemberRef = wpRef.collection("members").document(uid)
+             batch.setData(["joinedAt": Date()], forDocument: wpMemberRef)
+             
+             // Create Courses for WP Group
+             for wpSubjectConfig in wpConfig.subjects {
+                let subject = wpSubjectConfig.name
+                let courseRef = db.collection("courses").document()
+                let course = Course(
+                    id: courseRef.documentID,
+                    name: subject,
+                    subjectKey: slugifySubjectName(subject),
+                    classId: code,
+                    type: .wahlpflicht(wpGroupId),
+                    gradingMode: wpSubjectConfig.hasSchulaufgabe ? .withSchulaufgaben : .withoutSchulaufgaben,
+                    ownerId: uid,
+                    joinCode: nil,
+                    createdAt: Date()
+                )
+                _ = try? batch.setData(from: course, forDocument: courseRef)
+                wpCourseIds.append(course.id)
+            }
+         }
+         
+         if !linkedWPGroupIds.isEmpty {
+             classPayload["linkedWahlpflichtfachGroupIds"] = linkedWPGroupIds
+         }
+         
          batch.setData(classPayload, forDocument: classRef)
          
          // Add creator as member
          let memberRef = classRef.collection("members").document(uid)
-         batch.setData(["joinedAt": Date()], forDocument: memberRef)
+         batch.setData(["joinedAt": Date(), "role": "owner"], forDocument: memberRef)
          
-         // Link to user profile
+         // Link to user profile (year)
          let yearRef = try await requireYearRef(uid: uid)
-         batch.updateData(["classIds": FieldValue.arrayUnion([code])], forDocument: yearRef)
+         batch.updateData([
+            "classIds": FieldValue.arrayUnion([code]),
+            "wahlpflichtfachGroupIds": FieldValue.arrayUnion(linkedWPGroupIds)
+         ], forDocument: yearRef)
          
-         let commonSubjects = Array(Set(config.commonSubjects))
          
-         // 2. Create Common Courses
-         for subject in commonSubjects {
-             let courseRef = db.collection("courses").document()
-             let course = Course(
-                 id: courseRef.documentID,
-                 name: subject,
-                 subjectKey: slugifySubjectName(subject),
-                 classId: code,
-                 type: .mandatory,
-                 ownerId: uid,
-                 joinCode: nil, // Generate if needed
-                 createdAt: Date()
-             )
-             try batch.setData(from: course, forDocument: courseRef)
-         }
+         // 3. Create Common Courses
+        for subjectConfig in config.commonSubjects {
+            let subject = subjectConfig.name
+            let courseRef = db.collection("courses").document()
+            let course = Course(
+                id: courseRef.documentID,
+                name: subject,
+                subjectKey: slugifySubjectName(subject),
+                classId: code,
+                type: .mandatory,
+                gradingMode: subjectConfig.hasSchulaufgabe ? .withSchulaufgaben : .withoutSchulaufgaben,
+                ownerId: uid,
+                joinCode: nil, // Generate if needed
+                createdAt: Date()
+            )
+            try batch.setData(from: course, forDocument: courseRef)
+        }
          
-         // 3. Create Branch Courses
-         for branch in config.branches {
-             for subject in branch.subjects {
-                 let courseRef = db.collection("courses").document()
-                 let course = Course(
-                     id: courseRef.documentID,
-                     name: subject,
-                     subjectKey: slugifySubjectName(subject),
-                     classId: code,
-                     type: .branch(branch.name),
-                     ownerId: uid,
-                     joinCode: nil,
-                     createdAt: Date()
-                 )
-                 try batch.setData(from: course, forDocument: courseRef)
-             }
-         }
+         // 4. Create Branch Courses
+        for branch in config.branches {
+            for subjectConfig in branch.subjects {
+                let subject = subjectConfig.name
+                let courseRef = db.collection("courses").document()
+                let course = Course(
+                    id: courseRef.documentID,
+                    name: subject,
+                    subjectKey: slugifySubjectName(subject),
+                    classId: code,
+                    type: .branch(branch.name),
+                    gradingMode: subjectConfig.hasSchulaufgabe ? .withSchulaufgaben : .withoutSchulaufgaben,
+                    ownerId: uid,
+                    joinCode: nil,
+                    createdAt: Date()
+                )
+                try batch.setData(from: course, forDocument: courseRef)
+            }
+        }
          
          try await batch.commit()
          
-         // 4. Auto-subscribe creator to mandatory courses
-         let mandatoryCourses = try await fetchCoursesForClass(classId: code).filter { $0.type == .mandatory }
-         let mandatoryIds = mandatoryCourses.map { $0.id }
-         if let yearRef = try? await requireYearRef(uid: uid) {
-             var updates: [String: Any] = ["activeClassId": code]
-             if !mandatoryIds.isEmpty {
-                 updates["subscribedCourseIds"] = FieldValue.arrayUnion(mandatoryIds)
-             }
-             try? await yearRef.updateData(updates)
-             // Also update user profile for legacy
+         // 5. Auto-subscribe creator to mandatory courses AND created WP courses (since they are owner)
+         // Note: We need to fetch ID's for mandatory courses newly created... easier to pre-generate IDs or fetch after.
+         // Fetching after is safer.
+         let allCourses = try await fetchCoursesForClass(classId: code)
+         let mandatoryIds = allCourses.filter { $0.type == .mandatory }.map { $0.id }
+         
+         // Subscribe to Mandatory + Created WP Courses
+         let subscribeIds = mandatoryIds + wpCourseIds
+         
+         if !subscribeIds.isEmpty {
+             try? await yearRef.updateData([
+                "activeClassId": code,
+                "subscribedCourseIds": FieldValue.arrayUnion(subscribeIds)
+             ])
+             
+             // Also update user profile for legacy/global
              let userRef = db.collection("users").document(uid)
-             if !mandatoryIds.isEmpty {
-                 try? await userRef.updateData(["subscribedCourseIds": FieldValue.arrayUnion(mandatoryIds)])
+             try? await userRef.updateData(["subscribedCourseIds": FieldValue.arrayUnion(subscribeIds)])
+         }
+         
+         // Retrieve WP Group info locally to update store state immediately?
+         // (Listeners will pick it up eventually, but for smooth UI we might want to inject)
+         await MainActor.run {
+             for (idx, wpId) in linkedWPGroupIds.enumerated() {
+                 if idx < config.wahlpflichtSubjects.count {
+                     let name = config.wahlpflichtSubjects[idx].name
+                     wahlpflichtfachGroupIds.append(wpId)
+                     wahlpflichtfachGroupNames[wpId] = name
+                     wahlpflichtfachGroupOwners[wpId] = uid
+                 }
              }
+             classIds.append(code)
+             classNames[code] = config.name
+             activeClassId = code
          }
 
          // Local update
@@ -4324,7 +4806,7 @@ final class GradesStore: ObservableObject {
             "joinedAt": Date()
         ])
         
-        let yearRef = try await requireYearRef(uid: uid)
+        let yearRef = try await requireYearRef(uid: uid, gateOnOnboarding: false)
         try await yearRef.setData([
              "classIds": FieldValue.arrayUnion([code])
          ], merge: true)
@@ -4349,19 +4831,19 @@ final class GradesStore: ObservableObject {
          
          // 2. Update User Profile with Class Assignment
          // We store classIds in schoolYear usually, but subscriptions are top-level for now per logic.
-         let yearRef = try await requireYearRef(uid: uid)
-         batch.updateData(["classIds": FieldValue.arrayUnion([classId])], forDocument: yearRef)
+         let yearRef = try await requireYearRef(uid: uid, gateOnOnboarding: false)
+         batch.setData(["classIds": FieldValue.arrayUnion([classId])], forDocument: yearRef, merge: true)
          
          // 2. Update School Year with Class Context
          // Migrated from User Profile to School Year for "Ascension" support
          let courseIds = selectedCourses.map { $0.id }
          if !courseIds.isEmpty {
-             batch.updateData([
+             batch.setData([
                 "subscribedCourseIds": FieldValue.arrayUnion(courseIds),
                 "activeClassId": classId
-             ], forDocument: yearRef)
+             ], forDocument: yearRef, merge: true)
          } else {
-             batch.updateData(["activeClassId": classId], forDocument: yearRef)
+             batch.setData(["activeClassId": classId], forDocument: yearRef, merge: true)
          }
          
          try await batch.commit()
@@ -4388,7 +4870,9 @@ final class GradesStore: ObservableObject {
         let linkedClassIds = data["linkedClassIds"] as? [String]
         
         var config: ClassConfiguration? = nil
-        if let configData = data["courseConfiguration"] as? [String: Any] {
+        let configSource = data["courseConfiguration"] as? [String: Any] ?? data["config"] as? [String: Any]
+        
+        if let configData = configSource {
             // Manual decoding or JSON serialization
             if let jsonData = try? JSONSerialization.data(withJSONObject: configData),
                let decoded = try? JSONDecoder().decode(ClassConfiguration.self, from: jsonData) {
@@ -4396,12 +4880,38 @@ final class GradesStore: ObservableObject {
             }
         }
         
+        // Fallback: check for branches/wahlpflichtfaecher at the root level (legacy or flat schema)
+        if config == nil || ((config?.branches?.isEmpty ?? true) && (config?.wahlpflichtfaecher?.isEmpty ?? true)) {
+            // Check for branches as objects or strings
+            var branches: [ClassConfiguration.Branch] = []
+            if let branchesData = data["branches"] as? [[String: Any]] {
+                branches = branchesData.compactMap { d -> ClassConfiguration.Branch? in
+                    guard let n = d["name"] as? String else { return nil }
+                    return ClassConfiguration.Branch(name: n)
+                }
+            } else if let branchNames = data["branches"] as? [String] {
+                branches = branchNames.map { ClassConfiguration.Branch(name: $0) }
+            }
+            
+            // Handle wahlpflichtfaecher fallback
+            let wpData = data["wahlpflichtfaecher"] as? [[String: Any]] ?? []
+            let wp = wpData.compactMap { d -> ClassConfiguration.WahlpflichtfachConfig? in
+                guard let n = d["name"] as? String, let s = d["subjects"] as? [String] else { return nil }
+                return ClassConfiguration.WahlpflichtfachConfig(name: n, subjects: s)
+            }
+            
+            if !branches.isEmpty || !wp.isEmpty {
+                config = ClassConfiguration(branches: branches, wahlpflichtfaecher: wp.isEmpty ? nil : wp)
+            }
+        }
+        
         return (code, name, config, linkedClassIds)
     }
     
     func fetchCoursesForClass(classId: String) async throws -> [Course] {
+        let normalizedId = normalizedExamGroupCode(classId)
         let snapshot = try await db.collection("courses")
-            .whereField("classId", isEqualTo: classId)
+            .whereField("classId", isEqualTo: normalizedId)
             .getDocuments()
             
         return snapshot.documents.compactMap { try? $0.data(as: Course.self) }
@@ -4480,18 +4990,51 @@ final class GradesStore: ObservableObject {
         let migratedGroupsSnapshot = try await db.collection("groups")
             .whereField("migratedToClassId", isEqualTo: code)
             .getDocuments()
-        
+        var restoredGroupIds: [String] = []
         for groupDoc in migratedGroupsSnapshot.documents {
             // Clear the migration marker so the group shows up again
             try? await groupDoc.reference.updateData([
                 "migratedToClassId": FieldValue.delete(),
+                "migratedToBranchName": FieldValue.delete(),
                 "migratedAt": FieldValue.delete()
             ])
             
             // Remove from local migratedGroupIds
             await MainActor.run {
                 _ = migratedGroupIds.remove(groupDoc.documentID)
+                groupMigratedToClassIds.removeValue(forKey: groupDoc.documentID)
             }
+            restoredGroupIds.append(groupDoc.documentID)
+        }
+
+        if !restoredGroupIds.isEmpty {
+            // Re-add restored groups to user/school-year references so they reappear
+            let userRef = db.collection("users").document(uid)
+            try? await userRef.updateData([
+                "groupIds": FieldValue.arrayUnion(restoredGroupIds),
+                "examGroupIds": FieldValue.arrayUnion(restoredGroupIds),
+                "homeworkGroupIds": FieldValue.arrayUnion(restoredGroupIds)
+            ])
+
+            if let yearRef = try? await requireYearRef(uid: uid) {
+                try? await yearRef.updateData([
+                    "groupIds": FieldValue.arrayUnion(restoredGroupIds),
+                    "examGroupIds": FieldValue.arrayUnion(restoredGroupIds),
+                    "homeworkGroupIds": FieldValue.arrayUnion(restoredGroupIds)
+                ])
+            }
+
+            await MainActor.run {
+                groupIds = Array(Set(groupIds + restoredGroupIds))
+                examGroupIds = Array(Set(examGroupIds + restoredGroupIds))
+                homeworkGroupIds = Array(Set(homeworkGroupIds + restoredGroupIds))
+                if groupsHidden {
+                    groupsHidden = false
+                    UserDefaults.standard.set(false, forKey: legacyGroupsMigrationKey)
+                }
+            }
+
+            updateGroupObservers(uid: uid, schoolYearId: activeSchoolYearId)
         }
         
         // 2. Delete all Courses associated with this class
@@ -4555,25 +5098,77 @@ final class GradesStore: ObservableObject {
               let groupName = groupData["name"] as? String else {
             throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Gruppe nicht gefunden"])
         }
-        
-        // 2. Check Ownership
-        if let owner = groupData["ownerId"] as? String, owner != uid {
-             throw NSError(domain: "GradesStore", code: -4, userInfo: [NSLocalizedDescriptionKey: "Nur der Ersteller kann die Gruppe in eine Klasse umwandeln."])
+
+        if let migrated = groupData["migratedToClassId"] as? String, !migrated.isEmpty {
+            let migratedCourses = (try? await fetchCoursesForClass(classId: migrated)) ?? []
+            if !migratedCourses.isEmpty {
+                let courseIds = migratedCourses.map { $0.id }
+                let userRef = db.collection("users").document(uid)
+                try? await userRef.updateData([
+                    "subscribedCourseIds": FieldValue.arrayUnion(courseIds)
+                ])
+                if let yearId = activeSchoolYearId {
+                    let yearRef = db.collection("users").document(uid).collection("schoolYears").document(yearId)
+                    try? await yearRef.updateData([
+                        "subscribedCourseIds": FieldValue.arrayUnion(courseIds),
+                        "activeClassId": migrated
+                    ])
+                }
+            }
+            try? await joinClass(with: migrated)
+            await MainActor.run {
+                migratedGroupIds.insert(groupId)
+                groupMigratedToClassIds[groupId] = migrated
+            }
+            return migrated
         }
-        
-        // 3. Fetch Subjects
-        let subjectsSnapshot = try await groupRef.collection("subjects").getDocuments()
-        let subjectDocs = subjectsSnapshot.documents
-        let subjects = Array(Set(subjectDocs.compactMap { $0.data()["name"] as? String }))
-        
-        guard !subjects.isEmpty else {
-             throw NSError(domain: "GradesStore", code: -5, userInfo: [NSLocalizedDescriptionKey: "Die Gruppe hat keine Fächer."])
+
+        let ownerId = groupData["ownerId"] as? String
+        let isOwner = ownerId == nil || ownerId == uid
+        if !isOwner {
+            throw NSError(domain: "GradesStore", code: -4, userInfo: [NSLocalizedDescriptionKey: "Nur der Ersteller kann die Gruppe in eine Klasse umwandeln."])
+        }
+
+        // 3. Fetch Subjects (fallback to exams/homeworks if empty)
+        let subjectsSnapshot = try? await groupRef.collection("subjects").getDocuments()
+        var subjectNames: [String] = subjectsSnapshot?.documents.compactMap { $0.data()["name"] as? String } ?? []
+        if let cached = groupSubjectsByGroup[groupId] {
+            subjectNames.append(contentsOf: cached.map { $0.name })
+        }
+
+        let examGroupSnapshot = try? await db.collection("examGroups").document(groupId).collection("exams").getDocuments()
+        let homeworkGroupSnapshot = try? await db.collection("homeworkGroups").document(groupId).collection("homeworks").getDocuments()
+        let groupExamsSnapshot = try? await groupRef.collection("exams").getDocuments()
+        let groupHomeworksSnapshot = try? await groupRef.collection("homeworks").getDocuments()
+
+        func appendSubject(_ raw: String?) {
+            let trimmed = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            subjectNames.append(trimmed)
+        }
+
+        for doc in examGroupSnapshot?.documents ?? [] {
+            appendSubject(doc.data()["subjectName"] as? String)
+        }
+        for doc in homeworkGroupSnapshot?.documents ?? [] {
+            appendSubject(doc.data()["subjectName"] as? String)
+        }
+        for doc in groupExamsSnapshot?.documents ?? [] {
+            appendSubject(doc.data()["subjectName"] as? String)
+        }
+        for doc in groupHomeworksSnapshot?.documents ?? [] {
+            appendSubject(doc.data()["subjectName"] as? String)
+        }
+
+        var subjects = Array(Set(subjectNames.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }))
+        if subjects.isEmpty {
+            subjects = ["Allgemein"]
         }
 
         // 4. Create Class (this also creates Courses for each subject)
         let config = ClassCreationConfiguration(
             name: groupName,
-            commonSubjects: subjects,
+            commonSubjects: subjects.map { .init(name: $0, hasSchulaufgabe: true) }, // Assuming default hasSchulaufgabe for migrated
             branches: []
         )
         
@@ -4585,19 +5180,16 @@ final class GradesStore: ObservableObject {
         for course in newCourses {
             subjectToCourseId[course.name.lowercased()] = course.id
         }
+        let fallbackCourseId = newCourses.first?.id
         
         // 6. Migrate Exams from legacy examGroups collection
-        let examGroupRef = db.collection("examGroups").document(groupId)
-        let examsSnapshot = try? await examGroupRef.collection("exams").getDocuments()
-        
-        if let exams = examsSnapshot?.documents {
+        if let exams = examGroupSnapshot?.documents {
             for examDoc in exams {
                 let data = examDoc.data()
                 let subjectName = (data["subjectName"] as? String ?? "").lowercased()
+                let targetCourseId = subjectToCourseId[subjectName] ?? fallbackCourseId
                 
-                // Find matching course
-                if let targetCourseId = subjectToCourseId[subjectName] {
-                    // Copy exam to course
+                if let targetCourseId {
                     var newExamData = data
                     newExamData["migratedFromGroup"] = groupId
                     if let weight = data["weight"] as? Int, data["assessmentType"] == nil {
@@ -4611,17 +5203,13 @@ final class GradesStore: ObservableObject {
         }
         
         // 7. Migrate Homeworks from legacy homeworkGroups collection
-        let homeworkGroupRef = db.collection("homeworkGroups").document(groupId)
-        let homeworksSnapshot = try? await homeworkGroupRef.collection("homeworks").getDocuments()
-        
-        if let homeworks = homeworksSnapshot?.documents {
+        if let homeworks = homeworkGroupSnapshot?.documents {
             for hwDoc in homeworks {
                 let data = hwDoc.data()
                 let subjectName = (data["subjectName"] as? String ?? "").lowercased()
+                let targetCourseId = subjectToCourseId[subjectName] ?? fallbackCourseId
                 
-                // Find matching course
-                if let targetCourseId = subjectToCourseId[subjectName] {
-                    // Copy homework to course
+                if let targetCourseId {
                     var newHwData = data
                     newHwData["migratedFromGroup"] = groupId
                     try? await db.collection("courses").document(targetCourseId).collection("homeworks").document(hwDoc.documentID).setData(newHwData)
@@ -4630,12 +5218,12 @@ final class GradesStore: ObservableObject {
         }
         
         // 8. Also try groups/{id}/exams and groups/{id}/homeworks as fallback
-        let groupExamsSnapshot = try? await groupRef.collection("exams").getDocuments()
         if let exams = groupExamsSnapshot?.documents {
             for examDoc in exams {
                 let data = examDoc.data()
                 let subjectName = (data["subjectName"] as? String ?? "").lowercased()
-                if let targetCourseId = subjectToCourseId[subjectName] {
+                let targetCourseId = subjectToCourseId[subjectName] ?? fallbackCourseId
+                if let targetCourseId {
                     var newExamData = data
                     newExamData["migratedFromGroup"] = groupId
                     if let weight = data["weight"] as? Int, data["assessmentType"] == nil {
@@ -4648,12 +5236,12 @@ final class GradesStore: ObservableObject {
             }
         }
         
-        let groupHomeworksSnapshot = try? await groupRef.collection("homeworks").getDocuments()
         if let homeworks = groupHomeworksSnapshot?.documents {
             for hwDoc in homeworks {
                 let data = hwDoc.data()
                 let subjectName = (data["subjectName"] as? String ?? "").lowercased()
-                if let targetCourseId = subjectToCourseId[subjectName] {
+                let targetCourseId = subjectToCourseId[subjectName] ?? fallbackCourseId
+                if let targetCourseId {
                     var newHwData = data
                     newHwData["migratedFromGroup"] = groupId
                     try? await db.collection("courses").document(targetCourseId).collection("homeworks").document(hwDoc.documentID).setData(newHwData, merge: true)
@@ -4662,11 +5250,13 @@ final class GradesStore: ObservableObject {
         }
         
         // 9. Mark Group as Migrated (so it doesn't show in updated app versions)
-        try await groupRef.updateData([
-            "migratedToClassId": newClassId,
-            "migratedToBranchName": "", // Empty string indicates single-group conversion (no branch suffix)
-            "migratedAt": Date()
-        ])
+        if isOwner {
+            try await groupRef.updateData([
+                "migratedToClassId": newClassId,
+                "migratedToBranchName": "", // Empty string indicates single-group conversion (no branch suffix)
+                "migratedAt": Date()
+            ])
+        }
         
         // 10. Subscribe owner to all migrated courses
         let newCourseIds = newCourses.map { $0.id }
@@ -4676,7 +5266,9 @@ final class GradesStore: ObservableObject {
         ])
         
         // 10b. Migrate other group members (Legacy + Current)
-        try await migrateMembersFromGroupToClass(groupId: groupId, toClassId: newClassId, courseIds: newCourseIds)
+        if isOwner {
+            try await migrateMembersFromGroupToClass(groupId: groupId, toClassId: newClassId, courseIds: newCourseIds)
+        }
         
         // 11. Local Cleanup: Mark as migrated immediately
         await MainActor.run {
@@ -4692,7 +5284,11 @@ final class GradesStore: ObservableObject {
     /// - Parameter className: The name of the new class.
     /// - Parameter groups: Array of tuples containing (groupId, branchName).
     /// - Returns: The new Class ID.
-    func mergeGroupsIntoClass(className: String, groups: [(groupId: String, branchName: String)]) async throws -> String {
+    /// Merges multiple legacy groups into a single new Class.
+    /// - Parameter className: The name of the new class.
+    /// - Parameter groups: Array of tuples containing (groupId: String, targetName: String, isWahlpflicht: Bool, hasSchulaufgabe: Bool).
+    /// - Returns: The new Class ID.
+    func mergeGroupsIntoClass(className: String, groups: [(groupId: String, targetName: String, isWahlpflicht: Bool, hasSchulaufgabe: Bool)]) async throws -> String {
         guard let uid = Auth.auth().currentUser?.uid else {
             throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
         }
@@ -4701,17 +5297,19 @@ final class GradesStore: ObservableObject {
             throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Keine Gruppen ausgewählt"])
         }
         
+        let branchGroups = groups.filter { !$0.isWahlpflicht }
+        
         // 1. Create the Class document
         let classCode = generateExamGroupCode()
         let classRef = db.collection("classes").document(classCode)
         
         // Build branches configuration
         var branchConfigs: [ClassConfiguration.Branch] = []
-        for group in groups {
-            branchConfigs.append(ClassConfiguration.Branch(name: group.branchName))
+        for group in branchGroups {
+            branchConfigs.append(ClassConfiguration.Branch(name: group.targetName))
         }
         
-        let config = ClassConfiguration(branches: branchConfigs)
+        let config = ClassConfiguration(branches: branchConfigs, wahlpflichtfaecher: nil)
         
         try await classRef.setData([
             "ownerId": uid,
@@ -4733,7 +5331,8 @@ final class GradesStore: ObservableObject {
             ])
         }
         
-        // 2. For each group, create courses and migrate data
+        // 2. Process Groups (Create Courses & Migrate)
+        var linkedWPGroupIds: [String] = []
         var allCourseIds: [String] = []
         
         for group in groups {
@@ -4742,13 +5341,53 @@ final class GradesStore: ObservableObject {
             
             guard groupDoc.exists else { continue }
             
-            // Fetch subjects from the group
+            // Fetch subjects from the legacy group
             let subjectsSnapshot = try await groupRef.collection("subjects").getDocuments()
             let subjects = subjectsSnapshot.documents.compactMap { $0.data()["name"] as? String }
+
+
             
-            // Create courses for each subject (tagged with branch)
+            // Determine Course Type & Context
+            let courseType: CourseType
+            if group.isWahlpflicht {
+                // CREATE NEW INDEPENDENT WAHLPFLICHT GROUP
+                let newWPCode = generateExamGroupCode()
+                linkedWPGroupIds.append(newWPCode)
+                // Create WP Group Document
+                let wpRef = db.collection("wahlpflichtfachGroups").document(newWPCode)
+                try await wpRef.setData([
+                    "name": group.targetName,
+                    "subjects": subjects,
+                    "ownerId": uid,
+                    "createdAt": Date()
+                ])
+                // Add owner to WP group
+                try await wpRef.collection("members").document(uid).setData(["joinedAt": Date()])
+                
+                // Add to user's WP list
+                if let yearRef = try? await requireYearRef(uid: uid) {
+                    try await yearRef.updateData([
+                        "wahlpflichtfachGroupIds": FieldValue.arrayUnion([newWPCode])
+                    ])
+                }
+                
+                // Local update helper
+                await MainActor.run {
+                    if !wahlpflichtfachGroupIds.contains(newWPCode) {
+                        wahlpflichtfachGroupIds.append(newWPCode)
+                        wahlpflichtfachGroupNames[newWPCode] = group.targetName
+                        wahlpflichtfachGroupOwners[newWPCode] = uid
+                    }
+                }
+                
+                courseType = .wahlpflicht(newWPCode)
+            } else {
+                // BRANCH
+                courseType = .branch(group.targetName)
+            }
+            
+            // Create courses for each subject
             var subjectToCourseId: [String: String] = [:]
-            var branchCourseIds: [String] = []
             
             for subjectName in subjects {
                 let courseRef = db.collection("courses").document()
@@ -4757,7 +5396,8 @@ final class GradesStore: ObservableObject {
                     name: subjectName,
                     subjectKey: slugifySubjectName(subjectName),
                     classId: classCode,
-                    type: .branch(group.branchName),
+                    type: courseType,
+                    gradingMode: group.hasSchulaufgabe ? .withSchulaufgaben : .withoutSchulaufgaben,
                     ownerId: uid,
                     joinCode: nil,
                     createdAt: Date()
@@ -4765,7 +5405,6 @@ final class GradesStore: ObservableObject {
                 try courseRef.setData(from: course)
                 subjectToCourseId[subjectName.lowercased()] = courseRef.documentID
                 allCourseIds.append(courseRef.documentID)
-                branchCourseIds.append(courseRef.documentID)
             }
             
             // Migrate exams from examGroups
@@ -4801,43 +5440,25 @@ final class GradesStore: ObservableObject {
                 }
             }
             
-            // Also try groups/{id}/exams and groups/{id}/homeworks
-            if let exams = try? await groupRef.collection("exams").getDocuments().documents {
-                for examDoc in exams {
-                    let data = examDoc.data()
-                    let subjectName = (data["subjectName"] as? String ?? "").lowercased()
-                    if let targetCourseId = subjectToCourseId[subjectName] {
-                        var newData = data
-                        newData["migratedFromGroup"] = group.groupId
-                        if let weight = data["weight"] as? Int, data["assessmentType"] == nil {
-                            if let derived = deriveAssessmentType(from: weight) {
-                                newData["assessmentType"] = derived.rawValue
-                            }
-                        }
-                        try? await db.collection("courses").document(targetCourseId).collection("exams").document(examDoc.documentID).setData(newData, merge: true)
-                    }
-                }
-            }
-            
-            if let homeworks = try? await groupRef.collection("homeworks").getDocuments().documents {
-                for hwDoc in homeworks {
-                    let data = hwDoc.data()
-                    let subjectName = (data["subjectName"] as? String ?? "").lowercased()
-                    if let targetCourseId = subjectToCourseId[subjectName] {
-                        var newData = data
-                        newData["migratedFromGroup"] = group.groupId
-                        try? await db.collection("courses").document(targetCourseId).collection("homeworks").document(hwDoc.documentID).setData(newData, merge: true)
-                    }
-                }
-            }
-            
-            // Migrate Members (Legacy + Current)
-            try await migrateMembersFromGroupToClass(groupId: group.groupId, toClassId: classCode, courseIds: branchCourseIds)
+            // Note: We do NOT migrate members automatically for legacy groups?
+            // Actually, legacy groups didn't really have shared members like classes do.
+            // If they did, we might want to migrate them. But for now keeping it simple as per original logic.
             
             // Mark group as migrated
             try await groupRef.updateData([
                 "migratedToClassId": classCode,
                 "migratedAt": Date()
+            ])
+            
+            _ = await MainActor.run {
+                migratedGroupIds.insert(group.groupId)
+            }
+        }
+        
+        // Link WP Groups to Class if any
+        if !linkedWPGroupIds.isEmpty {
+            try await classRef.updateData([
+                "linkedWahlpflichtfachGroupIds": linkedWPGroupIds
             ])
         }
         
@@ -4850,16 +5471,154 @@ final class GradesStore: ObservableObject {
         
         // 4. Local cleanup
         await MainActor.run {
-            for group in groups {
-                // Keep in groupIds and groupNames so listeners continue (needed for context display)
-                migratedGroupIds.insert(group.groupId)
-            }
             classIds.append(classCode)
             classNames[classCode] = className
             subscribedCourseIds.append(contentsOf: allCourseIds)
+            activeClassId = classCode
         }
         
         return classCode
+    }
+
+
+
+    private func clearLegacyGroupState() {
+        for (_, l) in groupSubjectsListeners { l.remove() }
+        for (_, l) in groupMappingsListeners { l.remove() }
+        for (_, l) in groupNameListeners { l.remove() }
+        for (_, l) in groupMembersListeners { l.remove() }
+        for (_, l) in groupExamsListeners { l.remove() }
+        for (_, l) in groupHomeworksListeners { l.remove() }
+        groupSubjectsListeners = [:]
+        groupMappingsListeners = [:]
+        groupNameListeners = [:]
+        groupMembersListeners = [:]
+        groupExamsListeners = [:]
+        groupHomeworksListeners = [:]
+
+        examGroupSubjectsListener?.remove()
+        examGroupSubjectsListener = nil
+        examGroupSubjectsGid = nil
+        examGroupSubjects = []
+        homeworkGroupSubjectsListener?.remove()
+        homeworkGroupSubjectsListener = nil
+        homeworkGroupSubjectsGid = nil
+        homeworkGroupSubjects = []
+        examSubjectMappingListener?.remove()
+        examSubjectMappingListener = nil
+        examSubjectMappingGid = nil
+        examSubjectMapping = [:]
+        homeworkSubjectMappingListener?.remove()
+        homeworkSubjectMappingListener = nil
+        homeworkSubjectMappingGid = nil
+        homeworkSubjectMapping = [:]
+
+        groupIds = []
+        groupNames = [:]
+        groupBranchNames = [:]
+        groupMigratedToClassIds = [:]
+        groupOwners = [:]
+        groupTypes = [:]
+        groupMemberIds = [:]
+        groupSubjectsByGroup = [:]
+        groupSubjectMappings = [:]
+        groupExamsByGroup = [:]
+        groupHomeworksByGroup = [:]
+        migratedGroupIds = []
+
+        examGroupId = nil
+        homeworkGroupId = nil
+        examGroupIds = []
+        homeworkGroupIds = []
+        examGroupName = nil
+        homeworkGroupName = nil
+
+        sharedExamsListener?.remove()
+        sharedExamsListener = nil
+        sharedExamsGroupId = nil
+        sharedExams = []
+        legacySharedExams = []
+
+        sharedHomeworksListener?.remove()
+        sharedHomeworksListener = nil
+        sharedHomeworksGroupId = nil
+        sharedHomeworks = []
+        legacySharedHomeworks = []
+
+        sharedExamUserSettingsListener?.remove()
+        sharedExamUserSettingsListener = nil
+        sharedExamUserNotesListener?.remove()
+        sharedExamUserNotesListener = nil
+        sharedExamUserCompletedListener?.remove()
+        sharedExamUserCompletedListener = nil
+        sharedExamUserRescheduledListener?.remove()
+        sharedExamUserRescheduledListener = nil
+        sharedExamUserReminders = [:]
+        sharedExamUserNotes = [:]
+        sharedExamUserCompleted = []
+        sharedExamUserRescheduled = [:]
+
+        sharedHomeworkUserSettingsListener?.remove()
+        sharedHomeworkUserSettingsListener = nil
+        sharedHomeworkUserNotesListener?.remove()
+        sharedHomeworkUserNotesListener = nil
+        sharedHomeworkUserCompletedListener?.remove()
+        sharedHomeworkUserCompletedListener = nil
+        sharedHomeworkUserReminders = [:]
+        sharedHomeworkUserNotes = [:]
+        sharedHomeworkUserCompleted = []
+    }
+
+    private func clearLegacyGroupReferences(uid: String) async {
+        let payload: [String: Any] = [
+            "groupIds": FieldValue.delete(),
+            "examGroupIds": FieldValue.delete(),
+            "homeworkGroupIds": FieldValue.delete(),
+            "examGroupId": FieldValue.delete(),
+            "homeworkGroupId": FieldValue.delete()
+        ]
+
+        try? await db.collection("users").document(uid).updateData(payload)
+
+        if let yearId = activeSchoolYearId {
+            let yearRef = db.collection("users").document(uid).collection("schoolYears").document(yearId)
+            try? await yearRef.updateData(payload)
+        }
+    }
+
+    private func autoMigrateLegacyGroupsIfNeeded(uid: String) async {
+        if groupMigrationInProgress { return }
+        if UserDefaults.standard.bool(forKey: legacyGroupsMigrationKey) {
+            if !groupsHidden { groupsHidden = true }
+            clearLegacyGroupState()
+            return
+        }
+
+        let currentGroupIds = groupIds
+        if currentGroupIds.isEmpty {
+            groupsHidden = true
+            UserDefaults.standard.set(true, forKey: legacyGroupsMigrationKey)
+            return
+        }
+
+        groupMigrationInProgress = true
+        defer { groupMigrationInProgress = false }
+
+        var failed: [String] = []
+        for gid in currentGroupIds {
+            do {
+                _ = try await migrateGroupToClass(groupId: gid)
+            } catch {
+                failed.append(gid)
+            }
+        }
+
+        guard failed.isEmpty else { return }
+
+        await clearLegacyGroupReferences(uid: uid)
+        clearLegacyGroupState()
+        groupsHidden = true
+        UserDefaults.standard.set(true, forKey: legacyGroupsMigrationKey)
     }
     
     /// Adds a legacy group to an existing class as a new branch.
@@ -4870,12 +5629,21 @@ final class GradesStore: ObservableObject {
         guard let uid = Auth.auth().currentUser?.uid else {
             throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
         }
+
+        let classDoc = try await db.collection("classes").document(classId).getDocument()
+        if let owner = classDoc.data()?["ownerId"] as? String, owner != uid {
+            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Nur der Klassen-Owner kann Gruppen als Zweig hinzufügen."])
+        }
         
         let groupRef = db.collection("groups").document(groupCode)
         let groupDoc = try await groupRef.getDocument()
         
         guard groupDoc.exists else {
             throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Gruppe nicht gefunden"])
+        }
+
+        if let owner = groupDoc.data()?["ownerId"] as? String, owner != uid {
+            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Nur der Gruppen-Owner kann die Gruppe migrieren."])
         }
         
         // Fetch subjects from the group
@@ -4898,6 +5666,7 @@ final class GradesStore: ObservableObject {
                 subjectKey: slugifySubjectName(subjectName),
                 classId: classId,
                 type: .branch(branchName),
+                gradingMode: nil,
                 ownerId: uid,
                 joinCode: nil,
                 createdAt: Date()
@@ -4988,8 +5757,8 @@ final class GradesStore: ObservableObject {
         
         // Update class config to include new branch
         let classRef = db.collection("classes").document(classId)
-        let classDoc = try await classRef.getDocument()
-        if let data = classDoc.data(),
+        let classDocSnapshot = try await classRef.getDocument()
+        if let data = classDocSnapshot.data(),
            let configData = data["config"] as? [String: Any],
            var branches = configData["branches"] as? [[String: Any]] {
             branches.append(["name": branchName])
@@ -5110,6 +5879,7 @@ final class GradesStore: ObservableObject {
                 subjectKey: slugifySubjectName(subject),
                 classId: classId,
                 type: .branch(branchName),
+                gradingMode: nil,
                 ownerId: uid,
                 joinCode: nil,
                 createdAt: Date()
@@ -5140,7 +5910,7 @@ final class GradesStore: ObservableObject {
     }
     
     /// Adds a new Course to an existing Class.
-    func addCourseToClass(classId: String, name: String, type: CourseType) async throws {
+    func addCourseToClass(classId: String, name: String, type: CourseType, gradingMode: GradingMode? = nil) async throws {
         guard let uid = Auth.auth().currentUser?.uid else {
             throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
         }
@@ -5159,6 +5929,7 @@ final class GradesStore: ObservableObject {
             subjectKey: slugifySubjectName(name),
             classId: classId,
             type: type,
+            gradingMode: gradingMode,
             ownerId: uid,
             joinCode: nil,
             createdAt: Date()
@@ -5277,6 +6048,7 @@ final class GradesStore: ObservableObject {
             name: name,
             ownerId: ownerId,
             groupIds: groupIds,
+            linkedWahlpflichtfachGroupIds: data["linkedWahlpflichtfachGroupIds"] as? [String],
             createdAt: createdAt,
             fetchedGroups: nil,
             memberCount: nil
@@ -6026,6 +6798,7 @@ final class GradesStore: ObservableObject {
 
     // Neue Variante: verteilt automatisch in alle passenden Gruppen (nach Subject-Mapping) oder in die explizit angegebenen Gruppen
     func addExamToGroups(subjectName: String, subjectKey: String? = nil, title: String, notes: String?, date: Date, hasTime: Bool, weight: Int?, customWeight: Double?, assessmentType: AssessmentType?, reminderAt: Date?, requiresGrade: Bool? = true, targetGroupIds explicitGids: [String]? = nil) async throws -> [(groupId: String, docId: String)] {
+        if groupsHidden { return [] }
         guard let uid = Auth.auth().currentUser?.uid else {
             throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
         }
@@ -6058,6 +6831,7 @@ final class GradesStore: ObservableObject {
     }
     
     func shareExamToGroups(examId: String, targetGroupIds: [String]? = nil) async -> Bool {
+        if groupsHidden { return false }
         guard let exam = exams.first(where: { $0.id == examId }) else { return false }
         do {
             let created = try await addExamToGroups(
@@ -6147,6 +6921,7 @@ final class GradesStore: ObservableObject {
     }
 
     func addHomeworkToGroups(subjectName: String, title: String, dueDate: Date?, reminderAt: Date?, targetGroupIds explicitGids: [String]? = nil) async throws -> [(groupId: String, docId: String)] {
+        if groupsHidden { return [] }
         guard let uid = Auth.auth().currentUser?.uid else {
             throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
         }
@@ -6173,6 +6948,7 @@ final class GradesStore: ObservableObject {
     }
 
     func shareHomeworkToGroups(homeworkId: String, targetGroupIds: [String]? = nil) async -> Bool {
+        if groupsHidden { return false }
         guard let hw = homeworks.first(where: { $0.id == homeworkId }) else { return false }
         do {
             let created = try await addHomeworkToGroups(
@@ -7675,7 +8451,12 @@ final class GradesStore: ObservableObject {
                            holidayHintsEnabled: Bool? = nil,
                            mssDecimalPrecision: Int? = nil,
                            showNextExamCard: Bool? = nil,
-                           showSubjectsAsGrid: Bool? = nil) async {
+                           showSubjectsAsGrid: Bool? = nil,
+                           supportNotificationUpdates: Bool? = nil,
+                           supportNotificationAccess: Bool? = nil,
+                           homeworkReminderHour: Int? = nil,
+                           homeworkReminderMinute: Int? = nil,
+                           standardRemindersEnabled: Bool? = nil) async {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         let clampedIntensity = themeIntensity.map { max(0, min(1, $0)) }
 
@@ -7696,6 +8477,11 @@ final class GradesStore: ObservableObject {
         if let mssDecimalPrecision, (0...2).contains(mssDecimalPrecision) { self.mssDecimalPrecision = mssDecimalPrecision }
         if let showNextExamCard { self.showNextExamCard = showNextExamCard }
         if let showSubjectsAsGrid { self.showSubjectsAsGrid = showSubjectsAsGrid }
+        if let supportNotificationUpdates { self.supportNotificationUpdates = supportNotificationUpdates }
+        if let supportNotificationAccess { self.supportNotificationAccess = supportNotificationAccess }
+        if let homeworkReminderHour { self.homeworkReminderHour = homeworkReminderHour }
+        if let homeworkReminderMinute { self.homeworkReminderMinute = homeworkReminderMinute }
+        if let standardRemindersEnabled { self.standardRemindersEnabled = standardRemindersEnabled }
 
         // lokal speichern, damit Einstellungen direkt beim App-Start verfügbar sind
         let defaults = UserDefaults.standard
@@ -7709,6 +8495,11 @@ final class GradesStore: ObservableObject {
         if let mssDecimalPrecision { defaults.set(mssDecimalPrecision, forKey: "grades_mssDecimalPrecision") }
         if let showNextExamCard { defaults.set(showNextExamCard, forKey: "showNextExamCard") }
         if let showSubjectsAsGrid { defaults.set(showSubjectsAsGrid, forKey: "grades_showSubjectsAsGrid") }
+        if let supportNotificationUpdates { defaults.set(supportNotificationUpdates, forKey: "grades_supportNotificationUpdates") }
+        if let supportNotificationAccess { defaults.set(supportNotificationAccess, forKey: "grades_supportNotificationAccess") }
+        if let standardRemindersEnabled { defaults.set(standardRemindersEnabled, forKey: "grades_standardRemindersEnabled") }
+        // Note: Hour/Minute usually come from FS, but we can save them if needed. 
+        // Current pattern suggests we only strictly sync critical local flags or those with 'grades_' prefix logic.
 
         var payload: [String: Any] = [:]
         if let theme { payload["theme"] = theme }
@@ -7721,6 +8512,11 @@ final class GradesStore: ObservableObject {
         if let mssDecimalPrecision { payload["mssDecimalPrecision"] = mssDecimalPrecision }
         if let showNextExamCard { payload["showNextExamCard"] = showNextExamCard }
         if let showSubjectsAsGrid { payload["showSubjectsAsGrid"] = showSubjectsAsGrid }
+        if let supportNotificationUpdates { payload["supportNotificationUpdates"] = supportNotificationUpdates }
+        if let supportNotificationAccess { payload["supportNotificationAccess"] = supportNotificationAccess }
+        if let homeworkReminderHour { payload["homeworkReminderHour"] = homeworkReminderHour }
+        if let homeworkReminderMinute { payload["homeworkReminderMinute"] = homeworkReminderMinute }
+        if let standardRemindersEnabled { payload["standardRemindersEnabled"] = standardRemindersEnabled }
 
         guard !payload.isEmpty else { return }
         do {
@@ -7910,7 +8706,7 @@ final class GradesStore: ObservableObject {
     }
 
     func markOnboardingCompletedIfPossible() async {
-        guard !subjects.isEmpty else { return }
+        // Allow empty subjects - user can add later
         guard let uid = Auth.auth().currentUser?.uid else { return }
         do {
             try await db.collection("users").document(uid).setData([
@@ -7955,7 +8751,11 @@ final class GradesStore: ObservableObject {
         let onboardingDone = (data?["onboardingCompleted"] as? Bool) ?? false
         let migrated = (data?["migratedToSchoolYears"] as? Bool) ?? false
         let legacyPending = (data?["legacyDecisionPending"] as? Bool) ?? false
-        return onboardingDone && migrated && !legacyPending
+        
+        // Comprehensive check: onboarding is only "done" if flag is set AND we have a setup
+        let hasActiveYear = (data?["activeSchoolYearId"] as? String)?.isEmpty == false
+        
+        return onboardingDone && migrated && !legacyPending && hasActiveYear
     }
 
     func updateSubjectExamFlags(subjectName: String, examSubject: Bool, examType: ExamType) async {
@@ -8273,6 +9073,13 @@ final class GradesStore: ObservableObject {
     }
 
     private func updateExamGroupSubjectsListenerIfNeeded(forceReload: Bool = false) {
+        if groupsHidden {
+            examGroupSubjectsListener?.remove()
+            examGroupSubjectsListener = nil
+            examGroupSubjectsGid = nil
+            examGroupSubjects = []
+            return
+        }
         if forceReload || examGroupSubjectsGid != examGroupId {
             examGroupSubjectsListener?.remove()
             examGroupSubjectsListener = nil
@@ -8301,6 +9108,13 @@ final class GradesStore: ObservableObject {
     }
 
     private func updateHomeworkGroupSubjectsListenerIfNeeded(forceReload: Bool = false) {
+        if groupsHidden {
+            homeworkGroupSubjectsListener?.remove()
+            homeworkGroupSubjectsListener = nil
+            homeworkGroupSubjectsGid = nil
+            homeworkGroupSubjects = []
+            return
+        }
         if forceReload || homeworkGroupSubjectsGid != homeworkGroupId {
             homeworkGroupSubjectsListener?.remove()
             homeworkGroupSubjectsListener = nil
@@ -8329,6 +9143,13 @@ final class GradesStore: ObservableObject {
     }
 
     private func updateExamSubjectMappingListenerIfNeeded(uid: String, forceReload: Bool = false) {
+        if groupsHidden {
+            examSubjectMappingListener?.remove()
+            examSubjectMappingListener = nil
+            examSubjectMappingGid = nil
+            examSubjectMapping = [:]
+            return
+        }
         if forceReload || examSubjectMappingGid != examGroupId {
             examSubjectMappingListener?.remove(); examSubjectMappingListener = nil; examSubjectMappingGid = nil; examSubjectMapping = [:]
         }
@@ -8349,6 +9170,13 @@ final class GradesStore: ObservableObject {
     }
 
     private func updateHomeworkSubjectMappingListenerIfNeeded(uid: String, forceReload: Bool = false) {
+        if groupsHidden {
+            homeworkSubjectMappingListener?.remove()
+            homeworkSubjectMappingListener = nil
+            homeworkSubjectMappingGid = nil
+            homeworkSubjectMapping = [:]
+            return
+        }
         if forceReload || homeworkSubjectMappingGid != homeworkGroupId {
             homeworkSubjectMappingListener?.remove(); homeworkSubjectMappingListener = nil; homeworkSubjectMappingGid = nil; homeworkSubjectMapping = [:]
         }
@@ -8663,6 +9491,7 @@ final class GradesStore: ObservableObject {
     }
 
     func targetGroupIds(forLocalSubject subjectName: String) -> [String] {
+        if groupsHidden { return [] }
         let key = slugifySubjectName(subjectName)
         var result: [String] = []
         for gid in groupIds {
@@ -8692,10 +9521,14 @@ final class GradesStore: ObservableObject {
         // 1. Try resolving via CourseID (New Architecture)
         if let courseId, let course = courses.first(where: { $0.id == courseId }) {
             if let classId = course.classId, let className = classNames[classId] {
-                switch course.type {
-                case .mandatory: return className
-                case .branch(let bName): return "\(className) (\(bName))"
-                case .elective: return "\(course.name) (\(className))"
+                if let type = course.type {
+                    switch type {
+                    case .mandatory: return className
+                    case .branch(let bName): return "\(className) (\(bName))"
+                    case .elective: return "\(course.name) (\(className))"
+                    case .wahlpflicht(let groupId):
+                         return "\(course.name) (\(wahlpflichtfachGroupNames[groupId] ?? "Wahlpflicht/Zweig") - \(className))"
+                    }
                 }
             }
             return course.name

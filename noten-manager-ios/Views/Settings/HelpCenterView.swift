@@ -63,7 +63,11 @@ struct HelpCenterView: View {
     @FocusState private var searchFocused: Bool
     @State private var didScrollToInitialSection: Bool = false
     @State private var showScrollToTop: Bool = false
-    @State private var showSupportAccessSheet: Bool = false
+    @State private var showSupportAccessSheet = false
+    @State private var showSupportHistorySheet = false
+    
+    // Feedback
+    @State private var showFeedbackSheet = false
     @State private var expandedSections: Set<HelpCenterSection> = []
 
     private let searchIndex: [HelpSearchEntry] = [
@@ -768,6 +772,20 @@ struct HelpCenterView: View {
                     }
                     .buttonStyle(SoftTintButtonStyle(accent: .indigo))
                     .disabled(!contactFormValid || isSendingTicket)
+                    
+                    Divider().padding(.vertical, 5)
+                    
+                    Button {
+                        showSupportHistorySheet = true
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "clock.arrow.circlepath")
+                                .font(.subheadline.weight(.semibold))
+                            Text("Meine Tickets einsehen")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(SoftTintButtonStyle(accent: .blue))
                 }
             }
 
@@ -795,6 +813,9 @@ struct HelpCenterView: View {
         .sheet(isPresented: $showSupportAccessSheet) {
             SupportAccessRequestSheet()
                 .environmentObject(store)
+        }
+        .sheet(isPresented: $showSupportHistorySheet) {
+            SupportHistoryView()
         }
         .softFadeIn(enabled: animationsOn, delay: 0.28, offset: 12)
         .id("help_contact")
