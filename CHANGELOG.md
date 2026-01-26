@@ -9,17 +9,22 @@ All notable changes to this project will be documented in this file.
 - **Offline Support**: Implemented `OfflineSnapshot` and `PendingDataModels` to support robust data persistence during connection drops.
 - **Sync Status UI**: Added `SyncStatusView`, `EnhancedLoadingScreen`, and `MinimalLoadingIndicator` for better user feedback during data synchronization.
 - **Support System**: Introduced `SupportHistoryView` and related models for tracking support requests.
+- **Keyboard Optimization**: Unified keyboard dismissal with `KeyboardAccessoryManager` and refined `View+HideKeyboard` extension.
+- **Web Migration**: Introduced `WebDataMergeSheet` and `WebMigrationModels` for seamless data synchronization from the web version.
+- **Class Explaining**: Added `ClassesExplainingSheet` to guide users through the new classes and groups system.
+- **UX Enhancements**: Added `SubjectCalculationView` for detailed grade breakdown and improved `MSSHistoryChartView`.
 
 ### Changed
 - **Elective Integration**: Fully integrated elective subjects into the `ClassDetailView` and `CourseJoinView`, merging them into a unified "Branches" section.
-- **Onboarding Refinement**: Updated `OnboardingFunnelView` to support the new elective-aware joining flow.
+- **Onboarding Refinement**: Major overhaul of `OnboardingFunnelView` to support the new elective-aware joining flow and a smoother first-time experience.
 - **Settings UI**: Significantly refactored `AppSettingsView` and introduced `SettingsButtonLabel` for a more consistent and modular settings experience.
-- **State Management**: Refactored `GradesStore` and `AuthManager` to improve state cleanup (specifically addressing state leaks during logout) and data fetching efficiency.
+- **State Management**: Refactored `GradesStore` and `AuthManager` to improve state cleanup (specifically addressing state leaks during logout) and support web data merging.
 - **UI Polish**: Simplified `HomeView` by removing redundant loading cards and refined padding/alignment across several components.
 
 ### Fixed
 - **State Leak**: Resolved issues where onboarding flags were not correctly reset on logout.
 - **Navigation Errors**: Fixed compilation and logic errors in `CourseJoinView` related to branch selection.
+- **Redundancy Cleanup**: Removed legacy views like `AddPraktikumGradeView` and `SeminarPerformanceView` to streamline the codebase.
 
 ## [Unreleased] - 2026-01-19
 
