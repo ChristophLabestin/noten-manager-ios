@@ -424,6 +424,21 @@
 
 ---
 
+### 24) Legacy shared-user docs linger after rekeying (low/medium)
+**Issue**
+- If shared user settings start using a new key format, legacy documents keyed by raw `examId` / `homeworkId` can remain and keep applying via fallback logic.
+
+**Evidence**
+- User settings fall back to `exam.id`/`homework.id` when a keyed entry is missing. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:2466-2578`
+
+**Impact / likely symptoms**
+- Users can’t fully clear old reminders/notes/completion after rekeying.
+
+**Recommendation**
+- When writing/removing a new scoped key, also delete the legacy doc ID to prevent fallback collisions.
+
+---
+
 ## Additional Observations
 - `stopListening` does not stop course query listeners (`coursesQueriesListeners`) or course content listeners. Combined with missing cleanup of `courseExamsMap`, this can leave stale course data in memory. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:587-664, 2659-2701`
 - There are two different mapping stores: `groupMappings` (new) and `subjectMappings` (legacy). Only legacy migration copies `subjectMappings`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:166-177, 9759-9794`
