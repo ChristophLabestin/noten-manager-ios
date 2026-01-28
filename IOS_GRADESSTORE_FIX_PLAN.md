@@ -48,7 +48,7 @@
 ## Phase 3 — Data migration
 1) ◐ **Move top-level `/courses` into `classes/{classId}/courses`**
    - Implemented per-course migration when legacy path detected.
-   - Still missing: global migration/cleanup pass for all legacy courses.
+   - Added opt-in helper `cleanupLegacyTopLevelCourses(deleteLegacy:)` for owner-scoped cleanup; not wired to UI.
 2) ✅ **Backfill `id` fields for course exams/homeworks**
    - Decode path now writes missing `id` back to Firestore.
 3) ✅ **Legacy migration gap**
