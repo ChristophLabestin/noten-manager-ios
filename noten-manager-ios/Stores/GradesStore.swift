@@ -2686,6 +2686,7 @@ final class GradesStore: ObservableObject {
         guard !subscribedCourseIds.isEmpty else {
             courses = []
             stopCourseContentListeners()
+            coursePathById = [:]
             return
         }
         
