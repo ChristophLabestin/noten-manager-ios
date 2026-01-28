@@ -2450,19 +2450,19 @@ final class GradesStore: ObservableObject {
     }
     
     func userNoteForExam(_ exam: Exam) -> String? {
-        let key = compoundId(gid: exam.groupId, docId: exam.id)
+        let key = sharedUserKey(for: exam)
         return sharedExamUserNotes[key] ?? sharedExamUserNotes[exam.id]
     }
     
     func userNoteForHomework(_ homework: Homework) -> String? {
-        let key = compoundId(gid: homework.groupId, docId: homework.id)
+        let key = sharedUserKey(for: homework)
         return sharedHomeworkUserNotes[key] ?? sharedHomeworkUserNotes[homework.id]
     }
 
     private func applySharedExamUserReminders() {
         guard !sharedExams.isEmpty else { return }
         sharedExams = sharedExams.map { exam in
-            let key = compoundId(gid: exam.groupId, docId: exam.id)
+            let key = sharedUserKey(for: exam)
             if let date = sharedExamUserReminders[key] ?? sharedExamUserReminders[exam.id] {
                 return Exam(
                     id: exam.id,
@@ -2510,7 +2510,7 @@ final class GradesStore: ObservableObject {
     private func applySharedHomeworkUserReminders() {
         guard !sharedHomeworks.isEmpty else { return }
         sharedHomeworks = sharedHomeworks.map { hw in
-            let key = compoundId(gid: hw.groupId, docId: hw.id)
+            let key = sharedUserKey(for: hw)
             if let date = sharedHomeworkUserReminders[key] ?? sharedHomeworkUserReminders[hw.id] {
                 return Homework(id: hw.id, groupId: hw.groupId, courseId: hw.courseId, subjectName: hw.subjectName, subjectKey: hw.subjectKey, title: hw.title, dueDate: hw.dueDate, reminderAt: date, isCompleted: hw.isCompleted, createdAt: hw.createdAt, isShared: true, creatorId: hw.creatorId, isImportedFromShare: hw.isImportedFromShare)
             } else {
@@ -2522,7 +2522,7 @@ final class GradesStore: ObservableObject {
     private func applySharedHomeworkUserCompletion() {
         guard !sharedHomeworks.isEmpty else { return }
         sharedHomeworks = sharedHomeworks.map { hw in
-            let key = compoundId(gid: hw.groupId, docId: hw.id)
+            let key = sharedUserKey(for: hw)
             let done = sharedHomeworkUserCompleted.contains(key) || sharedHomeworkUserCompleted.contains(hw.id)
             return Homework(
                 id: hw.id,
@@ -2545,7 +2545,7 @@ final class GradesStore: ObservableObject {
     private func applySharedExamUserCompletion() {
         guard !sharedExams.isEmpty else { return }
         sharedExams = sharedExams.map { exam in
-            let key = compoundId(gid: exam.groupId, docId: exam.id)
+            let key = sharedUserKey(for: exam)
             let done = sharedExamUserCompleted.contains(key) || sharedExamUserCompleted.contains(exam.id)
             return Exam(
                 id: exam.id,
@@ -2572,7 +2572,7 @@ final class GradesStore: ObservableObject {
     private func applySharedExamUserRescheduledDates() {
         guard !sharedExams.isEmpty else { return }
         sharedExams = sharedExams.map { exam in
-            let key = compoundId(gid: exam.groupId, docId: exam.id)
+            let key = sharedUserKey(for: exam)
             // Check for user-specific rescheduled date
             if let rescheduledDate = sharedExamUserRescheduled[key] ?? sharedExamUserRescheduled[exam.id] {
                 return Exam(
@@ -8151,6 +8151,49 @@ final class GradesStore: ObservableObject {
         return "\(gid)|\(docId)"
     }
 
+    private func sharedUserKey(for exam: Exam) -> String {
+        if let gid = exam.groupId, !gid.isEmpty {
+            return compoundId(gid: gid, docId: exam.id)
+        }
+        if let courseId = exam.courseId, !courseId.isEmpty {
+            return "course:\(courseId)|\(exam.id)"
+        }
+        if let classId = exam.classId, !classId.isEmpty {
+            return "class:\(classId)|\(exam.id)"
+        }
+        return exam.id
+    }
+
+    private func sharedUserKey(for homework: Homework) -> String {
+        if let gid = homework.groupId, !gid.isEmpty {
+            return compoundId(gid: gid, docId: homework.id)
+        }
+        if let courseId = homework.courseId, !courseId.isEmpty {
+            return "course:\(courseId)|\(homework.id)"
+        }
+        return homework.id
+    }
+
+    private func sharedUserKeyForExamId(_ examId: String, groupId: String?) -> String {
+        if let gid = groupId, !gid.isEmpty {
+            return compoundId(gid: gid, docId: examId)
+        }
+        if let exam = sharedExams.first(where: { $0.id == examId }) {
+            return sharedUserKey(for: exam)
+        }
+        return examId
+    }
+
+    private func sharedUserKeyForHomeworkId(_ homeworkId: String, groupId: String?) -> String {
+        if let gid = groupId, !gid.isEmpty {
+            return compoundId(gid: gid, docId: homeworkId)
+        }
+        if let hw = sharedHomeworks.first(where: { $0.id == homeworkId }) {
+            return sharedUserKey(for: hw)
+        }
+        return homeworkId
+    }
+
     private func sharedExamKey(_ exam: Exam) -> String {
         if let courseId = exam.courseId, !courseId.isEmpty {
             return "course:\(courseId)|\(exam.id)"
@@ -8182,7 +8225,7 @@ final class GradesStore: ObservableObject {
         let gid = groupId ?? sharedExams.first(where: { $0.id == examId })?.groupId
         let ref = yearRef
             .collection("examGroupReminders")
-            .document(compoundId(gid: gid, docId: examId))
+            .document(sharedUserKeyForExamId(examId, groupId: gid))
 
         if let reminderAt {
             try await ref.setData([
@@ -8197,15 +8240,16 @@ final class GradesStore: ObservableObject {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         guard let yearRef = try? await requireYearRef(uid: uid) else { return }
         let gid = groupId ?? sharedExams.first(where: { $0.id == examId })?.groupId
-        let ref = yearRef.collection("examGroupNotes").document(compoundId(gid: gid, docId: examId))
+        let key = sharedUserKeyForExamId(examId, groupId: gid)
+        let ref = yearRef.collection("examGroupNotes").document(key)
         let trimmed = note?.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
             if let text = trimmed, !text.isEmpty {
                 try await ref.setData(["note": text])
-                sharedExamUserNotes[compoundId(gid: gid, docId: examId)] = text
+                sharedExamUserNotes[key] = text
             } else {
                 try await ref.delete()
-                sharedExamUserNotes.removeValue(forKey: compoundId(gid: gid, docId: examId))
+                sharedExamUserNotes.removeValue(forKey: key)
             }
         } catch {
             ErrorLoggingService.logErrorIfEnabled(error)
@@ -8217,15 +8261,16 @@ final class GradesStore: ObservableObject {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         guard let yearRef = try? await requireYearRef(uid: uid) else { return }
         let gid = groupId ?? sharedExams.first(where: { $0.id == examId })?.groupId
-        let ref = yearRef.collection("examGroupCompleted").document(compoundId(gid: gid, docId: examId))
+        let key = sharedUserKeyForExamId(examId, groupId: gid)
+        let ref = yearRef.collection("examGroupCompleted").document(key)
         do {
             if completed {
                 try await ref.setData(["isCompleted": true])
                 // Optimistisch lokal aktualisieren
-                sharedExamUserCompleted.insert(compoundId(gid: gid, docId: examId))
+                sharedExamUserCompleted.insert(key)
             } else {
                 try await ref.delete()
-                sharedExamUserCompleted.remove(compoundId(gid: gid, docId: examId))
+                sharedExamUserCompleted.remove(key)
             }
             applySharedExamUserCompletion()
             rescheduleLocalNotifications()
@@ -8239,7 +8284,7 @@ final class GradesStore: ObservableObject {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         guard let yearRef = try? await requireYearRef(uid: uid) else { return }
         let gid = groupId ?? sharedExams.first(where: { $0.id == examId })?.groupId
-        let key = compoundId(gid: gid, docId: examId)
+        let key = sharedUserKeyForExamId(examId, groupId: gid)
         let ref = yearRef.collection("examGroupRescheduled").document(key)
         do {
             if let newDate = rescheduledDate {
@@ -8263,7 +8308,7 @@ final class GradesStore: ObservableObject {
         }
         let yearRef = try await requireYearRef(uid: uid)
         let gid = groupId ?? sharedHomeworks.first(where: { $0.id == homeworkId })?.groupId
-        let ref = yearRef.collection("homeworkGroupReminders").document(compoundId(gid: gid, docId: homeworkId))
+        let ref = yearRef.collection("homeworkGroupReminders").document(sharedUserKeyForHomeworkId(homeworkId, groupId: gid))
         if let reminderAt {
             try await ref.setData(["reminderAt": reminderAt])
         } else {
@@ -8291,15 +8336,16 @@ final class GradesStore: ObservableObject {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         guard let yearRef = try? await requireYearRef(uid: uid) else { return }
         let gid = groupId ?? sharedHomeworks.first(where: { $0.id == homeworkId })?.groupId
-        let ref = yearRef.collection("homeworkGroupNotes").document(compoundId(gid: gid, docId: homeworkId))
+        let key = sharedUserKeyForHomeworkId(homeworkId, groupId: gid)
+        let ref = yearRef.collection("homeworkGroupNotes").document(key)
         let trimmed = note?.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
             if let text = trimmed, !text.isEmpty {
                 try await ref.setData(["note": text])
-                sharedHomeworkUserNotes[compoundId(gid: gid, docId: homeworkId)] = text
+                sharedHomeworkUserNotes[key] = text
             } else {
                 try await ref.delete()
-                sharedHomeworkUserNotes.removeValue(forKey: compoundId(gid: gid, docId: homeworkId))
+                sharedHomeworkUserNotes.removeValue(forKey: key)
             }
         } catch {
             ErrorLoggingService.logErrorIfEnabled(error)
@@ -8311,15 +8357,16 @@ final class GradesStore: ObservableObject {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         guard let yearRef = try? await requireYearRef(uid: uid) else { return }
         let gid = groupId ?? sharedHomeworks.first(where: { $0.id == homeworkId })?.groupId
-        let ref = yearRef.collection("homeworkGroupCompleted").document(compoundId(gid: gid, docId: homeworkId))
+        let key = sharedUserKeyForHomeworkId(homeworkId, groupId: gid)
+        let ref = yearRef.collection("homeworkGroupCompleted").document(key)
         do {
             if completed {
                 try await ref.setData(["isCompleted": true])
                 // Optimistisch lokal aktualisieren
-                sharedHomeworkUserCompleted.insert(compoundId(gid: gid, docId: homeworkId))
+                sharedHomeworkUserCompleted.insert(key)
             } else {
                 try await ref.delete()
-                sharedHomeworkUserCompleted.remove(compoundId(gid: gid, docId: homeworkId))
+                sharedHomeworkUserCompleted.remove(key)
             }
             applySharedHomeworkUserCompletion()
             rescheduleLocalNotifications()
