@@ -6781,7 +6781,12 @@ final class GradesStore: ObservableObject {
         guard let gid = examGroupId else { examGroupName = nil; return }
         do {
             let snap = try await db.collection("groups").document(gid).getDocument()
-            examGroupName = snap.data()?["name"] as? String
+            if snap.exists {
+                examGroupName = snap.data()?["name"] as? String
+                return
+            }
+            let legacySnap = try await db.collection("examGroups").document(gid).getDocument()
+            examGroupName = legacySnap.data()?["name"] as? String
         } catch {
             ErrorLoggingService.logErrorIfEnabled(error)
             examGroupName = nil
@@ -6908,7 +6913,12 @@ final class GradesStore: ObservableObject {
         guard let gid = homeworkGroupId else { homeworkGroupName = nil; return }
         do {
             let snap = try await db.collection("groups").document(gid).getDocument()
-            homeworkGroupName = snap.data()?["name"] as? String
+            if snap.exists {
+                homeworkGroupName = snap.data()?["name"] as? String
+                return
+            }
+            let legacySnap = try await db.collection("homeworkGroups").document(gid).getDocument()
+            homeworkGroupName = legacySnap.data()?["name"] as? String
         } catch {
             ErrorLoggingService.logErrorIfEnabled(error)
             homeworkGroupName = nil
