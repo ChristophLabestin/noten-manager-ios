@@ -4643,9 +4643,6 @@ final class GradesStore: ObservableObject {
 
         // Listener aktualisieren
         updateGroupObservers(uid: uid, schoolYearId: activeSchoolYearId)
-
-        await loadGroupName(gid: code)
-        updateGroupObservers(uid: uid, schoolYearId: activeSchoolYearId)
         await loadGroupName(gid: code)
     }
 
