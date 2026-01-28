@@ -8196,7 +8196,7 @@ final class GradesStore: ObservableObject {
         if let gid = groupId, !gid.isEmpty {
             return compoundId(gid: gid, docId: examId)
         }
-        if let exam = sharedExams.first(where: { $0.id == examId }) {
+        if let exam = sharedExams.first(where: { $0.id == examId && $0.groupId == groupId }) {
             return sharedUserKey(for: exam)
         }
         return examId
@@ -8206,7 +8206,7 @@ final class GradesStore: ObservableObject {
         if let gid = groupId, !gid.isEmpty {
             return compoundId(gid: gid, docId: homeworkId)
         }
-        if let hw = sharedHomeworks.first(where: { $0.id == homeworkId }) {
+        if let hw = sharedHomeworks.first(where: { $0.id == homeworkId && $0.groupId == groupId }) {
             return sharedUserKey(for: hw)
         }
         return homeworkId
