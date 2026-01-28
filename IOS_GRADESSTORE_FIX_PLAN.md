@@ -46,6 +46,9 @@
 11) ✅ **Course query chunk size aligned with Firestore limits**
    - Chunk size reduced to 10 for safer `in` queries.
 
+12) ✅ **Course pruning waits for legacy fallback**
+   - Auto-pruning now waits for both collectionGroup + legacy `/courses` query results before removing stale IDs.
+
 ---
 
 ## Phase 2 — Align schema + write paths
@@ -67,6 +70,7 @@
 1) ◐ **Move top-level `/courses` into `classes/{classId}/courses`**
    - Implemented per-course migration when legacy path detected.
    - Added opt-in helper `cleanupLegacyTopLevelCourses(deleteLegacy:)` for owner-scoped cleanup; wired to hidden debug tools.
+   - Legacy cleanup now removes `exams`/`homeworks` subcollections before deleting legacy docs.
 2) ✅ **Backfill `id` fields for course exams/homeworks**
    - Decode path now writes missing `id` back to Firestore.
    - Course docs also backfill `classId` from path when missing.
@@ -82,6 +86,9 @@
 
 2) ✅ **CourseType encoding**
    - Branch update/removal accepts `type` + `associatedId`.
+
+3) ✅ **Class membership sync**
+   - `applySchoolYearSettings` now syncs `classIds` from the school-year doc and fetches class details for new IDs.
 
 ---
 
