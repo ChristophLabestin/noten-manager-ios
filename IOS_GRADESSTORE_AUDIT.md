@@ -1,0 +1,311 @@
+# iOS GradesStore Audit (2026-01-28)
+
+## Scope
+- Primary focus: `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift`
+- Supporting context: `noten-manager-ios/noten-manager-ios/Stores/GradesStore+Merge.swift`,
+  `noten-manager-ios/noten-manager-ios/Models/CourseModels.swift`,
+  `noten-manager-ios/noten-manager-ios/Models/ExamModels.swift`,
+  `noten-manager-ios/noten-manager-ios/Models/HomeworkModels.swift`
+
+## Summary of Key Risk Areas
+- **Course/class Firestore path drift**: multiple code paths still write to top-level `/courses` while newer logic reads from `/classes/{classId}/courses`.
+- **Listener lifecycle issues**: missing removals, duplicate listeners, and setup order problems likely cause stale data, extra reads, and UI inconsistencies.
+- **Migration/deletion gaps**: some legacy collections are not migrated or deleted, leaving data behind.
+- **Aggregation/dedup collisions**: shared exams/homeworks are de-duplicated only by `id`, risking collisions across sources.
+- **Schema field drift**: `config` vs `courseConfiguration` and `type` vs `case` encoding for `CourseType`.
+
+---
+
+## Findings (Detailed)
+
+### 1) Courses stored in multiple Firestore paths (high impact)
+**Issue**
+- New logic assumes courses live under `classes/{classId}/courses`, but multiple functions still create, update, or delete courses in a top-level `courses` collection.
+- Exam/homework migration also writes to `/courses/{courseId}/exams` and `/courses/{courseId}/homeworks` rather than the class subcollection.
+
+**Evidence**
+- Listener assumes subcollection: `startCourseContentListeners` uses `classes/{classId}/courses/{courseId}`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:2670-2694`
+- Comments state “courses now in classes/{cid}/courses”. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:2590-2594`
+- Top-level course creation:
+  - `addLegacyGroupToClass` creates courses in `/courses`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:5916-5929`
+  - `addBranchToClass` creates courses in `/courses`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:6141-6156`
+  - `addWahlpflichtfachGroupToClass` creates courses in `/courses`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:6218-6234`
+  - `addCourseToClass` creates courses in `/courses`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:6379-6392`
+- Top-level course deletion/query:
+  - `deleteCourse` deletes from `/courses`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:6400-6406`
+  - `deleteClass` queries `/courses` to delete class courses. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:5240-5246`
+- Migration writes exam/homework to `/courses/{courseId}`:
+  - `migrateGroupToClass` writes to `/courses/{courseId}/exams` and `/homeworks`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:5401-5417, 5435-5448`
+  - `addLegacyGroupToClass` migration also writes to `/courses/{courseId}/exams` and `/homeworks`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:5948-5994`
+
+**Impact / likely symptoms**
+- Course exams/homeworks created via older paths are not visible because listeners read only `classes/{classId}/courses/{courseId}`.
+- Deleting a class might not delete any subcollection courses (if they were stored under classes).
+- Migrated group exams/homeworks can appear to “disappear” because they are stored in a path not read by the UI.
+
+**Recommendation**
+- Pick a single canonical path (prefer `classes/{classId}/courses`) and update all write/read/delete/migration code to use it.
+- Consider a one-time migration script to move top-level `/courses` into the class subcollection.
+
+---
+
+### 2) Course listeners start before course list is populated (high impact)
+**Issue**
+- `startCoursesListener` calls `startCourseContentListeners()` immediately, before `courses` has been populated by the Firestore snapshot.
+- `rebuildCourses()` never calls `startCourseContentListeners()` after `courses` changes.
+
+**Evidence**
+- `startCoursesListener` calls `startCourseContentListeners` before queries run. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:2572-2586`
+- `startCourseContentListeners` iterates current `courses` array. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:2670-2679`
+- `rebuildCourses` only updates `self.courses` and does not start listeners. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:2619-2652`
+
+**Impact / likely symptoms**
+- Course-based exams/homeworks never load on fresh app start (unless `courses` were already cached in memory).
+
+**Recommendation**
+- Start course content listeners after `courses` is populated (e.g., call `startCourseContentListeners()` inside `rebuildCourses()` or after the first snapshot loads).
+
+---
+
+### 3) Course listener cleanup wipes non-course shared data (high impact)
+**Issue**
+- `stopCourseContentListeners()` clears `sharedExams` and `sharedHomeworks`, even though those arrays also include group/class/wahlpflicht items.
+- It also does not clear `courseExamsMap`/`courseHomeworksMap`, so stale course data can reappear later.
+
+**Evidence**
+- `stopCourseContentListeners` clears shared arrays. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:2659-2667`
+- `courseExamsMap`/`courseHomeworksMap` are never cleared. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:2700-2701`
+
+**Impact / likely symptoms**
+- Toggling subscriptions or reloading courses can temporarily wipe shared items from groups/classes.
+- Stale course exams/homeworks can “come back” after unrelated recomputation.
+
+**Recommendation**
+- Only remove course-derived items (clear `courseExamsMap`/`courseHomeworksMap`) and rebuild shared lists, rather than clearing `sharedExams`/`sharedHomeworks` directly.
+
+---
+
+### 4) Shared exams/homeworks deduping ignores source (high impact)
+**Issue**
+- `rebuildSharedExams` and `rebuildSharedHomeworks` de-duplicate by `id` only, ignoring `groupId/courseId/classId`.
+- There are helper functions that use compound IDs, but they are not used.
+
+**Evidence**
+- `rebuildSharedExams` unique by `id` only. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:2747-2755`
+- `rebuildSharedHomeworks` unique by `id` only. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:2796-2813`
+- Unused helpers using compound IDs. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:10170-10192`
+
+**Impact / likely symptoms**
+- Exams/homeworks from different sources can collide and one disappears if their document IDs match.
+
+**Recommendation**
+- Use `compoundId(gid: docId)` or include `courseId/classId` in the key when de-duplicating.
+
+---
+
+### 5) Legacy migration misses `seminar` data (high impact)
+**Issue**
+- Legacy data migration does not copy the `seminar` collection, even though the new schema expects it.
+
+**Evidence**
+- `migrateLegacyDataIfNeeded` copies `fachreferat`, `practicalPerformance`, `homeworks`, etc., but not `seminar`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:166-177`
+- `deleteSchoolYearData` explicitly deletes `seminar`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:1141-1149`
+
+**Impact / likely symptoms**
+- Seminar performance data may be lost on migration to school years.
+
+**Recommendation**
+- Include `seminar` in legacy migration or add a one-off migration for it.
+
+---
+
+### 6) School-year deletion leaves user-specific data behind (medium)
+**Issue**
+- `deleteSchoolYearData` omits several collections that are used elsewhere (`examGroupNotes`, `homeworkGroupNotes`, `examGroupRescheduled`, `courseMappings`).
+
+**Evidence**
+- Delete list includes reminders/completed/mappings, but not notes or rescheduled. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:1141-1155`
+- Notes/rescheduled collections are used by listeners and setters. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:1661-1726` (notes) and `1702-1732` (rescheduled)
+
+**Impact / likely symptoms**
+- Orphaned documents persist after school year reset; potential reappearance of stale data.
+
+**Recommendation**
+- Add all user-specific collections to delete list.
+
+---
+
+### 7) Duplicate listener for legacy homework groups + leaked listener (medium)
+**Issue**
+- `updateSharedHomeworksListenerIfNeeded()` assigns `sharedHomeworksListener` twice (subjects then homeworks), overwriting the first listener reference and making it impossible to remove.
+- It also duplicates the dedicated `homeworkGroupSubjectsListener` (same data source).
+
+**Evidence**
+- Overwrites `sharedHomeworksListener` with subject listener, then overwrites it with homeworks listener. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:4153-4168`
+- Separate legacy listener already exists: `homeworkGroupSubjectsListener`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:801-803` and `9697-9720`
+
+**Impact / likely symptoms**
+- Extra Firestore listeners and unexpected updates; possible memory/CPU cost.
+
+**Recommendation**
+- Use two separate listener variables (subjects + homeworks) or reuse the existing `homeworkGroupSubjectsListener` and only keep a single `sharedHomeworksListener` for homeworks.
+
+---
+
+### 8) Group member listeners are not cleaned up (medium)
+**Issue**
+- `groupMembersListeners` are not removed in `stopListening` or `resetSchoolYearScopedData`.
+- `leaveSharedGroup` also does not remove the member listener or `groupMemberIds` cache.
+
+**Evidence**
+- `stopListening` removes subjects/mappings/names but not members. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:650-655`
+- `resetSchoolYearScopedData` removes mappings but not member listeners. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:813-818`
+- `leaveSharedGroup` removes other listeners but not member listeners or `groupMemberIds`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:6727-6739`
+
+**Impact / likely symptoms**
+- Background listeners stay active after logout or group leave; stale member data.
+
+**Recommendation**
+- Remove `groupMembersListeners` wherever other group listeners are removed, and clear `groupMemberIds` for the group.
+
+---
+
+### 9) Class config field drift: `config` vs `courseConfiguration` (medium)
+**Issue**
+- New class creation stores configuration under `config`, but other readers/updaters expect `courseConfiguration`.
+
+**Evidence**
+- `createClassWithCourses` writes `config`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:4752-4757`
+- `fetchClassDetails` reads only `courseConfiguration` (ignores `config`). `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:6511-6514`
+- `addBranchToClass` / `updateBranch` / `removeBranch` update `courseConfiguration`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:6160-6174, 6264-6278, 6305-6316`
+
+**Impact / likely symptoms**
+- Class details view may show empty or outdated configuration.
+- Branch updates can diverge from the authoritative `config` field.
+
+**Recommendation**
+- Standardize on a single field and migrate/alias the other.
+
+---
+
+### 10) CourseType encoding mismatch (`type` vs `case`) (medium)
+**Issue**
+- `CourseType.encode` writes `{ "type": "branch", "associatedId": "..." }`, but branch update/removal code expects `{ "case": "branch", "associatedId": "..." }`.
+
+**Evidence**
+- Encoding uses `type` key. `noten-manager-ios/noten-manager-ios/Models/CourseModels.swift:114-127`
+- Update/remove branch check uses `typeMap["case"]`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:6287-6295, 6325-6333`
+
+**Impact / likely symptoms**
+- Branch updates/deletes may fail for newly encoded courses.
+
+**Recommendation**
+- Update branch logic to accept the new encoded schema (or normalize in migration).
+
+---
+
+### 11) Unused / stale course listener cleanup (medium)
+**Issue**
+- `applySchoolYearSettings` clears a `coursesListener` that is never used, while actual listeners live in `coursesQueriesListeners`.
+
+**Evidence**
+- `coursesListener` is only declared and removed, never set. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:482, 3200-3202`
+- Actual listeners are `coursesQueriesListeners`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:2569-2616`
+
+**Impact / likely symptoms**
+- When subscriptions are cleared, query listeners may keep running.
+
+**Recommendation**
+- Remove `coursesListener` and explicitly tear down `coursesQueriesListeners` + course content listeners when subscriptions become empty.
+
+---
+
+### 12) Course exam/homework decode requires `id` field (medium)
+**Issue**
+- `startCourseContentListeners` uses `data(as: Exam.self)` and `data(as: Homework.self)`. The decoders require `id` in document data. Legacy docs without `id` will not decode.
+
+**Evidence**
+- Course listeners decode using `data(as:)`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:2682-2693`
+- `Exam` requires `id` in decoder. `noten-manager-ios/noten-manager-ios/Models/ExamModels.swift:59-66`
+- `Homework` requires `id` in decoder. `noten-manager-ios/noten-manager-ios/Models/HomeworkModels.swift:3-23`
+
+**Impact / likely symptoms**
+- Course items created before the “id field fix” appear to vanish.
+
+**Recommendation**
+- Backfill `id` fields or decode using `documentID` as fallback.
+
+---
+
+### 13) School year list ordering likely incorrect (low/medium)
+**Issue**
+- `startSchoolYearsListener` orders by `id` field, but school year docs only set `name` + `createdAt`.
+
+**Evidence**
+- Query uses `.order(by: "id")`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:1016-1021`
+- `createSchoolYear` writes `name` + `createdAt`, not `id`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:1078-1086`
+
+**Impact / likely symptoms**
+- Firestore ordering may be undefined or require extra index; potential listener errors.
+
+**Recommendation**
+- Order by `createdAt` or use `documentID` ordering.
+
+---
+
+### 14) Group name lookup ignores legacy collections (low/medium)
+**Issue**
+- Group name lookup reads from `/groups` only, even for legacy `examGroups`/`homeworkGroups`.
+
+**Evidence**
+- `loadExamGroupName` queries `/groups/{gid}`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:6661-6666`
+- `loadHomeworkGroupName` queries `/groups/{gid}`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:6786-6790`
+
+**Impact / likely symptoms**
+- Legacy group names show as empty or `nil`.
+
+**Recommendation**
+- Fallback to legacy collections if `groups/{gid}` is missing.
+
+---
+
+### 15) Redundant calls in `joinSharedGroup` (low)
+**Issue**
+- `joinSharedGroup` calls `updateGroupObservers` and `loadGroupName` twice.
+
+**Evidence**
+- Duplicate calls near end of method. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:4402-4407`
+
+**Impact / likely symptoms**
+- Redundant reads and extra UI refreshes.
+
+**Recommendation**
+- Remove the duplicate calls.
+
+---
+
+### 16) Subject deletion tries to remove subscriptions by subject name (low)
+**Issue**
+- `deleteSubjectFromFirestore` removes `subjectName` from `subscribedCourseIds`, but that list stores course IDs (not subject names).
+
+**Evidence**
+- `deleteSubjectFromFirestore` checks `subscribedCourseIds.contains(subjectName)`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:9611-9616`
+
+**Impact / likely symptoms**
+- Subscription cleanup does not happen; stale course subscriptions remain.
+
+**Recommendation**
+- Remove course IDs that actually map to the deleted subject (via `courseMappings` or `course.name`).
+
+---
+
+## Additional Observations
+- `stopListening` does not stop course query listeners (`coursesQueriesListeners`) or course content listeners. Combined with missing cleanup of `courseExamsMap`, this can leave stale course data in memory. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:587-664, 2659-2701`
+- There are two different mapping stores: `groupMappings` (new) and `subjectMappings` (legacy). Only legacy migration copies `subjectMappings`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:166-177, 9759-9794`
+- The helper functions `mergeSharedExams`/`mergeSharedHomeworks` (compound-ID based) are currently unused, suggesting previous logic was replaced but not fully integrated. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:10170-10192`
+
+---
+
+## Suggested Next Steps (if you want follow-up)
+- I can draft a single-source-of-truth schema for courses/classes/groups and provide a migration plan.
+- I can also prepare targeted fixes for the listener lifecycle issues and the course content listener startup order.
