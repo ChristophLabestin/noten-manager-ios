@@ -484,7 +484,6 @@ final class GradesStore: ObservableObject {
     @Published var legacyImportSelected: Bool? = nil
 
     private var schoolYearsCollectionListener: ListenerRegistration?
-    private var coursesListener: ListenerRegistration?
 
     private var offlinePendingGrades: [PendingGrade] = []
     private var offlinePendingFachreferat: PendingFachreferat? = nil
