@@ -2630,14 +2630,25 @@ final class GradesStore: ObservableObject {
                     return
                 }
                 guard let docs = snap?.documents else { return }
-                let chunkCourses = docs.compactMap { doc -> Course? in
-                    if let course = try? doc.data(as: Course.self) {
-                        self.coursePathById[course.id] = doc.reference.path
-                        return course
+                var chunkCoursesById: [String: (Course, String)] = [:]
+                for doc in docs {
+                    guard let course = try? doc.data(as: Course.self) else { continue }
+                    let path = doc.reference.path
+                    if let existing = chunkCoursesById[course.id] {
+                        let existingPath = existing.1
+                        if self.isClassCoursePath(path), !self.isClassCoursePath(existingPath) {
+                            chunkCoursesById[course.id] = (course, path)
+                        }
+                        continue
                     }
-                    return nil
+                    chunkCoursesById[course.id] = (course, path)
                 }
-                self.coursesQueryResults[index] = chunkCourses
+                for (courseId, entry) in chunkCoursesById {
+                    if self.shouldPreferCoursePath(existing: self.coursePathById[courseId], candidate: entry.1) {
+                        self.coursePathById[courseId] = entry.1
+                    }
+                }
+                self.coursesQueryResults[index] = chunkCoursesById.values.map { $0.0 }
                 self.rebuildCourses()
                 
                 // Auto-Pruning: Check for stale IDs
@@ -2720,6 +2731,18 @@ final class GradesStore: ObservableObject {
         return parts.count == 2 && parts.first == "courses"
     }
 
+    private func isClassCoursePath(_ path: String) -> Bool {
+        return path.hasPrefix("classes/")
+    }
+
+    private func shouldPreferCoursePath(existing: String?, candidate: String) -> Bool {
+        guard let existing else { return true }
+        if isClassCoursePath(candidate), !isClassCoursePath(existing) {
+            return true
+        }
+        return false
+    }
+
     private func hasMigratedLegacyCourse(_ courseId: String) -> Bool {
         let list = UserDefaults.standard.array(forKey: legacyCourseMigrationKey) as? [String] ?? []
         return list.contains(courseId)
@@ -2766,6 +2789,9 @@ final class GradesStore: ObservableObject {
 
     private func decodeCourseExam(from doc: QueryDocumentSnapshot, courseId: String, classId: String?) -> Exam? {
         let data = doc.data()
+        if data["id"] == nil {
+            doc.reference.setData(["id": doc.documentID], merge: true)
+        }
         guard let dateTs = data["date"] as? Timestamp else { return nil }
         let date = dateTs.dateValue()
         let hasTimeFlag = data["hasTime"] as? Bool
@@ -2801,6 +2827,9 @@ final class GradesStore: ObservableObject {
 
     private func decodeCourseHomework(from doc: QueryDocumentSnapshot, courseId: String) -> Homework {
         let data = doc.data()
+        if data["id"] == nil {
+            doc.reference.setData(["id": doc.documentID], merge: true)
+        }
         let createdTs = data["createdAt"] as? Timestamp
         let createdAt = createdTs?.dateValue() ?? Date()
         return Homework(
