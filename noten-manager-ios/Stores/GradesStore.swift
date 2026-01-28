@@ -2887,8 +2887,19 @@ final class GradesStore: ObservableObject {
                     let newRef = db.collection("classes").document(classId).collection("courses").document(doc.documentID)
                     let newSnap = try await newRef.getDocument()
                     if newSnap.exists {
-                        try await doc.reference.delete()
-                        summary.deleted += 1
+                        do {
+                            try await deleteCourseSubcollections(doc.reference)
+                        } catch {
+                            ErrorLoggingService.logErrorIfEnabled(error)
+                            summary.errors += 1
+                        }
+                        do {
+                            try await doc.reference.delete()
+                            summary.deleted += 1
+                        } catch {
+                            ErrorLoggingService.logErrorIfEnabled(error)
+                            summary.errors += 1
+                        }
                     }
                 }
             }
