@@ -5428,9 +5428,23 @@ final class GradesStore: ObservableObject {
     
     func fetchCoursesForClass(classId: String) async throws -> [Course] {
         let normalizedId = normalizedExamGroupCode(classId)
-        let snapshot = try await db.collection("classes").document(normalizedId).collection("courses").getDocuments()
-            
-        return snapshot.documents.compactMap { try? $0.data(as: Course.self) }
+        var results: [Course] = []
+        let classSnapshot = try await db.collection("classes").document(normalizedId).collection("courses").getDocuments()
+        results.append(contentsOf: classSnapshot.documents.compactMap { decodeCourseDocument($0) })
+        if let legacySnapshot = try? await db.collection("courses").whereField("classId", isEqualTo: normalizedId).getDocuments() {
+            results.append(contentsOf: legacySnapshot.documents.compactMap { decodeCourseDocument($0) })
+        }
+        var uniqueById: [String: Course] = [:]
+        for course in results {
+            if let existing = uniqueById[course.id] {
+                if existing.classId == nil, course.classId != nil {
+                    uniqueById[course.id] = course
+                }
+                continue
+            }
+            uniqueById[course.id] = course
+        }
+        return Array(uniqueById.values)
     }
     
     func leaveClass(code: String) async {
