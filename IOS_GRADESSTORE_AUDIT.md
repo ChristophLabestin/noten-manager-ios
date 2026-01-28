@@ -439,6 +439,21 @@
 
 ---
 
+### 25) Course subscription query chunk size may exceed Firestore `in` limits (low/medium)
+**Issue**
+- The subscription query chunks `subscribedCourseIds` into batches of 30 for a Firestore `in` query; Firestore `in` has a strict maximum (historically 10).
+
+**Evidence**
+- `subscribedCourseIds.chunked(into: 30)` followed by `.whereField("id", in: chunk)`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:2689-2694`
+
+**Impact / likely symptoms**
+- If the limit is lower than 30, the listener will error for larger chunks and courses will not load.
+
+**Recommendation**
+- Confirm the current Firestore `in` limit and adjust chunk size accordingly.
+
+---
+
 ## Additional Observations
 - `stopListening` does not stop course query listeners (`coursesQueriesListeners`) or course content listeners. Combined with missing cleanup of `courseExamsMap`, this can leave stale course data in memory. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:587-664, 2659-2701`
 - There are two different mapping stores: `groupMappings` (new) and `subjectMappings` (legacy). Only legacy migration copies `subjectMappings`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:166-177, 9759-9794`
