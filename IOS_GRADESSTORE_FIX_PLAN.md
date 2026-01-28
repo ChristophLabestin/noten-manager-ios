@@ -8,32 +8,31 @@
 ---
 
 ## Phase 1 — Stop the bleeding (highest impact, minimal migration)
-1) **Course content listeners start too early**
-   - Move `startCourseContentListeners()` to run *after* courses are loaded.
-   - Trigger from `rebuildCourses()` when course IDs change.
+1) ✅ **Course content listeners start too early**
+   - `startCourseContentListeners()` now runs after courses load via `rebuildCourses()`.
+   - Listener startup triggers when course IDs change or listeners are missing.
 
-2) **Listener cleanup + stale maps**
-   - `stopCourseContentListeners()` should clear `courseExamsMap` / `courseHomeworksMap` and rebuild shared lists (don’t wipe `sharedExams/sharedHomeworks`).
-   - Ensure `stopListening()` + `resetSchoolYearScopedData()` remove:
+2) ✅ **Listener cleanup + stale maps**
+   - `stopCourseContentListeners()` clears `courseExamsMap` / `courseHomeworksMap` and rebuilds shared lists.
+   - `stopListening()` + `resetSchoolYearScopedData()` remove:
      - `coursesQueriesListeners`
      - `courseExamsListeners` / `courseHomeworksListeners`
      - `courseMappingsListener`
 
-3) **Legacy homework listener leak**
-   - Remove the extra `homeworkGroups/.../subjects` listener in `updateSharedHomeworksListenerIfNeeded` (it overwrites the homeworks listener).
-   - Use the dedicated `homeworkGroupSubjectsListener` instead.
+3) ✅ **Legacy homework listener leak**
+   - Duplicate legacy listener removed; `homeworkGroupSubjectsListener` kept.
 
-4) **Shared-item dedup collisions**
-   - Dedup by compound key (`groupId`/`courseId`/`classId` + `docId`) in `rebuildSharedExams()` and `rebuildSharedHomeworks()`.
+4) ✅ **Shared-item dedup collisions**
+   - Dedup now uses compound keys.
 
-5) **Group members listener cleanup**
-   - Remove `groupMembersListeners` and `groupMemberIds` in `stopListening`, `resetSchoolYearScopedData`, and `leaveSharedGroup`.
+5) ✅ **Group members listener cleanup**
+   - Member listeners + caches cleared in all teardown paths.
 
 ---
 
 ## Phase 2 — Align schema + write paths
-1) **Normalize course writes to class subcollections**
-   - Update write paths in:
+1) ✅ **Normalize course writes to class subcollections**
+   - Updated write paths in:
      - `addLegacyGroupToClass`
      - `addBranchToClass`
      - `addWahlpflichtfachGroupToClass`
@@ -41,33 +40,36 @@
      - `migrateGroupToClass` (exam/homework migrations)
      - `deleteClass`, `deleteCourse`
 
-2) **Read-side compatibility**
-   - Temporary fallback: read top-level `/courses` if class subcollection missing.
+2) ✅ **Read-side compatibility**
+   - Added fallback for legacy top-level `/courses` by `documentID` and decode fixes.
 
 ---
 
 ## Phase 3 — Data migration
-1) **Move top-level `/courses` into `classes/{classId}/courses`**
-2) **Backfill `id` fields for course exams/homeworks**
-3) **Legacy migration gap**
-   - Add `seminar` to migration + deletion
-   - Add notes/rescheduled collections to deletion list
+1) ◐ **Move top-level `/courses` into `classes/{classId}/courses`**
+   - Implemented per-course migration when legacy path detected.
+   - Still missing: global migration/cleanup pass for all legacy courses.
+2) ✅ **Backfill `id` fields for course exams/homeworks**
+   - Decode path now writes missing `id` back to Firestore.
+3) ✅ **Legacy migration gap**
+   - Added `seminar` to migration + deletion.
+   - Added notes/rescheduled collections to deletion list.
 
 ---
 
 ## Phase 4 — Schema consistency
-1) **Class config field**
-   - Standardize on `config` (or `courseConfiguration`) and migrate/alias the other.
+1) ✅ **Class config field**
+   - Reads accept `config` or `courseConfiguration`; updates target existing field.
 
-2) **CourseType encoding**
-   - Make branch update/removal accept current encoded schema (`type` + `associatedId`).
+2) ✅ **CourseType encoding**
+   - Branch update/removal accepts `type` + `associatedId`.
 
 ---
 
 ## Phase 5 — Verification
 - Fresh login → course exams/homeworks appear.
 - Join group → shared items appear, no dedup collisions.
-- Legacy group migration → items visible in courses.
+- Legacy group migration (old shared groups) → items visible in courses.
 - Reset school year → no orphaned notes/reminders.
 
 ---
