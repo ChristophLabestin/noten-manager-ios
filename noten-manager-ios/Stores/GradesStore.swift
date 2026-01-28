@@ -10144,8 +10144,21 @@ final class GradesStore: ObservableObject {
     private func updateGroupObservers(uid: String, schoolYearId: String? = nil) {
         guard let sid = schoolYearId ?? activeSchoolYearId else { return }
         let current = Set(groupIds)
+        var didRemoveShared = false
 
         // Entferne Listener für alte Gruppen
+        for (gid, l) in groupExamsListeners where !current.contains(gid) {
+            l.remove()
+            groupExamsListeners.removeValue(forKey: gid)
+            groupExamsByGroup.removeValue(forKey: gid)
+            didRemoveShared = true
+        }
+        for (gid, l) in groupHomeworksListeners where !current.contains(gid) {
+            l.remove()
+            groupHomeworksListeners.removeValue(forKey: gid)
+            groupHomeworksByGroup.removeValue(forKey: gid)
+            didRemoveShared = true
+        }
         for (gid, l) in groupSubjectsListeners where !current.contains(gid) {
             l.remove()
             groupSubjectsListeners.removeValue(forKey: gid)
@@ -10166,6 +10179,9 @@ final class GradesStore: ObservableObject {
             l.remove()
             groupMembersListeners.removeValue(forKey: gid)
             groupMemberIds.removeValue(forKey: gid)
+        }
+        if didRemoveShared {
+            recomputeSharedCollections()
         }
 
         // Starte Listener für aktuelle Gruppen
@@ -10368,13 +10384,18 @@ final class GradesStore: ObservableObject {
 
     private func updateClassExamsObservers() {
         let current = Set(classIds)
+        var didRemoveShared = false
         for (cid, l) in classExamsListeners where !current.contains(cid) {
             l.remove()
             classExamsListeners.removeValue(forKey: cid)
             classExamsByClass.removeValue(forKey: cid)
+            didRemoveShared = true
         }
         for cid in current {
             startClassExamsListener(for: cid)
+        }
+        if didRemoveShared {
+            recomputeSharedCollections()
         }
     }
 
@@ -10436,13 +10457,18 @@ final class GradesStore: ObservableObject {
 
     private func updateWahlpflichtfachExamsObservers() {
         let current = Set(wahlpflichtfachGroupIds)
+        var didRemoveShared = false
         for (gid, l) in wahlpflichtfachExamsListeners where !current.contains(gid) {
             l.remove()
             wahlpflichtfachExamsListeners.removeValue(forKey: gid)
             wahlpflichtfachExamsByGroup.removeValue(forKey: gid)
+            didRemoveShared = true
         }
         for gid in current {
             startWahlpflichtfachExamsListener(for: gid)
+        }
+        if didRemoveShared {
+            recomputeSharedCollections()
         }
     }
 
