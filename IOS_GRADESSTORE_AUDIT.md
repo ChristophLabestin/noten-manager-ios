@@ -468,6 +468,9 @@
 **Recommendation**
 - Add recursive delete via Cloud Function or client-side cleanup of subcollections.
 
+**Status**
+- Client-side subcollection cleanup added in `deleteClass` and `deleteCourse`.
+
 ---
 
 ### 27) Class course fetch ignores legacy top‑level courses (low/medium)
@@ -482,6 +485,9 @@
 
 **Recommendation**
 - Merge in top‑level `/courses` where `classId == classId`.
+
+**Status**
+- `fetchCoursesForClass` now merges legacy top‑level courses and dedupes by ID.
 
 ---
 

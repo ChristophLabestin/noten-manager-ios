@@ -40,6 +40,9 @@
 9) ✅ **Leave class removes legacy course subscriptions**
    - Also removes top-level `/courses` by `classId`.
 
+10) ✅ **Delete class/course removes subcollections**
+   - `deleteClass` and `deleteCourse` now delete `exams`/`homeworks` subcollections (plus class `members`/`exams`).
+
 ---
 
 ## Phase 2 — Align schema + write paths

@@ -5569,22 +5569,25 @@ final class GradesStore: ObservableObject {
             updateGroupObservers(uid: uid, schoolYearId: activeSchoolYearId)
         }
         
-        // 2. Delete all Courses associated with this class
+        // 2. Delete all Courses associated with this class (including subcollections)
         let coursesSnapshot = try await classRef.collection("courses").getDocuments()
-        let batch = db.batch()
-        
         for courseDoc in coursesSnapshot.documents {
-            batch.deleteDocument(courseDoc.reference)
-            // Note: We are strictly supposed to delete subcollections (exams/homeworks) manually in Firestore!
-            // But usually for prototype/small apps we rely on them becoming orphaned or client-side cleanup.
-            // For rigorous implementation, we should fetch and delete subcollections of courses too.
-            // We'll trust that listeners handle "missing parent" gracefully or we implement cloud function recursive delete later.
+            try await deleteCourseSubcollections(courseDoc.reference)
+            try await courseDoc.reference.delete()
         }
-        
-        // 3. Delete Class Document
-        batch.deleteDocument(classRef)
-        
-        try await batch.commit()
+        if let legacyCourses = try? await db.collection("courses").whereField("classId", isEqualTo: code).getDocuments() {
+            for courseDoc in legacyCourses.documents {
+                try await deleteCourseSubcollections(courseDoc.reference)
+                try await courseDoc.reference.delete()
+            }
+        }
+
+        // 3. Delete class subcollections
+        try? await deleteCollectionDocs(classRef.collection("members"))
+        try? await deleteCollectionDocs(classRef.collection("exams"))
+
+        // 4. Delete Class Document
+        try await classRef.delete()
         
         // 4. Local Cleanup
         // Also perform "leave" logic for self to clean up user profile
@@ -6724,6 +6727,7 @@ final class GradesStore: ObservableObject {
             guard let owner = doc.data()?["ownerId"] as? String, owner == uid else {
                 throw NSError(domain: "GradesStore", code: -4, userInfo: [NSLocalizedDescriptionKey: "Nur der Ersteller kann diesen Kurs löschen."])
             }
+            try await deleteCourseSubcollections(courseRef)
             try await courseRef.delete()
             return
         }
@@ -6734,7 +6738,25 @@ final class GradesStore: ObservableObject {
         guard let owner = doc.data()?["ownerId"] as? String, owner == uid else {
             throw NSError(domain: "GradesStore", code: -4, userInfo: [NSLocalizedDescriptionKey: "Nur der Ersteller kann diesen Kurs löschen."])
         }
+        try await deleteCourseSubcollections(courseRef)
         try await courseRef.delete()
+    }
+
+    private func deleteCourseSubcollections(_ courseRef: DocumentReference) async throws {
+        try await deleteCollectionDocs(courseRef.collection("exams"))
+        try await deleteCollectionDocs(courseRef.collection("homeworks"))
+    }
+
+    private func deleteCollectionDocs(_ collection: CollectionReference) async throws {
+        while true {
+            let snapshot = try await collection.getDocuments()
+            if snapshot.documents.isEmpty { break }
+            let batch = db.batch()
+            for doc in snapshot.documents {
+                batch.deleteDocument(doc.reference)
+            }
+            try await batch.commit()
+        }
     }
 
     func removeGroupFromClass(classId: String, groupId: String) async throws {
