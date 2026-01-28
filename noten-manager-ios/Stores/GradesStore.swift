@@ -2767,18 +2767,28 @@ final class GradesStore: ObservableObject {
             }
 
             let newRef = db.collection("classes").document(classId).collection("courses").document(courseId)
-            if let data = legacySnap.data() {
+            if var data = legacySnap.data() {
+                if data["id"] == nil { data["id"] = courseId }
+                if data["classId"] == nil { data["classId"] = classId }
                 try await newRef.setData(data, merge: true)
+                coursePathById[courseId] = newRef.path
             }
 
             let examsSnap = try await legacyRef.collection("exams").getDocuments()
             for doc in examsSnap.documents {
-                try await newRef.collection("exams").document(doc.documentID).setData(doc.data(), merge: true)
+                var data = doc.data()
+                if data["id"] == nil { data["id"] = doc.documentID }
+                if data["courseId"] == nil { data["courseId"] = courseId }
+                if data["classId"] == nil { data["classId"] = classId }
+                try await newRef.collection("exams").document(doc.documentID).setData(data, merge: true)
             }
 
             let hwSnap = try await legacyRef.collection("homeworks").getDocuments()
             for doc in hwSnap.documents {
-                try await newRef.collection("homeworks").document(doc.documentID).setData(doc.data(), merge: true)
+                var data = doc.data()
+                if data["id"] == nil { data["id"] = doc.documentID }
+                if data["courseId"] == nil { data["courseId"] = courseId }
+                try await newRef.collection("homeworks").document(doc.documentID).setData(data, merge: true)
             }
 
             markMigratedLegacyCourse(courseId)
