@@ -379,6 +379,21 @@
 
 ---
 
+### 21) Legacy course migration flag is global across users (low/medium)
+**Issue**
+- The “legacy course migration completed” list is stored in `UserDefaults` without scoping to the current user, so switching accounts can skip necessary migrations.
+
+**Evidence**
+- `legacyCourseMigrationKey` is a global key and is used without UID scoping. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:2745-2790`
+
+**Impact / likely symptoms**
+- A different user account on the same device might never migrate legacy course content.
+
+**Recommendation**
+- Scope migration keys by `uid` (e.g., `legacyCourseMigration_v1_<uid>`).
+
+---
+
 ## Additional Observations
 - `stopListening` does not stop course query listeners (`coursesQueriesListeners`) or course content listeners. Combined with missing cleanup of `courseExamsMap`, this can leave stale course data in memory. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:587-664, 2659-2701`
 - There are two different mapping stores: `groupMappings` (new) and `subjectMappings` (legacy). Only legacy migration copies `subjectMappings`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:166-177, 9759-9794`
