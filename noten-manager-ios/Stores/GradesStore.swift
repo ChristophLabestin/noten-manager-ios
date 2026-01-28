@@ -8249,7 +8249,7 @@ final class GradesStore: ObservableObject {
             throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
         }
         let yearRef = try await requireYearRef(uid: uid)
-        let gid = groupId ?? sharedExams.first(where: { $0.id == examId })?.groupId
+        let gid = groupId ?? sharedExams.first(where: { $0.id == examId && $0.groupId == groupId })?.groupId
         let key = sharedUserKeyForExamId(examId, groupId: gid)
         let ref = yearRef
             .collection("examGroupReminders")
@@ -8269,7 +8269,7 @@ final class GradesStore: ObservableObject {
     func setUserNoteForSharedExam(examId: String, note: String?, groupId: String? = nil) async {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         guard let yearRef = try? await requireYearRef(uid: uid) else { return }
-        let gid = groupId ?? sharedExams.first(where: { $0.id == examId })?.groupId
+        let gid = groupId ?? sharedExams.first(where: { $0.id == examId && $0.groupId == groupId })?.groupId
         let key = sharedUserKeyForExamId(examId, groupId: gid)
         let ref = yearRef.collection("examGroupNotes").document(key)
         let trimmed = note?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -8294,7 +8294,7 @@ final class GradesStore: ObservableObject {
     func setUserCompletedForSharedExam(examId: String, completed: Bool, groupId: String? = nil) async {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         guard let yearRef = try? await requireYearRef(uid: uid) else { return }
-        let gid = groupId ?? sharedExams.first(where: { $0.id == examId })?.groupId
+        let gid = groupId ?? sharedExams.first(where: { $0.id == examId && $0.groupId == groupId })?.groupId
         let key = sharedUserKeyForExamId(examId, groupId: gid)
         let ref = yearRef.collection("examGroupCompleted").document(key)
         do {
@@ -8321,7 +8321,7 @@ final class GradesStore: ObservableObject {
     func setUserRescheduledDateForSharedExam(examId: String, rescheduledDate: Date?, groupId: String? = nil) async {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         guard let yearRef = try? await requireYearRef(uid: uid) else { return }
-        let gid = groupId ?? sharedExams.first(where: { $0.id == examId })?.groupId
+        let gid = groupId ?? sharedExams.first(where: { $0.id == examId && $0.groupId == groupId })?.groupId
         let key = sharedUserKeyForExamId(examId, groupId: gid)
         let ref = yearRef.collection("examGroupRescheduled").document(key)
         do {
@@ -8349,7 +8349,7 @@ final class GradesStore: ObservableObject {
             throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
         }
         let yearRef = try await requireYearRef(uid: uid)
-        let gid = groupId ?? sharedHomeworks.first(where: { $0.id == homeworkId })?.groupId
+        let gid = groupId ?? sharedHomeworks.first(where: { $0.id == homeworkId && $0.groupId == groupId })?.groupId
         let key = sharedUserKeyForHomeworkId(homeworkId, groupId: gid)
         let ref = yearRef.collection("homeworkGroupReminders").document(key)
         if let reminderAt {
@@ -8380,7 +8380,7 @@ final class GradesStore: ObservableObject {
     func setUserNoteForSharedHomework(homeworkId: String, note: String?, groupId: String? = nil) async {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         guard let yearRef = try? await requireYearRef(uid: uid) else { return }
-        let gid = groupId ?? sharedHomeworks.first(where: { $0.id == homeworkId })?.groupId
+        let gid = groupId ?? sharedHomeworks.first(where: { $0.id == homeworkId && $0.groupId == groupId })?.groupId
         let key = sharedUserKeyForHomeworkId(homeworkId, groupId: gid)
         let ref = yearRef.collection("homeworkGroupNotes").document(key)
         let trimmed = note?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -8405,7 +8405,7 @@ final class GradesStore: ObservableObject {
     func setUserCompletedForSharedHomework(homeworkId: String, completed: Bool, groupId: String? = nil) async {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         guard let yearRef = try? await requireYearRef(uid: uid) else { return }
-        let gid = groupId ?? sharedHomeworks.first(where: { $0.id == homeworkId })?.groupId
+        let gid = groupId ?? sharedHomeworks.first(where: { $0.id == homeworkId && $0.groupId == groupId })?.groupId
         let key = sharedUserKeyForHomeworkId(homeworkId, groupId: gid)
         let ref = yearRef.collection("homeworkGroupCompleted").document(key)
         do {
