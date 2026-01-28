@@ -5442,26 +5442,30 @@ final class GradesStore: ObservableObject {
          let userRef = db.collection("users").document(uid)
          
          // Fetch courses of this class to unsubscribe
-         // Refactor: Read from `classes/{classId}/courses` subcollection
+         var courseIdsToRemove: Set<String> = []
          if let coursesRequest = try? await db.collection("classes").document(code).collection("courses").getDocuments() {
-             let courseIdsToRemove = coursesRequest.documents.map { $0.documentID }
-             if !courseIdsToRemove.isEmpty {
-                 // Remove from User Profile
-                 try? await userRef.updateData([
-                     "subscribedCourseIds": FieldValue.arrayRemove(courseIdsToRemove)
+             courseIdsToRemove.formUnion(coursesRequest.documents.map { $0.documentID })
+         }
+         if let legacyCourses = try? await db.collection("courses").whereField("classId", isEqualTo: code).getDocuments() {
+             courseIdsToRemove.formUnion(legacyCourses.documents.map { $0.documentID })
+         }
+         if !courseIdsToRemove.isEmpty {
+             let ids = Array(courseIdsToRemove)
+             // Remove from User Profile
+             try? await userRef.updateData([
+                 "subscribedCourseIds": FieldValue.arrayRemove(ids)
+             ])
+             
+             // Remove from SchoolYear (Active Year)
+             if let yearRef = try? await requireYearRef(uid: uid) {
+                 try? await yearRef.updateData([
+                     "subscribedCourseIds": FieldValue.arrayRemove(ids)
                  ])
-                 
-                 // Remove from SchoolYear (Active Year)
-                 if let yearRef = try? await requireYearRef(uid: uid) {
-                     try? await yearRef.updateData([
-                         "subscribedCourseIds": FieldValue.arrayRemove(courseIdsToRemove)
-                     ])
-                 }
-                 
-                 // Local Cleanup
-                 await MainActor.run {
-                     self.subscribedCourseIds.removeAll { courseIdsToRemove.contains($0) }
-                 }
+             }
+             
+             // Local Cleanup
+             await MainActor.run {
+                 self.subscribedCourseIds.removeAll { ids.contains($0) }
              }
          }
          
