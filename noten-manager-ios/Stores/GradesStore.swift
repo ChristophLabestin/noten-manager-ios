@@ -2689,8 +2689,19 @@ final class GradesStore: ObservableObject {
     private func rebuildCourses() {
         let previousIds = Set(courses.map { $0.id })
         let allCourses = coursesQueryResults.values.flatMap { $0 }
+        var uniqueById: [String: Course] = [:]
+        for course in allCourses {
+            if let existing = uniqueById[course.id] {
+                if existing.classId == nil, course.classId != nil {
+                    uniqueById[course.id] = course
+                }
+                continue
+            }
+            uniqueById[course.id] = course
+        }
+        let uniqueCourses = Array(uniqueById.values)
         // Sort by name or whatever default
-        self.courses = allCourses.sorted { $0.name < $1.name }
+        self.courses = uniqueCourses.sorted { $0.name < $1.name }
         let foundIds = Set(allCourses.map { $0.id })
         if !coursePathById.isEmpty {
             coursePathById = coursePathById.filter { foundIds.contains($0.key) }
