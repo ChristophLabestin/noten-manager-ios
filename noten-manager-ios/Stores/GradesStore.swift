@@ -3602,6 +3602,33 @@ final class GradesStore: ObservableObject {
         examGroupIds = unionIds
         homeworkGroupIds = unionIds
 
+        let yearClassIds = data["classIds"] as? [String]
+        let fbClassIds = fallback["classIds"] as? [String]
+        if let incomingClassIds = yearClassIds ?? fbClassIds {
+            var seen = Set<String>()
+            let deduped = incomingClassIds.filter { seen.insert($0).inserted }
+            if deduped != classIds {
+                let previous = Set(classIds)
+                let current = Set(deduped)
+                let added = current.subtracting(previous)
+                let removed = previous.subtracting(current)
+                classIds = deduped
+                for cid in removed {
+                    classNames.removeValue(forKey: cid)
+                    classOwners.removeValue(forKey: cid)
+                    classDetails.removeValue(forKey: cid)
+                }
+                if !added.isEmpty {
+                    Task { [weak self] in
+                        guard let self else { return }
+                        for cid in added {
+                            await self.fetchClassDetails(classId: cid)
+                        }
+                    }
+                }
+            }
+        }
+
         if let sid = activeSchoolYearId,
            let name = (data["name"] as? String)?
                 .trimmingCharacters(in: .whitespacesAndNewlines),

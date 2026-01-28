@@ -513,6 +513,25 @@
 
 ---
 
+### 29) School-year classIds not synced on listener updates (medium)
+**Issue**
+- `applySchoolYearSettings` does not read `classIds` from the school-year document, so class membership changes made on another device are not reflected in the current session.
+
+**Evidence**
+- `loadUserClasses()` reads `classIds` once on startup; `applySchoolYearSettings` never updates `classIds` from year data. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:574-582, 3489-3660`
+
+**Impact / likely symptoms**
+- New classes added elsewhere do not appear; removed classes remain in the UI.
+- Class exam listeners can be stale because `updateClassExamsObservers()` runs with outdated `classIds`.
+
+**Recommendation**
+- Sync `classIds` inside `applySchoolYearSettings` and fetch class details for newly added classes.
+
+**Status**
+- ✅ Fixed: `applySchoolYearSettings` now dedupes and updates `classIds`, clears caches for removed classes, and fetches details for added ones.
+
+---
+
 ## Additional Observations
 - `stopListening` does not stop course query listeners (`coursesQueriesListeners`) or course content listeners. Combined with missing cleanup of `courseExamsMap`, this can leave stale course data in memory. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:587-664, 2659-2701`
 - There are two different mapping stores: `groupMappings` (new) and `subjectMappings` (legacy). Only legacy migration copies `subjectMappings`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:166-177, 9759-9794`
