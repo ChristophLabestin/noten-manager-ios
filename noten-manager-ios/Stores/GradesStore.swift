@@ -2701,6 +2701,7 @@ final class GradesStore: ObservableObject {
     
     private var courseExamsListeners: [String: ListenerRegistration] = [:]
     private var courseHomeworksListeners: [String: ListenerRegistration] = [:]
+    private let legacyCourseMigrationKey = "legacyCourseMigration_v1"
 
     private func stopCourseContentListeners() {
         courseExamsListeners.values.forEach { $0.remove() }
@@ -2717,6 +2718,50 @@ final class GradesStore: ObservableObject {
         guard let path = coursePathById[courseId] else { return false }
         let parts = path.split(separator: "/")
         return parts.count == 2 && parts.first == "courses"
+    }
+
+    private func hasMigratedLegacyCourse(_ courseId: String) -> Bool {
+        let list = UserDefaults.standard.array(forKey: legacyCourseMigrationKey) as? [String] ?? []
+        return list.contains(courseId)
+    }
+
+    private func markMigratedLegacyCourse(_ courseId: String) {
+        var list = UserDefaults.standard.array(forKey: legacyCourseMigrationKey) as? [String] ?? []
+        if !list.contains(courseId) {
+            list.append(courseId)
+            UserDefaults.standard.set(list, forKey: legacyCourseMigrationKey)
+        }
+    }
+
+    private func migrateLegacyCourseContentIfNeeded(courseId: String, classId: String) async {
+        if hasMigratedLegacyCourse(courseId) { return }
+        do {
+            let legacyRef = db.collection("courses").document(courseId)
+            let legacySnap = try await legacyRef.getDocument()
+            guard legacySnap.exists else {
+                markMigratedLegacyCourse(courseId)
+                return
+            }
+
+            let newRef = db.collection("classes").document(classId).collection("courses").document(courseId)
+            if let data = legacySnap.data() {
+                try await newRef.setData(data, merge: true)
+            }
+
+            let examsSnap = try await legacyRef.collection("exams").getDocuments()
+            for doc in examsSnap.documents {
+                try await newRef.collection("exams").document(doc.documentID).setData(doc.data(), merge: true)
+            }
+
+            let hwSnap = try await legacyRef.collection("homeworks").getDocuments()
+            for doc in hwSnap.documents {
+                try await newRef.collection("homeworks").document(doc.documentID).setData(doc.data(), merge: true)
+            }
+
+            markMigratedLegacyCourse(courseId)
+        } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
+        }
     }
 
     private func decodeCourseExam(from doc: QueryDocumentSnapshot, courseId: String, classId: String?) -> Exam? {
@@ -2786,13 +2831,17 @@ final class GradesStore: ObservableObject {
             guard subscribedCourseIds.contains(courseId) else { continue }
             let classId = course.classId
             let useTopLevel = isTopLevelCoursePath(courseId: courseId)
-            if !useTopLevel && classId == nil {
+            if useTopLevel, let classId {
+                Task { await migrateLegacyCourseContentIfNeeded(courseId: courseId, classId: classId) }
+            }
+            let shouldUseTopLevel = useTopLevel && classId == nil
+            if !shouldUseTopLevel && classId == nil {
                 continue
             }
             
             // Listen to Exams
             let examsRef: CollectionReference
-            if useTopLevel {
+            if shouldUseTopLevel {
                 examsRef = db.collection("courses").document(courseId).collection("exams")
             } else {
                 examsRef = db.collection("classes").document(classId ?? "").collection("courses").document(courseId).collection("exams")
@@ -2810,7 +2859,7 @@ final class GradesStore: ObservableObject {
             
             // Listen to Homework
             let hwRef: CollectionReference
-            if useTopLevel {
+            if shouldUseTopLevel {
                 hwRef = db.collection("courses").document(courseId).collection("homeworks")
             } else {
                 hwRef = db.collection("classes").document(classId ?? "").collection("courses").document(courseId).collection("homeworks")
