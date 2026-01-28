@@ -4820,6 +4820,7 @@ final class GradesStore: ObservableObject {
              throw NSError(domain: "GradesStore", code: -3, userInfo: [NSLocalizedDescriptionKey: "Diese Gruppe existiert nicht."])
         }
         let name = doc.data()?["name"] as? String ?? "Unbekannt"
+        let ownerId = doc.data()?["ownerId"] as? String
         
         // Add member
         try await groupRef.collection("members").document(uid).setData([
@@ -4852,6 +4853,7 @@ final class GradesStore: ObservableObject {
              if !wahlpflichtfachGroupIds.contains(code) {
                  wahlpflichtfachGroupIds.append(code)
                  wahlpflichtfachGroupNames[code] = name
+                 if let ownerId { wahlpflichtfachGroupOwners[code] = ownerId }
              }
             updateWahlpflichtfachExamsObservers()
          }
