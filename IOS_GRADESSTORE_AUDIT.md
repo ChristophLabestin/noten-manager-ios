@@ -47,6 +47,9 @@
 - Pick a single canonical path (prefer `classes/{classId}/courses`) and update all write/read/delete/migration code to use it.
 - Consider a one-time migration script to move top-level `/courses` into the class subcollection.
 
+**Status**
+- ✅ Mitigated: writes normalized to class subcollections; read-side legacy fallback + migration helper added.
+
 ---
 
 ### 2) Course listeners start before course list is populated (high impact)
@@ -64,6 +67,9 @@
 
 **Recommendation**
 - Start course content listeners after `courses` is populated (e.g., call `startCourseContentListeners()` inside `rebuildCourses()` or after the first snapshot loads).
+
+**Status**
+- ✅ Fixed: listeners now start after `rebuildCourses()` when IDs change or listeners are missing.
 
 ---
 
@@ -83,6 +89,9 @@
 **Recommendation**
 - Only remove course-derived items (clear `courseExamsMap`/`courseHomeworksMap`) and rebuild shared lists, rather than clearing `sharedExams`/`sharedHomeworks` directly.
 
+**Status**
+- ✅ Fixed: course maps are cleared and shared lists rebuilt without wiping non-course data.
+
 ---
 
 ### 4) Shared exams/homeworks deduping ignores source (high impact)
@@ -101,6 +110,9 @@
 **Recommendation**
 - Use `compoundId(gid: docId)` or include `courseId/classId` in the key when de-duplicating.
 
+**Status**
+- ✅ Fixed: shared-item dedup now uses compound keys.
+
 ---
 
 ### 5) Legacy migration misses `seminar` data (high impact)
@@ -116,6 +128,9 @@
 
 **Recommendation**
 - Include `seminar` in legacy migration or add a one-off migration for it.
+
+**Status**
+- ✅ Fixed: `seminar` included in migration and deletion.
 
 ---
 
@@ -133,6 +148,9 @@
 **Recommendation**
 - Add all user-specific collections to delete list.
 
+**Status**
+- ✅ Fixed: notes/rescheduled + mappings included in deletion list.
+
 ---
 
 ### 7) Duplicate listener for legacy homework groups + leaked listener (medium)
@@ -149,6 +167,9 @@
 
 **Recommendation**
 - Use two separate listener variables (subjects + homeworks) or reuse the existing `homeworkGroupSubjectsListener` and only keep a single `sharedHomeworksListener` for homeworks.
+
+**Status**
+- ✅ Fixed: duplicate legacy listener removed.
 
 ---
 
@@ -168,6 +189,9 @@
 **Recommendation**
 - Remove `groupMembersListeners` wherever other group listeners are removed, and clear `groupMemberIds` for the group.
 
+**Status**
+- ✅ Fixed: member listeners + caches removed on teardown/leave.
+
 ---
 
 ### 9) Class config field drift: `config` vs `courseConfiguration` (medium)
@@ -186,6 +210,9 @@
 **Recommendation**
 - Standardize on a single field and migrate/alias the other.
 
+**Status**
+- ✅ Fixed: reads accept `config` or `courseConfiguration`; updates target existing field.
+
 ---
 
 ### 10) CourseType encoding mismatch (`type` vs `case`) (medium)
@@ -201,6 +228,9 @@
 
 **Recommendation**
 - Update branch logic to accept the new encoded schema (or normalize in migration).
+
+**Status**
+- ✅ Fixed: branch updates/removals accept `type` + `associatedId`.
 
 ---
 
@@ -218,6 +248,9 @@
 **Recommendation**
 - Remove `coursesListener` and explicitly tear down `coursesQueriesListeners` + course content listeners when subscriptions become empty.
 
+**Status**
+- ✅ Fixed: unused `coursesListener` removed; teardown handled via `coursesQueriesListeners`.
+
 ---
 
 ### 12) Course exam/homework decode requires `id` field (medium)
@@ -234,6 +267,9 @@
 
 **Recommendation**
 - Backfill `id` fields or decode using `documentID` as fallback.
+
+**Status**
+- ✅ Fixed: decode fallback uses `documentID` and backfills missing `id`.
 
 ---
 
@@ -269,6 +305,9 @@
 **Recommendation**
 - Order by `createdAt` or use `documentID` ordering.
 
+**Status**
+- ✅ Fixed: listener now derives ordering from document IDs locally (no `order(by: "id")`).
+
 ---
 
 ### 14) Group name lookup ignores legacy collections (low/medium)
@@ -285,6 +324,9 @@
 **Recommendation**
 - Fallback to legacy collections if `groups/{gid}` is missing.
 
+**Status**
+- ✅ Fixed: group name lookup falls back to legacy collections.
+
 ---
 
 ### 15) Redundant calls in `joinSharedGroup` (low)
@@ -300,6 +342,9 @@
 **Recommendation**
 - Remove the duplicate calls.
 
+**Status**
+- ✅ Fixed: duplicate calls removed.
+
 ---
 
 ### 16) Subject deletion tries to remove subscriptions by subject name (low)
@@ -314,6 +359,9 @@
 
 **Recommendation**
 - Remove course IDs that actually map to the deleted subject (via `courseMappings` or `course.name`).
+
+**Status**
+- ✅ Fixed: removal now resolves course IDs via `courses` + `courseMappings`.
 
 ---
 
@@ -333,6 +381,9 @@
 **Recommendation**
 - Ensure group/class/wahlpflicht observer cleanup removes all relevant listeners + data maps and triggers `recomputeSharedCollections()` when removals occur.
 
+**Status**
+- ✅ Fixed: observers now remove full listener sets and recompute shared collections.
+
 ---
 
 ### 18) Course docs missing `classId` break course content listeners (medium)
@@ -349,6 +400,9 @@
 **Recommendation**
 - Derive `classId` from the document path when missing and backfill it to Firestore.
 
+**Status**
+- ✅ Fixed: decode backfills `classId` from path when missing.
+
 ---
 
 ### 19) Shared user settings collide across sources (medium)
@@ -363,6 +417,9 @@
 
 **Recommendation**
 - Scope per-user keys by source (e.g., `course:{courseId}|{docId}`, `class:{classId}|{docId}`) and keep a fallback for existing data.
+
+**Status**
+- ✅ Fixed: per-user keys are scoped; legacy keys cleaned up on write/delete.
 
 ---
 
@@ -380,6 +437,9 @@
 **Recommendation**
 - Preserve `classId` and `assessmentType` when rebuilding shared exam entries.
 
+**Status**
+- ✅ Fixed: `classId` + `assessmentType` preserved when applying user state.
+
 ---
 
 ### 21) Legacy course migration flag is global across users (low/medium)
@@ -394,6 +454,9 @@
 
 **Recommendation**
 - Scope migration keys by `uid` (e.g., `legacyCourseMigration_v1_<uid>`).
+
+**Status**
+- ✅ Fixed: migration key now includes user ID.
 
 ---
 
@@ -410,6 +473,9 @@
 **Recommendation**
 - Call `updateWahlpflichtfachExamsObservers()` after changes to `wahlpflichtfachGroupIds`.
 
+**Status**
+- ✅ Fixed: listeners refreshed on join/leave.
+
 ---
 
 ### 23) Leaving class ignores legacy top‑level courses (low/medium)
@@ -425,6 +491,9 @@
 **Recommendation**
 - Also remove top‑level courses where `classId == classId` from subscriptions.
 
+**Status**
+- ✅ Fixed: legacy course IDs are removed on class leave.
+
 ---
 
 ### 24) Legacy shared-user docs linger after rekeying (low/medium)
@@ -439,6 +508,9 @@
 
 **Recommendation**
 - When writing/removing a new scoped key, also delete the legacy doc ID to prevent fallback collisions.
+
+**Status**
+- ✅ Fixed: legacy keys cleaned up when writing/removing scoped entries.
 
 ---
 
