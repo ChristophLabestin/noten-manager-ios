@@ -74,3 +74,7 @@ noten-manager-ios.xcodeproj/project.xcworkspace/xcuserdata/christophlabestin.xcu
 SourcePackages/
 xcuserdata/
 *.xcuserstate
+
+build/*
+build/**
+build*

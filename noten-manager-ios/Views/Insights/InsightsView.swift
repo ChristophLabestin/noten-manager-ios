@@ -226,8 +226,8 @@ struct InsightsView: View {
                     
                     Picker("Halbjahr", selection: $selectedHalfYear) {
                         Text("Alle").tag(0)
-                        Text("1.hj").tag(1)
-                        Text("2.hj").tag(2)
+                        Text("1.HJ").tag(1)
+                        Text("2.HJ").tag(2)
                     }
                     .pickerStyle(.segmented)
                     .padding(.top, 8)
@@ -243,7 +243,7 @@ struct InsightsView: View {
                 }
                 .softFadeIn(enabled: animationsOn, delay: 0.1, offset: 12)
 
-                MSSHistoryChartView(includeDroppedHalfYears: $includeDroppedHalfYears)
+                MSSHistoryChartView(includeDroppedHalfYears: $includeDroppedHalfYears, selectedHalfYear: $selectedHalfYear)
                     .environmentObject(store)
                     .softFadeIn(enabled: animationsOn, delay: 0.06, offset: 12)
 

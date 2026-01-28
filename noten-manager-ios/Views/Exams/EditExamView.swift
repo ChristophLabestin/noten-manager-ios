@@ -804,21 +804,7 @@ struct EditExamView: View {
     private func deleteExam() async {
         guard !isDeleting else { return }
         isDeleting = true
-        if exam.isShared {
-            if let gid = exam.groupId {
-                if store.wahlpflichtfachGroupIds.contains(gid) {
-                    await store.deleteSharedExamFromWpGroup(wpGroupId: gid, id: exam.id)
-                } else {
-                    await store.deleteSharedExamFromGroup(groupId: gid, id: exam.id)
-                }
-            } else if let cid = exam.courseId {
-                try? await store.deleteExamFromCourse(courseId: cid, examId: exam.id)
-            } else if let clid = exam.classId {
-                await store.deleteSharedExamFromClass(classId: clid, id: exam.id)
-            }
-        } else {
-            await store.deleteExamFromFirestore(id: exam.id)
-        }
+        await store.deleteExam(exam)
         await MainActor.run {
             showDeleteConfirm = false
             dismiss()
@@ -924,7 +910,7 @@ struct EditExamView: View {
             await store.deleteSharedExamFromClass(classId: clid, id: exam.id)
         }
         if let cid = exam.courseId, !selectedCourseIds.contains(cid) {
-            try? await store.deleteExamFromCourse(courseId: cid, examId: exam.id)
+            try? await store.deleteExamFromCourse(courseId: cid, examId: exam.id, classId: exam.classId)
         }
         if let gid = exam.groupId, !selectedGroupIds.contains(gid) {
             if store.wahlpflichtfachGroupIds.contains(gid) {

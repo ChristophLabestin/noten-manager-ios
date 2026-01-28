@@ -129,6 +129,7 @@ final class NotificationInboxStore: ObservableObject {
         do {
             let fetched = try await FirestoreService.shared.getActiveBroadcastNotifications()
             broadcasts = fetched
+            removeBroadcastDuplicates(using: fetched)
         } catch {
             print("Error fetching broadcasts: \(error)")
         }
@@ -144,6 +145,29 @@ final class NotificationInboxStore: ObservableObject {
         items.removeAll()
         persist()
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+    }
+
+    private func removeBroadcastDuplicates(using broadcasts: [BroadcastNotification]) {
+        guard !broadcasts.isEmpty else { return }
+        let keys = Set(broadcasts.map { normalizeKey(title: $0.title, body: $0.body) })
+        let originalCount = items.count
+        items.removeAll { item in
+            item.kind == .unknown && keys.contains(normalizeKey(title: item.title, body: item.body))
+        }
+        if items.count != originalCount {
+            persist()
+        }
+    }
+
+    private func normalizeKey(title: String, body: String) -> String {
+        "\(normalizeText(title))|\(normalizeText(body))"
+    }
+
+    private func normalizeText(_ text: String) -> String {
+        text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
     }
 
     private func mergeDelivered(_ delivered: [NotificationInboxItem]) {

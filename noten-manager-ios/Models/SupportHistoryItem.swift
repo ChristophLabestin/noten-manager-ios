@@ -17,6 +17,14 @@ enum SupportHistoryItem: Identifiable, Hashable {
         case .accessRequest(let request): return request.createdAt
         }
     }
+
+    var activityAt: Date {
+        switch self {
+        case .ticket(let ticket): return ticket.lastActivityAt
+        case .accessRequest(let request):
+            return request.resolvedAt ?? request.createdAt
+        }
+    }
     
     var title: String {
         switch self {
@@ -27,7 +35,7 @@ enum SupportHistoryItem: Identifiable, Hashable {
     
     var message: String {
         switch self {
-        case .ticket(let ticket): return ticket.message
+        case .ticket(let ticket): return ticket.latestPreviewMessage
         case .accessRequest(let request): return request.message
         }
     }

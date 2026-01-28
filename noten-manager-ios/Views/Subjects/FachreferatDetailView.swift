@@ -51,6 +51,49 @@ struct FachreferatDetailView: View {
                             Spacer()
                         }
 
+                        if let pg = referat?.presentationGrade, let sg = referat?.paperGrade, let w = referat?.presentationWeight {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Zusammensetzung")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .textCase(.uppercase)
+                                HStack(spacing: 0) {
+                                    VStack(alignment: .leading) {
+                                        Text("Vortrag")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Text(formatGrade(pg))
+                                            .font(.headline)
+                                        Text("\(Int(w * 100))%")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .padding(.top, 2)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    
+                                    Divider()
+                                        .frame(height: 30)
+                                    
+                                    VStack(alignment: .leading) {
+                                        Text("Schriftlich")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Text(formatGrade(sg))
+                                            .font(.headline)
+                                        Text("\(Int((1 - w) * 100))%")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .padding(.top, 2)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.leading, 12)
+                                }
+                                .padding(12)
+                                .background(Color.secondary.opacity(0.06))
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            }
+                        }
+
                         if let subjectName = referat?.subjectName, !subjectName.isEmpty {
                             Label(subjectName, systemImage: "text.book.closed")
                                 .font(.subheadline.weight(.semibold))

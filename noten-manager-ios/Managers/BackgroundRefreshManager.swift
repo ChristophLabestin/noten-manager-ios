@@ -365,9 +365,7 @@ enum BackgroundRefreshManager {
         let upcoming = allSnapshotExams.filter { exam in
             guard exam.hasTime, !exam.isCompleted else { return false }
             let delta = exam.date.timeIntervalSince(now)
-            // Use 95 minutes window to account for the ~2 minute scheduling buffer.
-            // This ensures that if the background task fires at 92 minutes, it will still start the activity.
-            return delta > 0 && delta <= (liveActivityLeadTime + 300)
+            return delta > 0 && delta <= liveActivityLeadTime
         }
         guard !Task.isCancelled else { return false }
         await syncLiveActivitiesOnMain(for: upcoming)

@@ -36,19 +36,17 @@ struct FancyCoverView: View {
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                // Background: Static High-Quality Gradient (Performance Fix)
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color(hex: "#0f172a"),
-                        Color(hex: "#1e293b")
-                    ]),
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
+                // Background: Dynamic App Theme
+                ThemedBackground(
+                    isDark: store.darkMode,
+                    isFeminine: store.theme == "feminine",
+                    intensity: store.themeBackgroundIntensity
                 )
-                .ignoresSafeArea()
                 
-                // Subtle overlay
-                Color.black.opacity(0.2).ignoresSafeArea()
+                // Subtle overlay for depth (optional, reduced for light mode)
+                if store.darkMode {
+                    Color.black.opacity(0.2).ignoresSafeArea()
+                }
                 
                 VStack(spacing: 0) {
                     // Privacy Toggle
@@ -89,7 +87,7 @@ struct FancyCoverView: View {
                         } label: {
                             Image(systemName: store.isPrivacyModeActive ? "eye.slash.fill" : "eye.fill")
                                 .font(.system(size: 20, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.8))
+                                .foregroundStyle(.primary.opacity(0.8))
                                 .padding(12)
                                 .background(Circle().fill(.ultraThinMaterial))
                         }
@@ -104,11 +102,11 @@ struct FancyCoverView: View {
                     VStack(spacing: 12) {
                         Text("Dein aktueller Stand")
                             .font(.title3.weight(.medium))
-                            .foregroundStyle(.white.opacity(0.7))
+                            .foregroundStyle(.secondary)
                         
                         Text(store.isPrivacyModeActive ? "***" : grade1to6)
                             .font(.title.weight(.bold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                             .padding(.horizontal, 20)
                             .padding(.vertical, 8)
                             .background(
@@ -133,7 +131,7 @@ struct FancyCoverView: View {
                     VStack(spacing: 12) {
                         Image(systemName: "chevron.compact.up")
                             .font(.system(size: 32, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(.secondary)
                             .offset(y: showSwipeHint ? -10 : 0)
                             .animation(
                                 .easeInOut(duration: 1.5).repeatForever(autoreverses: true),
@@ -142,7 +140,7 @@ struct FancyCoverView: View {
                         
                         Text("Hochwischen für Details")
                             .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(.secondary)
                     }
                     .padding(.bottom, 60)
                     .opacity(animateSpeedometer ? 1 : 0)

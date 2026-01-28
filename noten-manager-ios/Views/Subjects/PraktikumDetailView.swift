@@ -240,6 +240,20 @@ struct PraktikumDetailView: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
+                    
+                    // FOBOSO Breakdown
+                    if let g = entry.guidanceGrade, let d = entry.deepeningGrade, let a = entry.activityGrade {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Zusammensetzung:")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Text("Anl: \(String(format: "%.0f", g)) • Vert: \(String(format: "%.0f", d)) • Tät: \(String(format: "%.0f", a)) (x2)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                    
                     Label(dateFormatter.string(from: entry.date), systemImage: "calendar")
                         .font(.caption)
                         .foregroundStyle(.secondary)

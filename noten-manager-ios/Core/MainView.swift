@@ -444,6 +444,9 @@ struct MainView: View {
         //    Either explicitly manual, or no internet + allowed offline login
         //    IMPORTANT: We check isManualOfflinePinned instead of isOfflineModeActive,
         //    because step 1 (loadOfflineSnapshot) sets isOfflineModeActive = true as a side effect.
+        if !offlineManager.isManualOfflinePinned && !offlineManager.isOnline {
+            try? await Task.sleep(nanoseconds: 600_000_000)
+        }
         var shouldStayOffline = offlineManager.isManualOfflinePinned
         
         if !shouldStayOffline && !offlineManager.isOnline {
@@ -1638,4 +1641,3 @@ struct LegacyMigrationPromptView: View {
         Color.black.opacity(colorScheme == .dark ? 0.38 : 0.16)
     }
 }
-

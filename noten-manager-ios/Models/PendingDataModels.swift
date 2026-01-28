@@ -19,6 +19,9 @@ struct PendingFachreferat: Codable {
     let date: Date
     let note: String?
     let createdAt: Date
+    let presentationGrade: Double?
+    let paperGrade: Double?
+    let presentationWeight: Double?
 }
 
 struct PendingSeminarPerformance: Codable {

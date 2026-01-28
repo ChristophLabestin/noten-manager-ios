@@ -102,6 +102,7 @@ struct SetFixedAverageView: View {
             .background(ThemedBackground(isDark: isDarkMode, isFeminine: appTheme == "feminine", intensity: backgroundIntensity))
             .navigationTitle("Schnitt anpassen")
             .navigationBarTitleDisplayMode(.inline)
+            .keyboardDismissToolbar()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button {

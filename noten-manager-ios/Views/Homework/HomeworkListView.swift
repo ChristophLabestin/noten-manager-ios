@@ -14,6 +14,7 @@ struct HomeworkListView: View {
     @State private var shareURL: URL? = nil
     @State private var showShareSheet: Bool = false
     @State private var shareError: String? = nil
+    @State private var homeworkToDelete: Homework? = nil
     @State private var detailHomework: Homework? = nil
     @State private var showAddHomeworkSheet: Bool = false
     private let noSubjectLabel = "Kein Fach"
@@ -83,6 +84,15 @@ struct HomeworkListView: View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                       Text("Hausaufgaben")
+                           .font(.title2.weight(.bold))
+                       Text("Gedrückt halten für weitere Optionen")
+                           .font(.subheadline)
+                           .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    
                     SettingsCard(
                         title: "Offene Hausaufgaben",
                         subtitle: "Aktuelle Aufgaben",
@@ -179,6 +189,22 @@ struct HomeworkListView: View {
                 }
             } message: {
                 Text(shareError ?? "Unbekannter Fehler.")
+            }
+            .alert("Hausaufgabe löschen?", isPresented: Binding(
+                get: { homeworkToDelete != nil },
+                set: { if !$0 { homeworkToDelete = nil } }
+            )) {
+                Button("Löschen", role: .destructive) {
+                    if let hw = homeworkToDelete {
+                        Task {
+                            await store.deleteHomework(hw)
+                            homeworkToDelete = nil
+                        }
+                    }
+                }
+                Button("Abbrechen", role: .cancel) {}
+            } message: {
+                Text("Bist du sicher? Dies kann nicht widerrufen werden.")
             }
             .sheet(isPresented: $showAddHomeworkSheet) {
                 NavigationStack {
@@ -331,6 +357,14 @@ struct HomeworkListView: View {
                  Task { await treatedCompleted ? markNotCompleted(hw) : markCompleted(hw) }
              } label: {
                  Label(treatedCompleted ? "Als offen markieren" : "Erledigen", systemImage: treatedCompleted ? "arrow.uturn.backward" : "checkmark")
+             }
+             
+             Divider()
+             
+             Button(role: .destructive) {
+                 homeworkToDelete = hw
+             } label: {
+                 Label("Löschen", systemImage: "trash")
              }
         }
     }

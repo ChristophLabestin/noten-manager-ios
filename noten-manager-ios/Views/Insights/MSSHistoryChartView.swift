@@ -17,6 +17,7 @@ struct MSSHistoryChartView: View {
     @State private var dataPoints: [MSSHistoryChartDataPoint] = []
     @State private var isLoading: Bool = true
     @Binding var includeDroppedHalfYears: Bool
+    @Binding var selectedHalfYear: Int // 0: Alle, 1: 1.HJ, 2: 2.HJ
 
     @State private var selectedDate: Date?
     @State private var selectedPoint: MSSHistoryChartDataPoint?
@@ -61,6 +62,9 @@ struct MSSHistoryChartView: View {
         .onChange(of: includeDroppedHalfYears) { _, _ in
             calculateHistory()
         }
+        .onChange(of: selectedHalfYear) { _, _ in
+            calculateHistory()
+        }
         .onChange(of: store.isPrivacyModeActive) { _, active in
             if active {
                 withAnimation {
@@ -98,6 +102,7 @@ struct MSSHistoryChartView: View {
     private func calculateHistory() {
         isLoading = true
         let includeDropped = includeDroppedHalfYears
+        let halfYearFilter = selectedHalfYear
         
         Task { @MainActor in
             let gradesMap = store.gradesBySubject
@@ -170,6 +175,11 @@ struct MSSHistoryChartView: View {
                 // If halfYear is nil, infer it from date so it's not excluded from calc
                 let effectiveHalfYear = event.halfYear ?? inferHalfYear(from: event.date)
 
+                // Filter by selected half year if active
+                if halfYearFilter != 0 && effectiveHalfYear != halfYearFilter {
+                    continue
+                }
+
                 // Resolve the correct subject with the effective GradingMode
                 guard var subject = subjects.first(where: { $0.name == event.subjectName }) else { continue }
                 if let mode = subjectGradingModes[subject.name] {
@@ -191,7 +201,10 @@ struct MSSHistoryChartView: View {
                         examPointsEncrypted: subject.examPointsEncrypted,
                         writtenExamPointsEncrypted: subject.writtenExamPointsEncrypted,
                         oralExamPointsEncrypted: subject.oralExamPointsEncrypted,
-                        isElective: subject.isElective
+                        isElective: subject.isElective,
+                        fixedAverageHalfYear1: subject.fixedAverageHalfYear1,
+                        fixedAverageHalfYear2: subject.fixedAverageHalfYear2,
+                        fixedAverageYearly: subject.fixedAverageYearly
                     )
                 }
 
@@ -252,7 +265,7 @@ struct MSSHistoryChartView: View {
                         if includeDropped { return nil }
                         return subj.droppedHalfYear
                     },
-                    halfYearFilter: nil,
+                    halfYearFilter: halfYearFilter == 0 ? nil : halfYearFilter,
                     fachreferat: fr,
                     seminar: sem,
                     practical: prac,
@@ -289,6 +302,8 @@ struct MSSHistoryChartView: View {
     private var content: some View {
         if isLoading {
             ProgressView()
+            headerView
+                .hidden() // Keep layout stable
                 .frame(maxWidth: .infinity, minHeight: 200)
         } else if dataPoints.isEmpty {
             Text("Keine Noten vorhanden")

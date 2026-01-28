@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased] - 2026-01-28
+
+### Added
+- **Support Conversations**: Users can view support ticket threads, see the full conversation timeline, and add new updates directly from the ticket detail.
+- **Keyboard Toolbars**: Added keyboard dismiss toolbars across all iOS input screens for consistent dismissal behavior.
+
+### Changed
+- **Support Ticket Activity**: Support history now orders by last activity (including user updates) and shows preview text for the latest message.
+
+### Fixed
+- **Exam Deletion**: Deleting exams now correctly targets class/course/group paths from both the calendar and exam list/detail views.
+- **Shared Labels**: Shared exam labels no longer append class names for branch and wahlpflicht subjects.
+- **Offline Startup**: Improved offline detection to avoid incorrect offline mode on launch and resume online when connectivity is confirmed.
+
 ## [Unreleased] - 2026-01-26
 
 ### Added

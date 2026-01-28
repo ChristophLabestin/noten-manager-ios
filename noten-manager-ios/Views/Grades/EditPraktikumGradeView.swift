@@ -12,11 +12,17 @@ struct EditPraktikumGradeView: View {
     @State private var note: String
     @State private var halfYear: Int
     @State private var date: Date
+    
+    @State private var useSubGrades: Bool
+    @State private var guidanceGradeText: String
+    @State private var deepeningGradeText: String
+    @State private var activityGradeText: String
+    
     @State private var isSaving: Bool = false
     @State private var error: String?
     @FocusState private var focusedField: Field?
 
-    private enum Field: Hashable { case grade, company, note }
+    private enum Field: Hashable { case grade, company, note, guidance, deepening, activity }
 
     init(entry: PracticalGradeEntry) {
         self.entry = entry
@@ -25,14 +31,41 @@ struct EditPraktikumGradeView: View {
         _note = State(initialValue: entry.note ?? "")
         _halfYear = State(initialValue: entry.halfYear ?? 1)
         _date = State(initialValue: entry.date)
+        
+        // FOS 11
+        let hasSub = entry.guidanceGrade != nil || entry.deepeningGrade != nil || entry.activityGrade != nil
+        _useSubGrades = State(initialValue: hasSub)
+        _guidanceGradeText = State(initialValue: entry.guidanceGrade.map { String(format: "%.0f", $0) } ?? "")
+        _deepeningGradeText = State(initialValue: entry.deepeningGrade.map { String(format: "%.0f", $0) } ?? "")
+        _activityGradeText = State(initialValue: entry.activityGrade.map { String(format: "%.0f", $0) } ?? "")
     }
 
     private var parsedGrade: Double? {
-        Double(
+        if useSubGrades {
+            return calculatedAverage
+        }
+        return Double(
             gradeText
                 .replacingOccurrences(of: ",", with: ".")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         )
+    }
+
+    private var parsedGuidance: Double? {
+        Double(guidanceGradeText.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+    
+    private var parsedDeepening: Double? {
+        Double(deepeningGradeText.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+    
+    private var parsedActivity: Double? {
+        Double(activityGradeText.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+    
+    private var calculatedAverage: Double? {
+        guard let g = parsedGuidance, let d = parsedDeepening, let a = parsedActivity else { return nil }
+        return (g + d + (2 * a)) / 4.0
     }
 
     private var canSave: Bool {
@@ -55,16 +88,97 @@ struct EditPraktikumGradeView: View {
                         VStack(alignment: .leading, spacing: 12) {
                             SettingsSectionBox {
                                 VStack(alignment: .leading, spacing: 10) {
-                                    Text("Punkte (0–15)")
-                                        .font(.headline)
-                                    TextField("z. B. 12,0", text: $gradeText)
-                                        .keyboardType(.decimalPad)
-                                        .submitLabel(.next)
-                                        .focused($focusedField, equals: .grade)
-                                        .onSubmit { focusedField = .company }
-                                        .padding(12)
-                                        .background(Color.formInputBackground)
-                                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    Toggle("Einzelnoten (FOBOSO)", isOn: $useSubGrades.animation())
+                                        .tint(.orange)
+                                    
+                                    if useSubGrades {
+                                        Divider()
+                                        
+                                        // Guidance
+                                        VStack(alignment: .leading, spacing: 6) {
+                                            HStack {
+                                                Text("Anleitung") // Praktische Anleitung
+                                                Spacer()
+                                                if let g = parsedGuidance {
+                                                    Text(String(format: "%.0f Pkt", g)).foregroundStyle(.secondary).font(.caption)
+                                                }
+                                            }
+                                            .font(.subheadline)
+                                            
+                                            TextField("Punkte (Schule)", text: $guidanceGradeText)
+                                                .keyboardType(.decimalPad)
+                                                .focused($focusedField, equals: .guidance)
+                                                .padding(10)
+                                                .background(Color.formInputBackground)
+                                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                        }
+                                        
+                                        // Deepening
+                                        VStack(alignment: .leading, spacing: 6) {
+                                            HStack {
+                                                Text("Vertiefung") // Praktische Vertiefung
+                                                Spacer()
+                                                if let d = parsedDeepening {
+                                                    Text(String(format: "%.0f Pkt", d)).foregroundStyle(.secondary).font(.caption)
+                                                }
+                                            }
+                                            .font(.subheadline)
+                                            
+                                            TextField("Punkte (Schule)", text: $deepeningGradeText)
+                                                .keyboardType(.decimalPad)
+                                                .focused($focusedField, equals: .deepening)
+                                                .padding(10)
+                                                .background(Color.formInputBackground)
+                                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                        }
+                                        
+                                        // Activity
+                                        VStack(alignment: .leading, spacing: 6) {
+                                            HStack {
+                                                Text("Tätigkeit (x2)") // Praktische Tätigkeit
+                                                Spacer()
+                                                if let a = parsedActivity {
+                                                    Text(String(format: "%.0f Pkt (zählt doppelt)", a)).foregroundStyle(.secondary).font(.caption)
+                                                }
+                                            }
+                                            .font(.subheadline)
+                                            
+                                            TextField("Punkte (Betrieb)", text: $activityGradeText)
+                                                .keyboardType(.decimalPad)
+                                                .focused($focusedField, equals: .activity)
+                                                .padding(10)
+                                                .background(Color.formInputBackground)
+                                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                        }
+                                        
+                                        Divider()
+                                        
+                                        HStack {
+                                            Text("Berechnete Note")
+                                                .font(.headline)
+                                            Spacer()
+                                            if let avg = calculatedAverage {
+                                                Text(String(format: "%.2f", avg))
+                                                    .font(.title3.weight(.bold))
+                                                    .monospacedDigit()
+                                                    .foregroundStyle(.orange)
+                                            } else {
+                                                Text("–")
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                        }
+                                    } else {
+                                        Text("Punkte (0–15)")
+                                            .font(.headline)
+                                        TextField("z. B. 12,0", text: $gradeText)
+                                            .keyboardType(.decimalPad)
+                                            .submitLabel(.next)
+                                            .focused($focusedField, equals: .grade)
+                                            .onSubmit { focusedField = .company }
+                                            .padding(12)
+                                            .background(Color.formInputBackground)
+                                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    }
                                 }
                             }
 
@@ -158,6 +272,7 @@ struct EditPraktikumGradeView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
+            .keyboardDismissToolbar()
         }
     }
 
@@ -177,6 +292,9 @@ struct EditPraktikumGradeView: View {
                 note: trimmedNote.isEmpty ? nil : trimmedNote,
                 company: trimmedCompany.isEmpty ? nil : trimmedCompany,
                 date: date,
+                guidanceGrade: useSubGrades ? parsedGuidance : nil,
+                deepeningGrade: useSubGrades ? parsedDeepening : nil,
+                activityGrade: useSubGrades ? parsedActivity : nil,
                 using: key
             )
             dismiss()

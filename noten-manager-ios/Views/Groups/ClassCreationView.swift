@@ -31,10 +31,11 @@ struct ClassCreationView: View {
     @State private var isCreating: Bool = false
     @State private var errorMessage: String?
     
-    // Subject Mapping after creation
-    @State private var showSubjectMapping: Bool = false
+    // Course Selection after creation
+    @State private var showCourseSelection: Bool = false
     @State private var createdClassId: String?
-    @State private var joinedCourses: [Course] = []
+    @State private var createdClassName: String = ""
+    @State private var createdConfig: ClassConfiguration?
     
     private var isFeminine: Bool { store.theme == "feminine" }
     private var isDark: Bool { store.darkMode }
@@ -211,6 +212,7 @@ struct ClassCreationView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .background(ThemedBackground(isDark: isDark, isFeminine: isFeminine, intensity: store.themeBackgroundIntensity))
+            .keyboardDismissToolbar()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button { dismiss() } label: {
@@ -221,12 +223,19 @@ struct ClassCreationView: View {
                 }
             }
         }
-        .sheet(isPresented: $showSubjectMapping, onDismiss: {
-            dismiss()
-        }) {
+        .sheet(isPresented: $showCourseSelection) {
             if let classId = createdClassId {
-                SubjectMappingView(classId: classId, courses: joinedCourses)
-                    .environmentObject(store)
+                CourseJoinView(
+                    classId: classId,
+                    className: createdClassName,
+                    config: createdConfig,
+                    linkedClassIds: [],
+                    onJoinSuccess: {
+                        showCourseSelection = false
+                        dismiss()
+                    }
+                )
+                .environmentObject(store)
             }
         }
     }
@@ -280,15 +289,13 @@ struct ClassCreationView: View {
             let generator = UINotificationFeedbackGenerator()
             generator.notificationOccurred(.success)
             
-            // Check for missing subject mappings (should be none for new class, but good to keep)
-            let missing = store.missingSubjects(for: classId)
-            if !missing.isEmpty {
-                self.createdClassId = classId
-                self.joinedCourses = missing
-                self.showSubjectMapping = true
-            } else {
-                dismiss()
-            }
+            self.createdClassId = classId
+            self.createdClassName = name
+            self.createdConfig = ClassConfiguration(
+                branches: branches.map { ClassConfiguration.Branch(name: $0.name) },
+                wahlpflichtfaecher: electives.map { ClassConfiguration.WahlpflichtfachConfig(name: $0.name, subjects: $0.subjects.map { $0.name }) }
+            )
+            self.showCourseSelection = true
         } catch {
             errorMessage = error.localizedDescription
             let generator = UINotificationFeedbackGenerator()
@@ -450,4 +457,3 @@ struct SubjectCreationRow: View {
         )
     }
 }
-

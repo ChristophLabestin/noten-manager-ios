@@ -261,6 +261,7 @@ struct HelpCenterView: View {
             }
             .coordinateSpace(name: "help_scroll")
             .scrollDismissesKeyboard(.interactively)
+            .keyboardDismissToolbar()
             .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
                 .onAppear {
                     if contactEmail.isEmpty {

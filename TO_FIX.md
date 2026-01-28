@@ -34,6 +34,8 @@
 - [ ] [ ] Android App has bugs:
     - [ ] [ ] When I open the App it crashes immediately
 - [ ] [ ] Fix remaining warnings.
+- [x] [ ] Beim Löschen einer Klasse gehen migrierte Alt-Gruppen-Termine verloren.
+    - Comment: Beim Löschen werden Exams/Homeworks mit `migratedFromGroup` aus den Klassenkursen zurück in `groups/{id}/exams` bzw. `groups/{id}/homeworks` gespiegelt, bevor die Klasse gelöscht wird.
 
 ##Adaptions
 - [ ] [ ] in the MSS calculation sheet on the homeview the user should be able to click on the individual subject and see the calculation for each subject
@@ -48,6 +50,10 @@
 
 - [ ] [ ] add button in the classdetailview should be updated to allow to add a branch or link a class
     - Comment: I'm not happy with the current implementation. I think it should be a sheet that allows to select a branch, add a course to a branch, or link a class. 
+- [x] [ ] ClassEditView soll optisch und funktional wie ClassCreationView wirken.
+    - Comment: Edit-Ansicht verwendet jetzt dieselben Karten/Rows (Fächer/Zweige/Wahlpflicht) inkl. SA-Toggles, Hinzufügen/Löschen und Branch-/WP-Handling.
+- [x] [ ] Nach dem Erstellen einer Klasse werden Zweige/Wahlpflichtfächer fälschlich vorselektiert und erfordern sofortiges Mapping.
+    - Comment: Statt direktem Mapping wird jetzt die Kursauswahl (CourseJoinView) angezeigt; Subscriptions werden erst nach Auswahl gesetzt.
 
 ##Feature Ideas and Tentative Upgrades for next Version
 - [ ] a weekly summary that shows the grade development of the week and summarizes what happend this week. 

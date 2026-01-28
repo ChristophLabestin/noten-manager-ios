@@ -13,11 +13,11 @@ struct SpeedometerView: View {
     
     var body: some View {
         ZStack {
-            // 1. Background Track (Clean, dark grey/translucent)
+            // 1. Background Track (Clean, standard/translucent)
             Circle()
                 .trim(from: 0, to: 0.75) // 270 degrees
                 .stroke(
-                    Color.white.opacity(0.1),
+                    Color.primary.opacity(0.1),
                     style: StrokeStyle(lineWidth: 22, lineCap: .round)
                 )
                 .rotationEffect(.degrees(135))
@@ -39,7 +39,7 @@ struct SpeedometerView: View {
                 if isPrivacyMode {
                     Image(systemName: "eye.slash.fill")
                         .font(.system(size: 60))
-                        .foregroundStyle(.white.opacity(0.3))
+                        .foregroundStyle(.primary.opacity(0.3))
                 } else {
                     Text(String(format: "%.2f", displayScore))
                         .font(.system(size: 80, weight: .bold, design: .rounded))
@@ -51,7 +51,7 @@ struct SpeedometerView: View {
                 
                 Text(isPrivacyMode ? "VERBORGEN" : "PUNKTE")
                     .font(.system(size: 14, weight: .bold, design: .default))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.primary.opacity(0.5))
                     .tracking(2)
                     .padding(.top, 4)
             }

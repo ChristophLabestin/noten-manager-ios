@@ -72,6 +72,9 @@ struct EditGradeView: View {
         switch weightChoice {
         case .preset(let value):
             if value == 3 { return "Fachreferat" }
+            if let match = weightOptions().first(where: { $0.value == value && $0.type == assessmentType }) {
+                return match.title
+            }
             if let match = weightOptions().first(where: { $0.value == value }) {
                 return match.title
             }

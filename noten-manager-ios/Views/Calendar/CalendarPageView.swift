@@ -605,13 +605,7 @@ struct CalendarPageView: View {
     }
     
     private func deleteExamConfirmed(_ exam: Exam) async {
-        if exam.isShared {
-            if let gid = exam.groupId {
-                await store.deleteSharedExamFromGroup(groupId: gid, id: exam.id)
-            }
-        } else {
-            await store.deleteExamFromFirestore(id: exam.id)
-        }
+        await store.deleteExam(exam)
     }
     
     private func presentShareLink(for exam: Exam) {

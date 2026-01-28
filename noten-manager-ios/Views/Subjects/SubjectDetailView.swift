@@ -159,13 +159,13 @@ struct SubjectDetailView: View {
         return String(format: "%.2f", value)
     }
     
-    private func averageForSubject() -> Double? {
-        if let vYear = activeSubject.fixedAverageYearly, halfYear == .all {
+    private func averageForSubject(filter: HalfYearFilter = .all) -> Double? {
+        if let vYear = activeSubject.fixedAverageYearly, filter == .all {
             return vYear
         }
     
         let droppedHalf = activeSubject.droppedHalfYear
-        switch halfYear {
+        switch filter {
         case .all:
             let v1 = droppedHalf == 1 ? nil : store.bestAvailableHalfYearValue(subject: activeSubject, halfYear: 1)
             let v2 = droppedHalf == 2 ? nil : store.bestAvailableHalfYearValue(subject: activeSubject, halfYear: 2)
@@ -320,21 +320,19 @@ struct SubjectDetailView: View {
         ) {
             VStack(alignment: .leading, spacing: 12) {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                    if halfYear == .all {
-                        let halfYears = Set(allGrades.compactMap { $0.halfYear })
-                        if halfYears.count == 1, let onlyHalf = halfYears.first {
-                            let comp = store.computeHalfYearFoboso(subject: activeSubject, halfYear: onlyHalf)
-                            let value = fobosoValueText(comp, subject: activeSubject, halfYear: onlyHalf)
-                            StatChip(title: "\(onlyHalf). Hj", value: value, accent: .teal)
-                        } else {
-                            let avg = averageForSubject()
-                            StatChip(title: "Gesamt", value: formatAverage(avg), accent: .indigo)
-                        }
+                    
+                    // Always show "Gesamt" or the single smart half year
+                    let halfYears = Set(allGrades.compactMap { $0.halfYear })
+                    if halfYears.count == 1, let onlyHalf = halfYears.first {
+                        let comp = store.computeHalfYearFoboso(subject: activeSubject, halfYear: onlyHalf)
+                        let value = fobosoValueText(comp, subject: activeSubject, halfYear: onlyHalf)
+                        StatChip(title: "\(onlyHalf). Hj", value: value, accent: .teal)
                     } else {
-                        let half = (halfYear == .one) ? 1 : 2
-                        let comp = store.computeHalfYearFoboso(subject: activeSubject, halfYear: half)
-                        StatChip(title: "\(half). Hj", value: fobosoValueText(comp, subject: activeSubject, halfYear: half), accent: .teal)
+                        // Pass .all specifically so this chip never changes based on filter
+                        let avg = averageForSubject(filter: .all)
+                        StatChip(title: "Gesamt", value: formatAverage(avg), accent: .indigo)
                     }
+
                     StatChip(title: "Noten", value: "\(allGrades.count)", accent: .orange)
                     StatChip(title: "Klausuren", value: "\(upcomingExamsCount)", accent: .mint)
                 }

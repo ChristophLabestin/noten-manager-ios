@@ -63,6 +63,7 @@ struct ClassCourseCreationView: View {
             }
             .navigationTitle("Neuer Kurs")
             .navigationBarTitleDisplayMode(.inline)
+            .keyboardDismissToolbar()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Abbrechen") { dismiss() }

@@ -126,6 +126,7 @@ struct AuthView: View {
                 .frame(maxWidth: .infinity)
             }
             .scrollDismissesKeyboard(.interactively)
+            .keyboardDismissToolbar()
             .scrollBounceBehavior(.basedOnSize)
         }
         .sheet(isPresented: $showResetSheet) {
@@ -544,6 +545,7 @@ struct AuthView: View {
                 }
             }
             .navigationTitle("Passwort zurücksetzen")
+            .keyboardDismissToolbar()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button {

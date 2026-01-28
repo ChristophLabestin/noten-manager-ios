@@ -52,6 +52,16 @@ struct ContentView: View {
                 if (authManager.isAuthenticated || offlineManager.isOfflineModeActive) && !authManager.isLoading {
                     if biometricRequired && !biometricUnlocked {
                         biometricLockScreen
+                    } else if authManager.isNewRegistration && !offlineManager.isOfflineModeActive {
+                        OnboardingFunnelView {
+                            authManager.isNewRegistration = false
+                        }
+                        .environmentObject(gradesStore)
+                        .environmentObject(authManager)
+                        .transition(.opacity)
+                    } else if !offlineManager.isOfflineModeActive && !gradesStore.initialSyncSettled {
+                        EnhancedLoadingScreen()
+                            .environmentObject(gradesStore)
                     } else if (authManager.isNewRegistration || gradesStore.onboardingRequired || gradesStore.legacyMigrationSummary != nil) && !offlineManager.isOfflineModeActive {
                         OnboardingFunnelView {
                             authManager.isNewRegistration = false
@@ -95,6 +105,9 @@ struct ContentView: View {
         .onAppear {
             offlineManager.startMonitoring()
             authManager.startListeningAuthState()
+            if authManager.isAuthenticated && !offlineManager.isOfflineModeActive {
+                Task { await gradesStore.startListening() }
+            }
             refreshBiometricState(triggerUnlock: true)
             Task {
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
@@ -102,13 +115,18 @@ struct ContentView: View {
             }
         }
         .onChange(of: offlineManager.isOnline) { _, online in
-            if !online {
+            if online {
+                attemptResumeOnlineIfPossible()
+            } else {
                 evaluateOfflineOffer()
             }
         }
         .onChange(of: authManager.isAuthenticated) { _, isAuth in
             if isAuth {
                 preAuthOnboardingCompleted = true
+                if !offlineManager.isOfflineModeActive {
+                    Task { await gradesStore.startListening() }
+                }
             } else {
                 // Ensure store is reset on any logout
                 gradesStore.stopListening()
@@ -213,6 +231,18 @@ struct ContentView: View {
         guard offlineSnapshotForPrompt != nil else { return }
         offlineManager.activateOfflineMode(manual: true)
         showOfflinePrompt = false
+    }
+
+    private func attemptResumeOnlineIfPossible() {
+        guard offlineManager.isOfflineModeActive else { return }
+        guard !offlineManager.isManualOfflinePinned else { return }
+        guard authManager.isAuthenticated else { return }
+        Task {
+            OfflineModeManager.shared.enableFirestoreNetworkIfNeeded()
+            await gradesStore.syncOfflinePendingChanges(forceLocalOverride: true)
+            gradesStore.leaveOfflineModePreservingState()
+            await gradesStore.startListening()
+        }
     }
 
     private var offlinePromptMessage: String {

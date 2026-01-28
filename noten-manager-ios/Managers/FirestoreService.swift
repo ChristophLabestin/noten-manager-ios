@@ -73,43 +73,78 @@ final class FirestoreService {
             .order(by: "createdAt", descending: true)
             .getDocuments()
         
-        return snap.documents.compactMap { doc in
-            let data = doc.data()
-            guard let userId = data["userId"] as? String,
-                  let subject = data["subject"] as? String,
-                  let message = data["message"] as? String,
-                  let createdAt = (data["createdAt"] as? Timestamp)?.dateValue(),
-                  let status = data["status"] as? String else {
-                return nil
-            }
-            
-            let rawReplies = data["replies"] as? [[String: Any]] ?? []
-            let replies: [SupportReply] = rawReplies.compactMap { r in
-                guard let rMsg = r["message"] as? String,
-                      let rDate = (r["createdAt"] as? Timestamp)?.dateValue(),
-                      let rAdminId = r["adminId"] as? String,
-                      let rAdminEmail = r["adminEmail"] as? String else {
-                    return nil
-                }
-                return SupportReply(message: rMsg, createdAt: rDate, adminId: rAdminId, adminEmail: rAdminEmail)
-            }
-            
-            return SupportTicket(
-                id: doc.documentID,
-                userId: userId,
-                email: data["email"] as? String,
-                subject: subject,
-                message: message,
-                createdAt: createdAt,
-                status: status,
-                replies: replies.isEmpty ? nil : replies
-            )
-        }
+        return snap.documents.compactMap { parseSupportTicket(from: $0) }
+    }
+
+    func getSupportTicket(ticketId: String, userId: String? = nil) async throws -> SupportTicket? {
+        let doc = try await db.collection("supportTickets").document(ticketId).getDocument()
+        guard let ticket = parseSupportTicket(from: doc) else { return nil }
+        if let userId, ticket.userId != userId { return nil }
+        return ticket
+    }
+
+    func addSupportTicketUpdate(ticketId: String, userId: String, message: String) async throws {
+        let now = Timestamp(date: Date())
+        let update: [String: Any] = [
+            "message": message,
+            "createdAt": now,
+            "userId": userId
+        ]
+        try await db.collection("supportTickets").document(ticketId).setData([
+            "userUpdates": FieldValue.arrayUnion([update]),
+            "status": "open",
+            "updatedAt": now,
+            "lastUserUpdateAt": now,
+            "lastUserUpdateUserId": userId
+        ], merge: true)
     }
 
     func createAnonymousErrorLog(payload: AnonymousErrorLogPayload) {
         let data = payload.firestoreData()
         _ = db.collection("anonymousErrorLogs").addDocument(data: data)
+    }
+
+    private func parseSupportTicket(from doc: DocumentSnapshot) -> SupportTicket? {
+        let data = doc.data() ?? [:]
+        guard let userId = data["userId"] as? String,
+              let subject = data["subject"] as? String,
+              let message = data["message"] as? String,
+              let createdAt = (data["createdAt"] as? Timestamp)?.dateValue(),
+              let status = data["status"] as? String else {
+            return nil
+        }
+        
+        let rawReplies = data["replies"] as? [[String: Any]] ?? []
+        let replies: [SupportReply] = rawReplies.compactMap { r in
+            guard let rMsg = r["message"] as? String,
+                  let rDate = (r["createdAt"] as? Timestamp)?.dateValue(),
+                  let rAdminId = r["adminId"] as? String,
+                  let rAdminEmail = r["adminEmail"] as? String else {
+                return nil
+            }
+            return SupportReply(message: rMsg, createdAt: rDate, adminId: rAdminId, adminEmail: rAdminEmail)
+        }
+        
+        let rawUserUpdates = data["userUpdates"] as? [[String: Any]] ?? []
+        let userUpdates: [SupportUserUpdate] = rawUserUpdates.compactMap { u in
+            guard let uMsg = u["message"] as? String,
+                  let uDate = (u["createdAt"] as? Timestamp)?.dateValue() else {
+                return nil
+            }
+            return SupportUserUpdate(message: uMsg, createdAt: uDate, userId: u["userId"] as? String)
+        }
+        
+        return SupportTicket(
+            id: doc.documentID,
+            userId: userId,
+            email: data["email"] as? String,
+            subject: subject,
+            message: message,
+            createdAt: createdAt,
+            status: status,
+            replies: replies.isEmpty ? nil : replies,
+            userUpdates: userUpdates.isEmpty ? nil : userUpdates
+        )
     }
 
     // MARK: - Support Access

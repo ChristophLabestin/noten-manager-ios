@@ -49,8 +49,7 @@ enum ExamLiveActivityManager {
                 activityMap[activity.attributes.examId] = nil
                 continue
             }
-            // Be slightly more permissive (95 mins) to match BackgroundRefreshManager scheduling logic.
-            if exam.date <= now || exam.date.timeIntervalSince(now) > (leadTime + 300) {
+            if exam.date <= now || exam.date.timeIntervalSince(now) > leadTime {
                 cancelAutoEnd(for: activity.id)
                 cancelPushTokenTask(for: activity.id)
                 await end(activity)
@@ -61,7 +60,7 @@ enum ExamLiveActivityManager {
             await activity.update(content)
         }
 
-        for exam in relevant where exam.date > now && exam.date.timeIntervalSince(now) <= (leadTime + 300) {
+        for exam in relevant where exam.date > now && exam.date.timeIntervalSince(now) <= leadTime {
             if activityMap[exam.id] != nil { continue }
             await start(for: exam)
         }

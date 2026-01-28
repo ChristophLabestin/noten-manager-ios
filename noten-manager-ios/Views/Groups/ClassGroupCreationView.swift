@@ -69,6 +69,7 @@ struct ClassGroupCreationView: View {
             }
             .navigationTitle("Gruppe erstellen")
             .navigationBarTitleDisplayMode(.inline)
+            .keyboardDismissToolbar()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button {

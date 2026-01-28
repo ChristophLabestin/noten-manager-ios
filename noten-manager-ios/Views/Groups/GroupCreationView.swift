@@ -225,6 +225,7 @@ struct GroupCreationView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .background(ThemedBackground(isDark: isDark, isFeminine: isFeminine, intensity: store.themeBackgroundIntensity))
+            .keyboardDismissToolbar()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button {
@@ -290,5 +291,4 @@ struct GroupCreationView: View {
         generator.impactOccurred()
     }
 }
-
 

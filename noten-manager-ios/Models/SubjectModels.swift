@@ -200,6 +200,9 @@ struct EncryptedFachreferat: Codable {
     let subjectName: String
     let date: Date
     let note: String?
+    let presentationGrade: String?
+    let paperGrade: String?
+    let presentationWeight: Double?
 }
 
 struct Fachreferat: Codable, Identifiable {
@@ -208,6 +211,9 @@ struct Fachreferat: Codable, Identifiable {
     let subjectName: String
     let date: Date
     let note: String?
+    let presentationGrade: Double?
+    let paperGrade: Double?
+    let presentationWeight: Double?
 }
 
 struct SeminarPerformance: Codable, Identifiable, Equatable {
@@ -229,6 +235,10 @@ struct PracticalGradeEntry: Codable, Identifiable, Equatable {
     let note: String?
     let halfYear: Int?
     let date: Date
+    // FOS 11 FOBOSO Components
+    let guidanceGrade: Double?    // Praktische Anleitung (1x)
+    let deepeningGrade: Double?   // Praktische Vertiefung (1x)
+    let activityGrade: Double?    // Praktische Tätigkeit (2x)
 }
 
 struct PracticalPerformance: Codable, Identifiable, Equatable {

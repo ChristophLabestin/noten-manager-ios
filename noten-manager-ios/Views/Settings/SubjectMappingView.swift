@@ -90,6 +90,7 @@ struct SubjectMappingView: View {
                 }
             }
             .background(ThemedBackground(isDark: isDark, isFeminine: isFeminine, intensity: store.themeBackgroundIntensity))
+            .keyboardDismissToolbar()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {

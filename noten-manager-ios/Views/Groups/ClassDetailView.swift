@@ -274,6 +274,10 @@ struct ClassDetailView: View {
                 for gid in linkedIds {
                     if let group = try? await store.fetchWahlpflichtfachGroupInfo(with: gid) {
                         fetched.append(group)
+                        await MainActor.run {
+                            store.wahlpflichtfachGroupNames[gid] = group.name
+                            store.wahlpflichtfachGroupOwners[gid] = group.ownerId
+                        }
                     }
                 }
                 self.linkedElectiveGroups = fetched
@@ -1129,6 +1133,7 @@ struct AddGroupByCodeSheet: View {
             }
             .background(ThemedBackground(isDark: isDark, isFeminine: isFeminine, intensity: store.themeBackgroundIntensity))
             .navigationBarTitleDisplayMode(.inline)
+            .keyboardDismissToolbar()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button { dismiss() } label: {
@@ -1277,6 +1282,7 @@ struct AddGroupsToClassSheet: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .background(ThemedBackground(isDark: isDark, isFeminine: isFeminine, intensity: store.themeBackgroundIntensity))
+            .keyboardDismissToolbar()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button { dismiss() } label: {
@@ -1384,8 +1390,14 @@ struct AddBranchSheet: View {
     let onComplete: () -> Void
     
     @State private var type: BranchType = .branch
+    struct SubjectInput: Identifiable, Hashable {
+        let id = UUID()
+        var name: String
+        var hasSchulaufgabe: Bool = true
+    }
+    
     @State private var name: String = ""
-    @State private var subjects: [String] = []
+    @State private var subjects: [SubjectInput] = []
     @State private var newSubjectText: String = ""
     @State private var isCreating: Bool = false
     @State private var errorMessage: String?
@@ -1484,25 +1496,15 @@ struct AddBranchSheet: View {
                         VStack(spacing: 12) {
                             // Subject chips
                             if !subjects.isEmpty {
-                                FlowLayout(spacing: 8) {
-                                    ForEach(subjects, id: \.self) { subject in
-                                        HStack(spacing: 4) {
-                                            Text(subject)
-                                                .font(.subheadline)
-                                            Button {
-                                                withAnimation {
-                                                    subjects.removeAll { $0 == subject }
-                                                }
-                                            } label: {
-                                                Image(systemName: "xmark.circle.fill")
-                                                    .font(.caption)
-                                                    .foregroundStyle(.secondary)
-                                            }
+                                VStack(spacing: 8) {
+                                    ForEach($subjects) { $subject in
+                                        SubjectCreationRow(
+                                            name: subject.name,
+                                            hasSA: $subject.hasSchulaufgabe,
+                                            color: type.color
+                                        ) {
+                                            subjects.removeAll { $0.id == subject.id }
                                         }
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 6)
-                                        .background(Color.blue.opacity(0.1))
-                                        .clipShape(Capsule())
                                     }
                                 }
                             }
@@ -1558,6 +1560,7 @@ struct AddBranchSheet: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .background(ThemedBackground(isDark: isDark, isFeminine: isFeminine, intensity: store.themeBackgroundIntensity))
+            .keyboardDismissToolbar()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button { dismiss() } label: {
@@ -1570,9 +1573,9 @@ struct AddBranchSheet: View {
     
     private func addSubject() {
         let trimmed = newSubjectText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty && !subjects.contains(trimmed) {
+        if !trimmed.isEmpty && !subjects.contains(where: { $0.name == trimmed }) {
             withAnimation {
-                subjects.append(trimmed)
+                subjects.append(SubjectInput(name: trimmed))
                 newSubjectText = ""
             }
         }
@@ -1585,11 +1588,12 @@ struct AddBranchSheet: View {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         
         do {
+            let subjectConfigs = subjects.map { GradesStore.ClassCreationConfiguration.SubjectConfig(name: $0.name, hasSchulaufgabe: $0.hasSchulaufgabe) }
             switch type {
             case .branch:
-                _ = try await store.addBranchToClass(classId: classId, branchName: trimmedName, subjects: subjects)
+                _ = try await store.addBranchToClass(classId: classId, branchName: trimmedName, subjects: subjectConfigs)
             case .elective:
-                _ = try await store.addWahlpflichtfachGroupToClass(classId: classId, name: trimmedName, subjects: subjects)
+                _ = try await store.addWahlpflichtfachGroupToClass(classId: classId, name: trimmedName, subjects: subjectConfigs)
             }
             
             UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -1637,6 +1641,7 @@ struct LinkClassSheet: View {
             }
             .navigationTitle("Wahlpflichtfach verknüpfen")
             .navigationBarTitleDisplayMode(.inline)
+            .keyboardDismissToolbar()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Abbrechen") { dismiss() }

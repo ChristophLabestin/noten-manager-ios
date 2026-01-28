@@ -226,6 +226,7 @@ struct AddHomeworkView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
+            .keyboardDismissToolbar()
             .onAppear {
                 applyInitialSubjectSelection()
                 // Initial update based on subject

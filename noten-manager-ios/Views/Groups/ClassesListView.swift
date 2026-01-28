@@ -118,7 +118,10 @@ struct ClassesListView: View {
                     className: ctx.name,
                     config: ctx.config,
                     linkedClassIds: ctx.linkedClassIds,
-                    onJoinSuccess: { }
+                    onJoinSuccess: {
+                        showCourseSelection = false
+                        joinContext = nil
+                    }
                 )
                 .environmentObject(store)
             }
@@ -302,6 +305,7 @@ struct ClassesListView: View {
                     memberCount: store.classDetails[cid]?.memberCount ?? 0,
                     courseCount: store.courses.filter { $0.classId == cid }.count,
                     branchCount: store.classDetails[cid]?.config?.branches?.count ?? 0,
+                    wahlpflichtCount: store.classDetails[cid]?.linkedWahlpflichtfachGroupIds?.count ?? 0,
                     onLeave: { classPendingLeave = cid },
                     onDelete: { classPendingDelete = cid },
                     onFinishSetup: {
@@ -742,6 +746,7 @@ private struct AddLegacyGroupToClassForm: View {
         }
         .background(ThemedBackground(isDark: isDark, isFeminine: isFeminine, intensity: store.themeBackgroundIntensity))
         .navigationBarTitleDisplayMode(.inline)
+        .keyboardDismissToolbar()
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button { dismiss() } label: {
@@ -786,16 +791,18 @@ private struct ClassCardView: View {
     let memberCount: Int
     let courseCount: Int
     let branchCount: Int
+    let wahlpflichtCount: Int
     let onLeave: () -> Void
     let onDelete: () -> Void
     let onFinishSetup: () -> Void
     
     @State private var showShareSheet = false
+    @State private var openClassDetail = false
     
     var body: some View {
         SettingsCard(
             title: store.classNames[classId] ?? "Unbenannte Klasse",
-            subtitle: nil,
+            subtitle: "Code \(classId)",
             systemImage: "rectangle.stack.fill",
             accent: .indigo,
             trailing: {
@@ -826,11 +833,11 @@ private struct ClassCardView: View {
                     }
                     
                     HStack(spacing: 6) {
-                        Image(systemName: "number")
+                        Image(systemName: "star.fill")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Text(classId)
-                            .font(.caption.monospaced().weight(.medium))
+                        Text("\(wahlpflichtCount) WP")
+                            .font(.caption.weight(.medium))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -878,6 +885,20 @@ private struct ClassCardView: View {
                 }
             }
         }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard courseCount > 0 else { return }
+            openClassDetail = true
+        }
+        .background(
+            NavigationLink(isActive: $openClassDetail) {
+                ClassDetailView(classId: classId)
+                    .environmentObject(store)
+            } label: {
+                EmptyView()
+            }
+            .opacity(0)
+        )
         .contextMenu {
             if isOwner {
                 Button(role: .destructive) {

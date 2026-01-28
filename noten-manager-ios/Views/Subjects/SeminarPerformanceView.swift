@@ -242,6 +242,7 @@ struct SeminarPerformanceView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
+            .keyboardDismissToolbar()
             .hideKeyboardOnTap()
             .alert("Seminarfach löschen?", isPresented: $showDeleteAlert) {
                 Button("Löschen", role: .destructive) {

@@ -107,6 +107,16 @@ struct ExamListView: View {
     @ViewBuilder
     private var listContent: some View {
         VStack(spacing: 16) {
+            // Header
+            VStack(alignment: .leading, spacing: 4) {
+               Text(sheetTitle)
+                   .font(.title2.weight(.bold))
+               Text("Gedrückt halten für weitere Optionen")
+                   .font(.subheadline)
+                   .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            
             upcomingSection
             waitingForGradeSection
             completedSection
@@ -158,7 +168,9 @@ struct ExamListView: View {
                             reminderExam = exam
                         }, onMarkCompleted: {
                             Task { await markExamCompleted(exam) }
-                        }, onUndoCompleted: nil, onTap: {
+                        }, onUndoCompleted: nil, onAddGrade: {
+                            if isFachreferatExam(exam) { fachreferatExam = exam } else { examForNewGrade = exam }
+                        }, onTap: {
                             detailExam = exam
                         }) {
                             contextMenuContent(for: exam)
@@ -210,9 +222,15 @@ struct ExamListView: View {
     private func contextMenuContent(for exam: Exam) -> some View {
         if !exam.isCompleted {
             Button {
+                editingExam = exam
+            } label: {
+                Label("Bearbeiten", systemImage: "pencil")
+            }
+            
+            Button {
                 if isFachreferatExam(exam) { fachreferatExam = exam } else { examForNewGrade = exam }
             } label: {
-                Label("Note eintragen", systemImage: "pencil")
+                Label("Note eintragen", systemImage: "graduationcap")
             }
             Button {
                 reminderExam = exam
@@ -614,23 +632,7 @@ struct ExamListView: View {
     }
 
     private func deleteExamConfirmed(_ exam: Exam) async {
-        if exam.isShared {
-            if let gid = exam.groupId {
-                if store.wahlpflichtfachGroupIds.contains(gid) {
-                    await store.deleteSharedExamFromWpGroup(wpGroupId: gid, id: exam.id)
-                } else {
-                    await store.deleteSharedExamFromGroup(groupId: gid, id: exam.id)
-                }
-            } else if let cid = exam.courseId {
-                // Course-level exams: nested path classes/{classId}/courses/{courseId}/exams
-                try? await store.deleteExamFromCourse(courseId: cid, examId: exam.id)
-            } else if let clid = exam.classId {
-                // Class-level exams: classes/{classId}/exams
-                await store.deleteSharedExamFromClass(classId: clid, id: exam.id)
-            }
-        } else {
-            await store.deleteExamFromFirestore(id: exam.id)
-        }
+        await store.deleteExam(exam)
     }
 }
 
@@ -998,23 +1000,7 @@ struct ExamDetailSheet: View {
     }
 
     private func deleteExamConfirmed() async {
-        if exam.isShared {
-            if let gid = exam.groupId {
-                if store.wahlpflichtfachGroupIds.contains(gid) {
-                    await store.deleteSharedExamFromWpGroup(wpGroupId: gid, id: exam.id)
-                } else {
-                    await store.deleteSharedExamFromGroup(groupId: gid, id: exam.id)
-                }
-            } else if let cid = exam.courseId {
-                // Course-level exams: nested path classes/{classId}/courses/{courseId}/exams
-                try? await store.deleteExamFromCourse(courseId: cid, examId: exam.id)
-            } else if let clid = exam.classId {
-                // Class-level exams: classes/{classId}/exams
-                await store.deleteSharedExamFromClass(classId: clid, id: exam.id)
-            }
-        } else {
-            await store.deleteExamFromFirestore(id: exam.id)
-        }
+        await store.deleteExam(exam)
         dismiss()
     }
 
@@ -1294,6 +1280,7 @@ struct PersonalNoteEditor: View {
                     .frame(maxHeight: .infinity, alignment: .topLeading)
             }
             .padding(16)
+            .keyboardDismissToolbar()
             .sheetNavigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
