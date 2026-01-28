@@ -2603,6 +2603,60 @@ final class GradesStore: ObservableObject {
     private var coursesQueryResults: [Int: [Course]] = [:]
     private var coursePathById: [String: String] = [:]
 
+    private func decodeCourseDocument(_ doc: QueryDocumentSnapshot) -> Course? {
+        if let course = try? doc.data(as: Course.self) {
+            return course
+        }
+        var data = doc.data()
+        if data["name"] == nil, let legacyName = data["subjectName"] as? String {
+            data["name"] = legacyName
+        }
+        if data["id"] == nil {
+            data["id"] = doc.documentID
+            doc.reference.setData(["id": doc.documentID], merge: true)
+        }
+        return try? Firestore.Decoder().decode(Course.self, from: data)
+    }
+
+    private func parseCoursesSnapshot(_ docs: [QueryDocumentSnapshot]) -> [Course] {
+        var resultsById: [String: (Course, String)] = [:]
+        for doc in docs {
+            guard let course = decodeCourseDocument(doc) else { continue }
+            let path = doc.reference.path
+            if let existing = resultsById[course.id] {
+                if isClassCoursePath(path), !isClassCoursePath(existing.1) {
+                    resultsById[course.id] = (course, path)
+                }
+                continue
+            }
+            resultsById[course.id] = (course, path)
+        }
+        for (courseId, entry) in resultsById {
+            if shouldPreferCoursePath(existing: coursePathById[courseId], candidate: entry.1) {
+                coursePathById[courseId] = entry.1
+            }
+        }
+        return resultsById.compactMap { courseId, entry in
+            let preferredPath = coursePathById[courseId] ?? entry.1
+            return preferredPath == entry.1 ? entry.0 : nil
+        }
+    }
+
+    private func addCoursesListener(query: Query, index: Int, label: String) {
+        let listener = query.addSnapshotListener { [weak self] snap, error in
+            guard let self else { return }
+            if let error {
+                print("Courses listener error (\(label) \(index)): \(error)")
+                return
+            }
+            guard let docs = snap?.documents else { return }
+            let parsed = self.parseCoursesSnapshot(docs)
+            self.coursesQueryResults[index] = parsed
+            self.rebuildCourses()
+        }
+        coursesQueriesListeners.append(listener)
+    }
+
     private func startCoursesListener() {
         // Clear existing listeners
         coursesQueriesListeners.forEach { $0.remove() }
@@ -2623,44 +2677,12 @@ final class GradesStore: ObservableObject {
             // Fix: Use "id" field instead of FieldPath.documentID() because we are providing simple IDs, 
             // and collectionGroup+documentID requires full paths. "id" is stored on the doc.
             let query = db.collectionGroup("courses").whereField("id", in: chunk)
-            let listener = query.addSnapshotListener { [weak self] snap, error in
-                guard let self else { return }
-                if let error {
-                    print("Courses listener error (chunk \(index)): \(error)")
-                    return
-                }
-                guard let docs = snap?.documents else { return }
-                var chunkCoursesById: [String: (Course, String)] = [:]
-                for doc in docs {
-                    guard let course = try? doc.data(as: Course.self) else { continue }
-                    let path = doc.reference.path
-                    if let existing = chunkCoursesById[course.id] {
-                        let existingPath = existing.1
-                        if self.isClassCoursePath(path), !self.isClassCoursePath(existingPath) {
-                            chunkCoursesById[course.id] = (course, path)
-                        }
-                        continue
-                    }
-                    chunkCoursesById[course.id] = (course, path)
-                }
-                for (courseId, entry) in chunkCoursesById {
-                    if self.shouldPreferCoursePath(existing: self.coursePathById[courseId], candidate: entry.1) {
-                        self.coursePathById[courseId] = entry.1
-                    }
-                }
-                self.coursesQueryResults[index] = chunkCoursesById.values.map { $0.0 }
-                self.rebuildCourses()
-                
-                // Auto-Pruning: Check for stale IDs
-                // If a chunk returned fewer docs than requested, some IDs might be invalid/deleted.
-                // Note: This logic runs on every snapshot. 
-                // To be safe, we only prune if we are sure the docs missing are truly gone.
-                // In a collection group query with 'in', missing docs just aren't returned.
-                // We should collect all found IDs from all chunks and compare with `subscribedCourseIds`.
-                // However, snapshot listeners depend on chunks.
-                // Let's implement pruning in `rebuildCourses` where we have the full picture.
-            }
-            coursesQueriesListeners.append(listener)
+            addCoursesListener(query: query, index: index, label: "group")
+
+            // Legacy fallback: top-level courses without "id" field (query by document ID)
+            let legacyIndex = index + chunks.count
+            let legacyQuery = db.collection("courses").whereField(FieldPath.documentID(), in: chunk)
+            addCoursesListener(query: legacyQuery, index: legacyIndex, label: "legacy")
         }
     }
     
