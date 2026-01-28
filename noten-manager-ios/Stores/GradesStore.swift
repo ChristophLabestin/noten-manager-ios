@@ -8216,6 +8216,11 @@ final class GradesStore: ObservableObject {
         return homeworkId
     }
 
+    private func cleanupLegacySharedDoc(yearRef: DocumentReference, collection: String, legacyId: String, key: String) async {
+        guard key != legacyId else { return }
+        try? await yearRef.collection(collection).document(legacyId).delete()
+    }
+
     private func sharedExamKey(_ exam: Exam) -> String {
         if let courseId = exam.courseId, !courseId.isEmpty {
             return "course:\(courseId)|\(exam.id)"
@@ -8245,16 +8250,19 @@ final class GradesStore: ObservableObject {
         }
         let yearRef = try await requireYearRef(uid: uid)
         let gid = groupId ?? sharedExams.first(where: { $0.id == examId })?.groupId
+        let key = sharedUserKeyForExamId(examId, groupId: gid)
         let ref = yearRef
             .collection("examGroupReminders")
-            .document(sharedUserKeyForExamId(examId, groupId: gid))
+            .document(key)
 
         if let reminderAt {
             try await ref.setData([
                 "reminderAt": reminderAt
             ])
+            await cleanupLegacySharedDoc(yearRef: yearRef, collection: "examGroupReminders", legacyId: examId, key: key)
         } else {
             try await ref.delete()
+            await cleanupLegacySharedDoc(yearRef: yearRef, collection: "examGroupReminders", legacyId: examId, key: key)
         }
     }
     
@@ -8269,9 +8277,13 @@ final class GradesStore: ObservableObject {
             if let text = trimmed, !text.isEmpty {
                 try await ref.setData(["note": text])
                 sharedExamUserNotes[key] = text
+                if key != examId { sharedExamUserNotes.removeValue(forKey: examId) }
+                await cleanupLegacySharedDoc(yearRef: yearRef, collection: "examGroupNotes", legacyId: examId, key: key)
             } else {
                 try await ref.delete()
                 sharedExamUserNotes.removeValue(forKey: key)
+                if key != examId { sharedExamUserNotes.removeValue(forKey: examId) }
+                await cleanupLegacySharedDoc(yearRef: yearRef, collection: "examGroupNotes", legacyId: examId, key: key)
             }
         } catch {
             ErrorLoggingService.logErrorIfEnabled(error)
@@ -8290,9 +8302,13 @@ final class GradesStore: ObservableObject {
                 try await ref.setData(["isCompleted": true])
                 // Optimistisch lokal aktualisieren
                 sharedExamUserCompleted.insert(key)
+                if key != examId { sharedExamUserCompleted.remove(examId) }
+                await cleanupLegacySharedDoc(yearRef: yearRef, collection: "examGroupCompleted", legacyId: examId, key: key)
             } else {
                 try await ref.delete()
                 sharedExamUserCompleted.remove(key)
+                if key != examId { sharedExamUserCompleted.remove(examId) }
+                await cleanupLegacySharedDoc(yearRef: yearRef, collection: "examGroupCompleted", legacyId: examId, key: key)
             }
             applySharedExamUserCompletion()
             rescheduleLocalNotifications()
@@ -8313,9 +8329,13 @@ final class GradesStore: ObservableObject {
                 try await ref.setData(["rescheduledDate": newDate])
                 // Optimistic local update
                 sharedExamUserRescheduled[key] = newDate
+                if key != examId { sharedExamUserRescheduled.removeValue(forKey: examId) }
+                await cleanupLegacySharedDoc(yearRef: yearRef, collection: "examGroupRescheduled", legacyId: examId, key: key)
             } else {
                 try await ref.delete()
                 sharedExamUserRescheduled.removeValue(forKey: key)
+                if key != examId { sharedExamUserRescheduled.removeValue(forKey: examId) }
+                await cleanupLegacySharedDoc(yearRef: yearRef, collection: "examGroupRescheduled", legacyId: examId, key: key)
             }
             applySharedExamUserRescheduledDates()
             rescheduleLocalNotifications()
@@ -8330,11 +8350,14 @@ final class GradesStore: ObservableObject {
         }
         let yearRef = try await requireYearRef(uid: uid)
         let gid = groupId ?? sharedHomeworks.first(where: { $0.id == homeworkId })?.groupId
-        let ref = yearRef.collection("homeworkGroupReminders").document(sharedUserKeyForHomeworkId(homeworkId, groupId: gid))
+        let key = sharedUserKeyForHomeworkId(homeworkId, groupId: gid)
+        let ref = yearRef.collection("homeworkGroupReminders").document(key)
         if let reminderAt {
             try await ref.setData(["reminderAt": reminderAt])
+            await cleanupLegacySharedDoc(yearRef: yearRef, collection: "homeworkGroupReminders", legacyId: homeworkId, key: key)
         } else {
             try await ref.delete()
+            await cleanupLegacySharedDoc(yearRef: yearRef, collection: "homeworkGroupReminders", legacyId: homeworkId, key: key)
         }
     }
 
@@ -8365,9 +8388,13 @@ final class GradesStore: ObservableObject {
             if let text = trimmed, !text.isEmpty {
                 try await ref.setData(["note": text])
                 sharedHomeworkUserNotes[key] = text
+                if key != homeworkId { sharedHomeworkUserNotes.removeValue(forKey: homeworkId) }
+                await cleanupLegacySharedDoc(yearRef: yearRef, collection: "homeworkGroupNotes", legacyId: homeworkId, key: key)
             } else {
                 try await ref.delete()
                 sharedHomeworkUserNotes.removeValue(forKey: key)
+                if key != homeworkId { sharedHomeworkUserNotes.removeValue(forKey: homeworkId) }
+                await cleanupLegacySharedDoc(yearRef: yearRef, collection: "homeworkGroupNotes", legacyId: homeworkId, key: key)
             }
         } catch {
             ErrorLoggingService.logErrorIfEnabled(error)
@@ -8386,9 +8413,13 @@ final class GradesStore: ObservableObject {
                 try await ref.setData(["isCompleted": true])
                 // Optimistisch lokal aktualisieren
                 sharedHomeworkUserCompleted.insert(key)
+                if key != homeworkId { sharedHomeworkUserCompleted.remove(homeworkId) }
+                await cleanupLegacySharedDoc(yearRef: yearRef, collection: "homeworkGroupCompleted", legacyId: homeworkId, key: key)
             } else {
                 try await ref.delete()
                 sharedHomeworkUserCompleted.remove(key)
+                if key != homeworkId { sharedHomeworkUserCompleted.remove(homeworkId) }
+                await cleanupLegacySharedDoc(yearRef: yearRef, collection: "homeworkGroupCompleted", legacyId: homeworkId, key: key)
             }
             applySharedHomeworkUserCompletion()
             rescheduleLocalNotifications()
