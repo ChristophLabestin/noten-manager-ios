@@ -332,6 +332,22 @@
 
 ---
 
+### 18) Course docs missing `classId` break course content listeners (medium)
+**Issue**
+- `startCourseContentListeners` relies on `course.classId` to build the course path. If a course document lacks `classId`, the listener skips the course entirely even if the doc lives under `classes/{classId}/courses`.
+
+**Evidence**
+- Listener requires `classId` to build `classes/{classId}/courses/{courseId}`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:2917-2936`
+- Course decoding uses document fields, not path, so missing `classId` yields `nil`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:2608-2624`
+
+**Impact / likely symptoms**
+- Course exams/homeworks never load for affected courses.
+
+**Recommendation**
+- Derive `classId` from the document path when missing and backfill it to Firestore.
+
+---
+
 ## Additional Observations
 - `stopListening` does not stop course query listeners (`coursesQueriesListeners`) or course content listeners. Combined with missing cleanup of `courseExamsMap`, this can leave stale course data in memory. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:587-664, 2659-2701`
 - There are two different mapping stores: `groupMappings` (new) and `subjectMappings` (legacy). Only legacy migration copies `subjectMappings`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:166-177, 9759-9794`
