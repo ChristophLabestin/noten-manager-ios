@@ -2611,9 +2611,18 @@ final class GradesStore: ObservableObject {
         if data["name"] == nil, let legacyName = data["subjectName"] as? String {
             data["name"] = legacyName
         }
+        if data["classId"] == nil {
+            let parts = doc.reference.path.split(separator: "/")
+            if parts.count >= 4, parts[0] == "classes", parts[2] == "courses" {
+                data["classId"] = String(parts[1])
+            }
+        }
         if data["id"] == nil {
             data["id"] = doc.documentID
             doc.reference.setData(["id": doc.documentID], merge: true)
+        }
+        if let classId = data["classId"] as? String {
+            doc.reference.setData(["classId": classId], merge: true)
         }
         return try? Firestore.Decoder().decode(Course.self, from: data)
     }
