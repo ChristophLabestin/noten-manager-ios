@@ -98,6 +98,7 @@ struct AppSettingsView: View {
     @State private var maintenanceMessage: String?
     @State private var maintenanceIsError: Bool = false
     @State private var isRunningLegacyCleanup: Bool = false
+    @State private var showLegacyDeleteConfirm: Bool = false
     
     init(scrollToAccount: Bool = false, onOpenCreationMenu: @escaping () -> Void = {}) {
         self.scrollToAccount = scrollToAccount
@@ -1472,18 +1473,7 @@ struct AppSettingsView: View {
                                         .disabled(isRunningLegacyCleanup)
 
                                         Button {
-                                            guard !isRunningLegacyCleanup else { return }
-                                            isRunningLegacyCleanup = true
-                                            maintenanceMessage = nil
-                                            maintenanceIsError = false
-                                            Task {
-                                                let summary = await store.cleanupLegacyTopLevelCourses(deleteLegacy: true)
-                                                await MainActor.run {
-                                                    isRunningLegacyCleanup = false
-                                                    maintenanceMessage = "Legacy-Kurse gescannt: \(summary.scanned) · Migriert: \(summary.migrated) · Gelöscht: \(summary.deleted) · Übersprungen: \(summary.skippedMissingClassId) · Fehler: \(summary.errors)"
-                                                    maintenanceIsError = summary.errors > 0
-                                                }
-                                            }
+                                            showLegacyDeleteConfirm = true
                                         } label: {
                                             HStack {
                                                 Label("Legacy-Kurse löschen", systemImage: "trash")
@@ -1499,6 +1489,29 @@ struct AppSettingsView: View {
                                         }
                                         .buttonStyle(.plain)
                                         .disabled(isRunningLegacyCleanup)
+                                        .confirmationDialog(
+                                            "Legacy-Kurse wirklich löschen?",
+                                            isPresented: $showLegacyDeleteConfirm,
+                                            titleVisibility: .visible
+                                        ) {
+                                            Button("Löschen", role: .destructive) {
+                                                guard !isRunningLegacyCleanup else { return }
+                                                isRunningLegacyCleanup = true
+                                                maintenanceMessage = nil
+                                                maintenanceIsError = false
+                                                Task {
+                                                    let summary = await store.cleanupLegacyTopLevelCourses(deleteLegacy: true)
+                                                    await MainActor.run {
+                                                        isRunningLegacyCleanup = false
+                                                        maintenanceMessage = "Legacy-Kurse gescannt: \(summary.scanned) · Migriert: \(summary.migrated) · Gelöscht: \(summary.deleted) · Übersprungen: \(summary.skippedMissingClassId) · Fehler: \(summary.errors)"
+                                                        maintenanceIsError = summary.errors > 0
+                                                    }
+                                                }
+                                            }
+                                            Button("Abbrechen", role: .cancel) {}
+                                        } message: {
+                                            Text("Dabei werden top-level Legacy-Kurse nach erfolgreicher Migration gelöscht.")
+                                        }
 
                                         if let maintenanceMessage {
                                             Text(maintenanceMessage)
