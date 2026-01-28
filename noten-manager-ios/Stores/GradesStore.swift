@@ -673,6 +673,7 @@ final class GradesStore: ObservableObject {
         coursesQueriesListeners.forEach { $0.remove() }
         coursesQueriesListeners.removeAll()
         coursesQueryResults.removeAll()
+        coursePathById = [:]
         stopCourseContentListeners()
         courseMappingsListener?.remove()
         courseMappingsListener = nil
@@ -849,6 +850,7 @@ final class GradesStore: ObservableObject {
         courseExamsMap = [:]
         courseHomeworksMap = [:]
         courseMappings = [:]
+        coursePathById = [:]
         courseMappingsListener?.remove()
         courseMappingsListener = nil
         coursesQueriesListeners.forEach { $0.remove() }
@@ -2599,6 +2601,7 @@ final class GradesStore: ObservableObject {
 
     private var coursesQueriesListeners: [ListenerRegistration] = []
     private var coursesQueryResults: [Int: [Course]] = [:]
+    private var coursePathById: [String: String] = [:]
 
     private func startCoursesListener() {
         // Clear existing listeners
@@ -2627,7 +2630,13 @@ final class GradesStore: ObservableObject {
                     return
                 }
                 guard let docs = snap?.documents else { return }
-                let chunkCourses = docs.compactMap { try? $0.data(as: Course.self) }
+                let chunkCourses = docs.compactMap { doc -> Course? in
+                    if let course = try? doc.data(as: Course.self) {
+                        self.coursePathById[course.id] = doc.reference.path
+                        return course
+                    }
+                    return nil
+                }
                 self.coursesQueryResults[index] = chunkCourses
                 self.rebuildCourses()
                 
@@ -2649,6 +2658,10 @@ final class GradesStore: ObservableObject {
         let allCourses = coursesQueryResults.values.flatMap { $0 }
         // Sort by name or whatever default
         self.courses = allCourses.sorted { $0.name < $1.name }
+        let foundIds = Set(allCourses.map { $0.id })
+        if !coursePathById.isEmpty {
+            coursePathById = coursePathById.filter { foundIds.contains($0.key) }
+        }
         let currentIds = Set(courses.map { $0.id })
         let listenersMissing = courseExamsListeners.isEmpty && courseHomeworksListeners.isEmpty
         if currentIds != previousIds || listenersMissing {
@@ -2660,7 +2673,6 @@ final class GradesStore: ObservableObject {
         // Only run this check if we have received results for ALL chunks (to avoid premature deletion during loading).
         let totalChunks = (Double(subscribedCourseIds.count) / 30.0).rounded(.up)
         if coursesQueryResults.count == Int(totalChunks) {
-            let foundIds = Set(allCourses.map { $0.id })
             let staleIds = subscribedCourseIds.filter { !foundIds.contains($0) }
             
             if !staleIds.isEmpty {
@@ -2699,6 +2711,12 @@ final class GradesStore: ObservableObject {
         courseHomeworksMap = [:]
         rebuildSharedExams()
         rebuildSharedHomeworks()
+    }
+
+    private func isTopLevelCoursePath(courseId: String) -> Bool {
+        guard let path = coursePathById[courseId] else { return false }
+        let parts = path.split(separator: "/")
+        return parts.count == 2 && parts.first == "courses"
     }
 
     private func decodeCourseExam(from doc: QueryDocumentSnapshot, courseId: String, classId: String?) -> Exam? {
@@ -2766,10 +2784,19 @@ final class GradesStore: ObservableObject {
             // We know the course ID, but to construct the path `classes/{classId}/courses/{courseId}`, we need the classId.
             // We can get it from the `courses` cache which should be populated by `startCoursesListener`.
             guard subscribedCourseIds.contains(courseId) else { continue }
-            guard let classId = course.classId else { continue } // Can't listen if we don't know the class (shouldn't happen in new arch)
+            let classId = course.classId
+            let useTopLevel = isTopLevelCoursePath(courseId: courseId)
+            if !useTopLevel && classId == nil {
+                continue
+            }
             
             // Listen to Exams
-            let examsRef = db.collection("classes").document(classId).collection("courses").document(courseId).collection("exams")
+            let examsRef: CollectionReference
+            if useTopLevel {
+                examsRef = db.collection("courses").document(courseId).collection("exams")
+            } else {
+                examsRef = db.collection("classes").document(classId ?? "").collection("courses").document(courseId).collection("exams")
+            }
             courseExamsListeners[courseId] = examsRef.addSnapshotListener { [weak self] snap, _ in
                 guard let self, let docs = snap?.documents else { return }
                 let newExams = docs.compactMap { doc -> Exam? in
@@ -2782,7 +2809,12 @@ final class GradesStore: ObservableObject {
             }
             
             // Listen to Homework
-            let hwRef = db.collection("classes").document(classId).collection("courses").document(courseId).collection("homeworks")
+            let hwRef: CollectionReference
+            if useTopLevel {
+                hwRef = db.collection("courses").document(courseId).collection("homeworks")
+            } else {
+                hwRef = db.collection("classes").document(classId ?? "").collection("courses").document(courseId).collection("homeworks")
+            }
             courseHomeworksListeners[courseId] = hwRef.addSnapshotListener { [weak self] snap, _ in
                 guard let self, let docs = snap?.documents else { return }
                 let newHw = docs.compactMap { doc -> Homework? in
