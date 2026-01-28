@@ -237,6 +237,21 @@
 
 ---
 
+### 12b) Course subscription query skips docs missing `id` (medium)
+**Issue**
+- `startCoursesListener` uses a collectionGroup query filtered by `id`. Legacy course docs without an `id` field are never returned and may be pruned as “stale.”
+
+**Evidence**
+- Query uses `.whereField("id", in: chunk)` on `collectionGroup("courses")`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:2628-2635`
+
+**Impact / likely symptoms**
+- Courses created before the `id` field was introduced can disappear from the UI and be removed from `subscribedCourseIds`.
+
+**Recommendation**
+- Add a legacy fallback query on top-level `/courses` by `documentID`, and/or backfill `id` on those documents.
+
+---
+
 ### 13) School year list ordering likely incorrect (low/medium)
 **Issue**
 - `startSchoolYearsListener` orders by `id` field, but school year docs only set `name` + `createdAt`.
