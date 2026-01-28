@@ -2069,6 +2069,8 @@ final class GradesStore: ObservableObject {
                         let customWeight = (data["customWeight"] as? NSNumber)?.doubleValue
                         let creatorId = data["creatorId"] as? String
                         let requiresGrade = data["requiresGrade"] as? Bool
+                        let assessmentTypeRaw = data["assessmentType"] as? String
+                        let assessmentType = assessmentTypeRaw.flatMap { AssessmentType(rawValue: $0) }
                         return Exam(
                             id: doc.documentID,
                             groupId: gid,
@@ -2085,7 +2087,8 @@ final class GradesStore: ObservableObject {
                             createdAt: createdAt,
                             isShared: true,
                             creatorId: creatorId,
-                            requiresGrade: requiresGrade
+                            requiresGrade: requiresGrade,
+                            assessmentType: assessmentType
                         )
                     }
                     await MainActor.run { self.groupExamsByGroup[gid] = list }
@@ -4420,6 +4423,8 @@ final class GradesStore: ObservableObject {
                         let customWeight = (data["customWeight"] as? NSNumber)?.doubleValue
                         let creatorId = data["creatorId"] as? String
                         let requiresGrade = data["requiresGrade"] as? Bool
+                        let assessmentTypeRaw = data["assessmentType"] as? String
+                        let assessmentType = assessmentTypeRaw.flatMap { AssessmentType(rawValue: $0) }
                         return Exam(
                             id: doc.documentID,
                             groupId: gid,
@@ -4436,7 +4441,8 @@ final class GradesStore: ObservableObject {
                             createdAt: createdAt,
                             isShared: true,
                             creatorId: creatorId,
-                            requiresGrade: requiresGrade
+                            requiresGrade: requiresGrade,
+                            assessmentType: assessmentType
                         )
                     }
                     self.legacySharedExams = list
@@ -10425,6 +10431,8 @@ final class GradesStore: ObservableObject {
                     let customWeight = (data["customWeight"] as? NSNumber)?.doubleValue
                     let creatorId = data["creatorId"] as? String
                     let requiresGrade = data["requiresGrade"] as? Bool
+                    let assessmentTypeRaw = data["assessmentType"] as? String
+                    let assessmentType = assessmentTypeRaw.flatMap { AssessmentType(rawValue: $0) }
                     return Exam(
                         id: doc.documentID,
                         groupId: gid,
@@ -10441,7 +10449,8 @@ final class GradesStore: ObservableObject {
                         createdAt: createdAt,
                         isShared: true,
                         creatorId: creatorId,
-                        requiresGrade: requiresGrade
+                        requiresGrade: requiresGrade,
+                        assessmentType: assessmentType
                     )
                 }
                 self.groupExamsByGroup[gid] = list
