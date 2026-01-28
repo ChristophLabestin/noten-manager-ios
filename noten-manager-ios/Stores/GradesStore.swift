@@ -2468,6 +2468,7 @@ final class GradesStore: ObservableObject {
                     id: exam.id,
                     groupId: exam.groupId,
                     courseId: exam.courseId,
+                    classId: exam.classId,
                     subjectName: exam.subjectName,
                     subjectKey: exam.subjectKey,
                     title: exam.title,
@@ -2481,13 +2482,15 @@ final class GradesStore: ObservableObject {
                     createdAt: exam.createdAt,
                     isShared: exam.isShared,
                     creatorId: exam.creatorId,
-                    requiresGrade: exam.requiresGrade
+                    requiresGrade: exam.requiresGrade,
+                    assessmentType: exam.assessmentType
                 )
             } else {
                 return Exam(
                     id: exam.id,
                     groupId: exam.groupId,
                     courseId: exam.courseId,
+                    classId: exam.classId,
                     subjectName: exam.subjectName,
                     subjectKey: exam.subjectKey,
                     title: exam.title,
@@ -2501,7 +2504,8 @@ final class GradesStore: ObservableObject {
                     createdAt: exam.createdAt,
                     isShared: exam.isShared,
                     creatorId: exam.creatorId,
-                    requiresGrade: exam.requiresGrade
+                    requiresGrade: exam.requiresGrade,
+                    assessmentType: exam.assessmentType
                 )
             }
         }
@@ -2551,6 +2555,7 @@ final class GradesStore: ObservableObject {
                 id: exam.id,
                 groupId: exam.groupId,
                 courseId: exam.courseId,
+                classId: exam.classId,
                 subjectName: exam.subjectName,
                 subjectKey: exam.subjectKey,
                 title: exam.title,
@@ -2564,7 +2569,8 @@ final class GradesStore: ObservableObject {
                 createdAt: exam.createdAt,
                 isShared: exam.isShared,
                 creatorId: exam.creatorId,
-                requiresGrade: exam.requiresGrade
+                requiresGrade: exam.requiresGrade,
+                assessmentType: exam.assessmentType
             )
         }
     }
@@ -2579,6 +2585,7 @@ final class GradesStore: ObservableObject {
                     id: exam.id,
                     groupId: exam.groupId,
                     courseId: exam.courseId,
+                    classId: exam.classId,
                     subjectName: exam.subjectName,
                     subjectKey: exam.subjectKey,
                     title: exam.title,
@@ -2592,7 +2599,8 @@ final class GradesStore: ObservableObject {
                     createdAt: exam.createdAt,
                     isShared: exam.isShared,
                     creatorId: exam.creatorId,
-                    requiresGrade: exam.requiresGrade
+                    requiresGrade: exam.requiresGrade,
+                    assessmentType: exam.assessmentType
                 )
             }
             return exam
