@@ -28,6 +28,18 @@
 5) ✅ **Group members listener cleanup**
    - Member listeners + caches cleared in all teardown paths.
 
+6) ✅ **Shared user settings scoped by source**
+   - Per-user keys now include course/class context; legacy keys cleaned up on write/delete.
+
+7) ✅ **Wahlpflicht listener refresh on join/leave**
+   - `updateWahlpflichtfachExamsObservers()` called after membership changes.
+
+8) ✅ **Preserve shared exam metadata on user-state apply**
+   - `classId` and `assessmentType` retained when applying reminders/completion/reschedule.
+
+9) ✅ **Leave class removes legacy course subscriptions**
+   - Also removes top-level `/courses` by `classId`.
+
 ---
 
 ## Phase 2 — Align schema + write paths
@@ -51,6 +63,7 @@
    - Added opt-in helper `cleanupLegacyTopLevelCourses(deleteLegacy:)` for owner-scoped cleanup; not wired to UI.
 2) ✅ **Backfill `id` fields for course exams/homeworks**
    - Decode path now writes missing `id` back to Firestore.
+   - Course docs also backfill `classId` from path when missing.
 3) ✅ **Legacy migration gap**
    - Added `seminar` to migration + deletion.
    - Added notes/rescheduled collections to deletion list.
