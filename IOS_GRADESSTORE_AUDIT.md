@@ -363,6 +363,22 @@
 
 ---
 
+### 20) Shared exam user‑state drops `classId` + `assessmentType` (low/medium)
+**Issue**
+- When applying user reminders/completion/reschedule to shared exams, the code rebuilds `Exam` objects without preserving `classId` or `assessmentType`.
+
+**Evidence**
+- In `applySharedExamUserReminders`, `applySharedExamUserCompletion`, and `applySharedExamUserRescheduledDates`, new `Exam` instances are created without `classId` or `assessmentType`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:2466-2588`
+
+**Impact / likely symptoms**
+- Class exams can lose `classId`, causing dedup/labeling issues.
+- `assessmentType` can disappear from UI after applying user state.
+
+**Recommendation**
+- Preserve `classId` and `assessmentType` when rebuilding shared exam entries.
+
+---
+
 ## Additional Observations
 - `stopListening` does not stop course query listeners (`coursesQueriesListeners`) or course content listeners. Combined with missing cleanup of `courseExamsMap`, this can leave stale course data in memory. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:587-664, 2659-2701`
 - There are two different mapping stores: `groupMappings` (new) and `subjectMappings` (legacy). Only legacy migration copies `subjectMappings`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:166-177, 9759-9794`
