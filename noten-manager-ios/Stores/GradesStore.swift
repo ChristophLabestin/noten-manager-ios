@@ -2701,6 +2701,62 @@ final class GradesStore: ObservableObject {
         rebuildSharedExams()
         rebuildSharedHomeworks()
     }
+
+    private func decodeCourseExam(from doc: QueryDocumentSnapshot, courseId: String, classId: String?) -> Exam? {
+        let data = doc.data()
+        guard let dateTs = data["date"] as? Timestamp else { return nil }
+        let date = dateTs.dateValue()
+        let hasTimeFlag = data["hasTime"] as? Bool
+        let calendar = Calendar.current
+        let hasTime = hasTimeFlag ?? !calendar.isDate(date, equalTo: calendar.startOfDay(for: date), toGranularity: .minute)
+        let createdTs = data["createdAt"] as? Timestamp
+        let createdAt = createdTs?.dateValue() ?? Date()
+        let assessmentTypeRaw = data["assessmentType"] as? String
+        let assessmentType = assessmentTypeRaw.flatMap { AssessmentType(rawValue: $0) }
+
+        return Exam(
+            id: data["id"] as? String ?? doc.documentID,
+            groupId: data["groupId"] as? String,
+            courseId: data["courseId"] as? String ?? courseId,
+            classId: data["classId"] as? String ?? classId,
+            subjectName: data["subjectName"] as? String ?? "Termin",
+            subjectKey: data["subjectKey"] as? String,
+            title: data["title"] as? String ?? "",
+            notes: data["notes"] as? String,
+            date: date,
+            hasTime: hasTime,
+            weight: data["weight"] as? Int,
+            customWeight: (data["customWeight"] as? NSNumber)?.doubleValue,
+            reminderAt: (data["reminderAt"] as? Timestamp)?.dateValue(),
+            isCompleted: data["isCompleted"] as? Bool ?? false,
+            createdAt: createdAt,
+            isShared: data["isShared"] as? Bool ?? true,
+            creatorId: data["creatorId"] as? String,
+            requiresGrade: data["requiresGrade"] as? Bool,
+            assessmentType: assessmentType
+        )
+    }
+
+    private func decodeCourseHomework(from doc: QueryDocumentSnapshot, courseId: String) -> Homework {
+        let data = doc.data()
+        let createdTs = data["createdAt"] as? Timestamp
+        let createdAt = createdTs?.dateValue() ?? Date()
+        return Homework(
+            id: data["id"] as? String ?? doc.documentID,
+            groupId: data["groupId"] as? String,
+            courseId: data["courseId"] as? String ?? courseId,
+            subjectName: data["subjectName"] as? String ?? "",
+            subjectKey: data["subjectKey"] as? String,
+            title: data["title"] as? String ?? "",
+            dueDate: (data["dueDate"] as? Timestamp)?.dateValue(),
+            reminderAt: (data["reminderAt"] as? Timestamp)?.dateValue(),
+            isCompleted: data["isCompleted"] as? Bool ?? false,
+            createdAt: createdAt,
+            isShared: data["isShared"] as? Bool ?? true,
+            creatorId: data["creatorId"] as? String,
+            isImportedFromShare: data["importedFromShare"] as? Bool ?? false
+        )
+    }
     
     private func startCourseContentListeners() {
         stopCourseContentListeners() // Clean slate
@@ -2717,7 +2773,12 @@ final class GradesStore: ObservableObject {
             let examsRef = db.collection("classes").document(classId).collection("courses").document(courseId).collection("exams")
             courseExamsListeners[courseId] = examsRef.addSnapshotListener { [weak self] snap, _ in
                 guard let self, let docs = snap?.documents else { return }
-                let newExams = docs.compactMap { try? $0.data(as: Exam.self) }
+                let newExams = docs.compactMap { doc -> Exam? in
+                    if let decoded = try? doc.data(as: Exam.self) {
+                        return decoded
+                    }
+                    return self.decodeCourseExam(from: doc, courseId: courseId, classId: classId)
+                }
                 self.updateSharedExams(from: courseId, exams: newExams)
             }
             
@@ -2725,7 +2786,12 @@ final class GradesStore: ObservableObject {
             let hwRef = db.collection("classes").document(classId).collection("courses").document(courseId).collection("homeworks")
             courseHomeworksListeners[courseId] = hwRef.addSnapshotListener { [weak self] snap, _ in
                 guard let self, let docs = snap?.documents else { return }
-                let newHw = docs.compactMap { try? $0.data(as: Homework.self) }
+                let newHw = docs.compactMap { doc -> Homework? in
+                    if let decoded = try? doc.data(as: Homework.self) {
+                        return decoded
+                    }
+                    return self.decodeCourseHomework(from: doc, courseId: courseId)
+                }
                 self.updateSharedHomeworks(from: courseId, homeworks: newHw)
             }
         }
