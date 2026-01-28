@@ -1044,7 +1044,6 @@ final class GradesStore: ObservableObject {
     private func startSchoolYearsListener(uid: String) {
         if schoolYearsCollectionListener != nil { return }
         schoolYearsCollectionListener = db.collection("users").document(uid).collection("schoolYears")
-            .order(by: "id", descending: true)
             .addSnapshotListener { [weak self] snapshot, error in
                 ErrorLoggingService.logErrorIfEnabled(error)
                 Task { @MainActor in
