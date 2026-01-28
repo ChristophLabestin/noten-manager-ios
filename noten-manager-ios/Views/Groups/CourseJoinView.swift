@@ -46,53 +46,53 @@ struct CourseJoinView: View {
     
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 32) {
-                    // Header
-                    VStack(spacing: 12) {
-                        ZStack {
-                            Circle()
-                                .fill(accentColor.opacity(0.12))
-                                .frame(width: 80, height: 80)
-                            Image(systemName: "rectangle.stack.person.crop.fill")
-                                .font(.system(size: 36, weight: .bold))
-                                .foregroundStyle(accentColor)
+            ZStack {
+                ThemedBackground(isDark: isDark, isFeminine: isFeminine, intensity: store.themeBackgroundIntensity)
+                    .ignoresSafeArea()
+                
+                ScrollView {
+                    VStack(spacing: 32) {
+                        // Header
+                        VStack(spacing: 12) {
+                            ZStack {
+                                Circle()
+                                    .fill(accentColor.opacity(0.12))
+                                    .frame(width: 80, height: 80)
+                                Image(systemName: "rectangle.stack.person.crop.fill")
+                                    .font(.system(size: 36, weight: .bold))
+                                    .foregroundStyle(accentColor)
+                            }
+                            
+                            VStack(spacing: 4) {
+                                Text(className)
+                                    .font(.title.weight(.bold))
+                                    .multilineTextAlignment(.center)
+                                Text("Fast geschafft! Wähle deine Kurse aus.")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.center)
+                            }
                         }
+                        .padding(.top, 24)
                         
-                        VStack(spacing: 4) {
-                            Text(className)
-                                .font(.title.weight(.bold))
-                                .multilineTextAlignment(.center)
-                            Text("Fast geschafft! Wähle deine Kurse aus.")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
+                        if isLoading {
+                            VStack(spacing: 16) {
+                                ProgressView()
+                                Text("Kurse werden geladen...")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 80)
+                        } else {
+                            content
                         }
                     }
-                    .padding(.top, 24)
-                    
-                    if isLoading {
-                        VStack(spacing: 16) {
-                            ProgressView()
-                            Text("Kurse werden geladen...")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.top, 40)
-                    } else {
-                        content
-                    }
+                    .padding(20)
                 }
-                .padding(20)
             }
-            .background(ThemedBackground(isDark: isDark, isFeminine: isFeminine, intensity: store.themeBackgroundIntensity))
             .task {
                 await loadCourses()
-            }
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") { dismiss() }
-                }
             }
             .sheet(isPresented: $showSubjectMapping, onDismiss: {
                 onJoinSuccess()

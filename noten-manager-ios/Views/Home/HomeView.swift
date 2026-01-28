@@ -129,10 +129,13 @@ struct HomeView: View {
         }
         switch halfYear {
         case .one:
+            if let fixed = subject.fixedAverageHalfYear1 { return fixed }
             return halfValue(1)
         case .two:
+            if let fixed = subject.fixedAverageHalfYear2 { return fixed }
             return halfValue(2)
         case .all:
+            if let fixed = subject.fixedAverageYearly { return fixed }
             let v1 = halfValue(1)
             let v2 = halfValue(2)
             switch (v1, v2) {
@@ -668,6 +671,19 @@ struct HomeView: View {
                     Text(appointmentTitle)
                         .font(.headline)
                         .foregroundStyle(.primary)
+
+                    let sharing = {
+                        switch next {
+                        case .exam(let e): return store.resolveContextName(groupId: e.groupId, courseId: e.courseId)
+                        case .homework(let h): return store.resolveContextName(groupId: h.groupId, courseId: h.courseId)
+                        }
+                    }()
+                    
+                    if !sharing.isEmpty {
+                        Text("Geteilt mit \(sharing)")
+                            .font(.caption2)
+                            .foregroundStyle(.blue)
+                    }
                 }
                 
                 Spacer()
@@ -2528,6 +2544,9 @@ struct SubjectRowView: View {
         let droppedHalf = subject.droppedHalfYear
         switch halfYearFilter {
         case .one:
+            if let fixed = subject.fixedAverageHalfYear1 {
+                return (fixed, String(format: "%.\(store.mssDecimalPrecision)f", fixed))
+            }
             // If half-year 1 is dropped, show nil
             if droppedHalf == 1 {
                 return (nil, "–")
@@ -2535,6 +2554,9 @@ struct SubjectRowView: View {
             let value = halfValue(subject, half: 1)
             return (value, value.map { String(format: "%.\(store.mssDecimalPrecision)f", $0) } ?? "–")
         case .two:
+            if let fixed = subject.fixedAverageHalfYear2 {
+                return (fixed, String(format: "%.\(store.mssDecimalPrecision)f", fixed))
+            }
             // If half-year 2 is dropped, show nil
             if droppedHalf == 2 {
                 return (nil, "–")
@@ -2542,6 +2564,9 @@ struct SubjectRowView: View {
             let value = halfValue(subject, half: 2)
             return (value, value.map { String(format: "%.\(store.mssDecimalPrecision)f", $0) } ?? "–")
         case .all:
+            if let fixed = subject.fixedAverageYearly {
+                return (fixed, String(format: "%.\(store.mssDecimalPrecision)f", fixed))
+            }
             let v1 = droppedHalf == 1 ? nil : halfValue(subject, half: 1)
             let v2 = droppedHalf == 2 ? nil : halfValue(subject, half: 2)
             if let a = v1, let b = v2 {
@@ -2805,6 +2830,7 @@ struct SubjectGridItemView: View {
     let fachreferatSubjectName: String?
 
     private func avg(_ subject: Subject) -> Double? {
+        if let fixed = subject.fixedAverageYearly { return fixed }
         let droppedHalf = subject.droppedHalfYear
         let v1 = droppedHalf == 1 ? nil : store.bestAvailableHalfYearValue(subject: subject, halfYear: 1)
         let v2 = droppedHalf == 2 ? nil : store.bestAvailableHalfYearValue(subject: subject, halfYear: 2)

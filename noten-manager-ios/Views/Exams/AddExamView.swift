@@ -74,7 +74,7 @@ struct AddExamView: View {
             return "Sonstige Leistung"
         }
         let options = weightOptions(for: gradingMode)
-        if let match = options.first(where: { $0.value == examWeight }) {
+        if let match = options.first(where: { $0.value == examWeight && $0.type == examAssessmentType }) {
             return match.title
         }
         return "Art auswählen"
@@ -418,9 +418,7 @@ struct AddExamView: View {
                     Button {
                         dismiss()
                     } label: {
-                        Image(systemName: "xmark")
-                            .imageScale(.medium)
-                            .foregroundStyle(Color.primary)
+                        ToolbarIcon(symbol: "xmark", showDot: false)
                     }
                     .accessibilityLabel("Abbrechen")
                 }
@@ -429,11 +427,9 @@ struct AddExamView: View {
                         Task { await save() }
                     } label: {
                         if isSaving {
-                            ProgressView()
+                            ToolbarLoadingIcon()
                         } else {
-                            Image(systemName: "checkmark")
-                                .imageScale(.medium)
-                                .foregroundStyle(Color.primary)
+                            ToolbarIcon(symbol: "checkmark", showDot: false)
                         }
                     }
                     .accessibilityLabel("Speichern")
@@ -580,28 +576,31 @@ struct AddExamView: View {
             if shareWithGroup {
                 var createdAny = false
                 
-                // 1. Share to selected Courses
+                // Collect unique targets to avoid double-sharing to the same collection
+                var targetClassIds = Set(selectedClassIds)
+                var targetWpGroupIds: Set<String> = []
+                var targetSocialGroupIds = Set(selectedGroupIds)
+                
+                // Map courses to their respective higher-level collections
+                var remainingCourseIds: Set<String> = []
                 for courseId in selectedCourseIds {
-                    _ = try await store.addExamToCourse(
-                        courseId: courseId,
-                        subjectName: isGeneralEvent ? effectiveSubject : nil,
-                        title: trimmedTitle,
-                        notes: storedNotes,
-                        date: examDate,
-                        hasTime: hasTime,
-                        weight: weightToStore,
-                        customWeight: customWeight,
-                        assessmentType: allowWeights && !useCustomWeight ? examAssessmentType : nil,
-                        reminderAt: reminder,
-                        requiresGrade: requiresGrade
-                    )
-                    createdAny = true
+                    if let course = store.courses.first(where: { $0.id == courseId }) {
+                        switch course.type {
+                        case .wahlpflicht(let wpGroupId):
+                            targetWpGroupIds.insert(wpGroupId)
+                        case .mandatory:
+                            if let cid = course.classId {
+                                targetClassIds.insert(cid)
+                            }
+                        case .branch, .elective, .none:
+                            remainingCourseIds.insert(courseId)
+                        }
+                    }
                 }
                 
-                // 2. For selected classes: share to courses belonging to those classes
-                for classId in selectedClassIds {
-                    let classCourseIds = store.courses.filter { $0.classId == classId }.map { $0.id }
-                    for courseId in classCourseIds where !selectedCourseIds.contains(courseId) {
+                // 1. Share to specific Courses (Branches, Electives)
+                for courseId in remainingCourseIds {
+                    do {
                         _ = try await store.addExamToCourse(
                             courseId: courseId,
                             subjectName: isGeneralEvent ? effectiveSubject : nil,
@@ -616,6 +615,74 @@ struct AddExamView: View {
                             requiresGrade: requiresGrade
                         )
                         createdAny = true
+                    } catch {
+                        ErrorLoggingService.logErrorIfEnabled(error)
+                    }
+                }
+                
+                // 1. Share to Classes
+                for classId in targetClassIds {
+                    do {
+                        _ = try await store.addExamToClass(
+                            classId: classId,
+                            subjectName: isGeneralEvent ? effectiveSubject : (isFachreferatEvent ? "Fachreferat" : subjectName),
+                            title: trimmedTitle,
+                            notes: storedNotes,
+                            date: examDate,
+                            hasTime: hasTime,
+                            weight: weightToStore,
+                            customWeight: customWeight,
+                            assessmentType: allowWeights && !useCustomWeight ? examAssessmentType : nil,
+                            reminderAt: reminder,
+                            requiresGrade: requiresGrade
+                        )
+                        createdAny = true
+                    } catch {
+                        ErrorLoggingService.logErrorIfEnabled(error)
+                    }
+                }
+                
+                // 2. Share to Wahlpflichtfächer
+                for wpId in targetWpGroupIds {
+                    do {
+                        _ = try await store.addExamToWahlpflichtfachGroup(
+                            wpGroupId: wpId,
+                            subjectName: isGeneralEvent ? effectiveSubject : (isFachreferatEvent ? "Fachreferat" : subjectName),
+                            title: trimmedTitle,
+                            notes: storedNotes,
+                            date: examDate,
+                            hasTime: hasTime,
+                            weight: weightToStore,
+                            customWeight: customWeight,
+                            assessmentType: allowWeights && !useCustomWeight ? examAssessmentType : nil,
+                            reminderAt: reminder,
+                            requiresGrade: requiresGrade
+                        )
+                        createdAny = true
+                    } catch {
+                        ErrorLoggingService.logErrorIfEnabled(error)
+                    }
+                }
+                
+                // 3. Share to Social Groups
+                if !targetSocialGroupIds.isEmpty {
+                    do {
+                        _ = try await store.addExamToGroups(
+                            subjectName: effectiveSubject,
+                            title: trimmedTitle,
+                            notes: storedNotes,
+                            date: examDate,
+                            hasTime: hasTime,
+                            weight: weightToStore,
+                            customWeight: customWeight,
+                            assessmentType: allowWeights && !useCustomWeight ? examAssessmentType : nil,
+                            reminderAt: reminder,
+                            requiresGrade: requiresGrade,
+                            targetGroupIds: Array(targetSocialGroupIds)
+                        )
+                        createdAny = true
+                    } catch {
+                        ErrorLoggingService.logErrorIfEnabled(error)
                     }
                 }
                 

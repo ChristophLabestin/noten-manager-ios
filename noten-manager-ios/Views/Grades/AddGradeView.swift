@@ -395,9 +395,7 @@ struct AddGradeView: View {
                     Button {
                         dismiss()
                     } label: {
-                        Image(systemName: "xmark")
-                            .imageScale(.medium)
-                            .foregroundStyle(Color.primary)
+                        ToolbarIcon(symbol: "xmark", showDot: false)
                     }
                     .accessibilityLabel("Abbrechen")
                 }
@@ -406,11 +404,9 @@ struct AddGradeView: View {
                         Task { await save() }
                     } label: {
                         if isSaving {
-                            ProgressView()
+                            ToolbarLoadingIcon()
                         } else {
-                            Image(systemName: "checkmark")
-                                .imageScale(.medium)
-                                .foregroundStyle(Color.primary)
+                            ToolbarIcon(symbol: "checkmark", showDot: false)
                         }
                     }
                     .accessibilityLabel("Speichern")

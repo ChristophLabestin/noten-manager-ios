@@ -328,6 +328,15 @@ enum GradeCalculationService {
         let examWeight: Double = (schoolType == .fos && (gradeYear ?? 12) < 13) ? 3 : 2
         
         for subject in eligibleSubjects {
+            // Check for Fixed Yearly Average Override (only applies if looking for overall average)
+            if halfYearFilter == nil, let fixedYearly = subject.fixedAverageYearly {
+                 let val = useRawValues ? fixedYearly : Double(roundHJE(fixedYearly))
+                 // Fixed yearly counts as 2 half-years (assuming full year data)
+                 total += val * 2
+                 count += 2
+                 continue
+            }
+
             let droppedHalf = droppedHalfYearProvider?(subject)
             
             switch halfYearFilter {
@@ -422,6 +431,14 @@ enum GradeCalculationService {
         let examWeight: Double = (schoolType == .fos && (gradeYear ?? 12) < 13) ? 3 : 2
         
         for subject in eligibleSubjects {
+            if halfYearFilter == nil, let fixedYearly = subject.fixedAverageYearly {
+                 // Fixed Yearly Override
+                 items.append(CalculationBreakdownItem(label: "\(subject.name) (Fest)", value: fixedYearly, weight: 2.0, category: "Fächer"))
+                 total += fixedYearly * 2
+                 count += 2
+                 continue
+            }
+
             let droppedHalf = droppedHalfYearProvider?(subject)
             
             switch halfYearFilter {

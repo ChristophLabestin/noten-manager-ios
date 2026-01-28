@@ -128,8 +128,15 @@ enum ExamLiveActivityManager {
 
     @available(iOS 16.2, *)
     private static func contentState(for exam: Exam, existing: ExamCountdownAttributes.ContentState?) -> ExamCountdownAttributes.ContentState {
-        let startDate = exam.date.addingTimeInterval(-leadTime)
-        let duration = leadTime
+        let now = Date()
+        let timeTilExam = exam.date.timeIntervalSince(now)
+        
+        // If we are starting earlier than leadTime (e.g. 92 mins), we adjust 
+        // the startDate to NOW so the countdown is not "frozen".
+        let actualLeadTime = max(leadTime, timeTilExam)
+        let startDate = exam.date.addingTimeInterval(-actualLeadTime)
+        let duration = actualLeadTime
+        
         return ExamCountdownAttributes.ContentState(
             examDate: exam.date,
             title: exam.title,
@@ -215,7 +222,11 @@ enum ExamLiveActivityManager {
     @available(iOS 16.2, *)
     private static func savePushRegistration(token: String, uid: String, activity: Activity<ExamCountdownAttributes>, exam: Exam) async {
         let db = Firestore.firestore()
-        let startAt = exam.date.addingTimeInterval(-leadTime)
+        let now = Date()
+        let timeTilExam = exam.date.timeIntervalSince(now)
+        let actualLeadTime = max(leadTime, timeTilExam)
+        let startAt = exam.date.addingTimeInterval(-actualLeadTime)
+        
         var payload: [String: Any] = [
             "pushToken": token,
             "examId": exam.id,

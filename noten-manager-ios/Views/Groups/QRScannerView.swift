@@ -136,6 +136,7 @@ class QRScannerController: NSObject, ObservableObject, AVCaptureMetadataOutputOb
 struct QRScannerView: View {
     @Environment(\.dismiss) private var dismiss
     var onScan: (String) -> Void
+    var onManualEntry: (() -> Void)? = nil
     
     @StateObject private var controller = QRScannerController()
     
@@ -178,22 +179,37 @@ struct QRScannerView: View {
                                     .font(.system(size: 100, weight: .thin))
                                     .foregroundStyle(.white.opacity(0.8))
                             )
-                            .padding(.bottom, 50)
                         
                         Spacer()
                         
-                        Button {
-                            controller.toggleTorch()
-                        } label: {
-                            VStack {
-                                Image(systemName: controller.isTorchOn ? "flashlight.on.fill" : "flashlight.off.fill")
-                                    .font(.title)
-                                Text("Licht")
-                                    .font(.caption)
+                        HStack(spacing: 40) {
+                            Button {
+                                controller.toggleTorch()
+                            } label: {
+                                VStack {
+                                    Image(systemName: controller.isTorchOn ? "flashlight.on.fill" : "flashlight.off.fill")
+                                        .font(.title2)
+                                    Text("Licht")
+                                        .font(.caption2)
+                                }
+                                .foregroundStyle(.white)
                             }
-                            .foregroundStyle(.white)
+                            
+                            if let onManualEntry = onManualEntry {
+                                Button {
+                                    onManualEntry()
+                                } label: {
+                                    VStack {
+                                        Image(systemName: "keyboard")
+                                            .font(.title2)
+                                        Text("Manuell")
+                                            .font(.caption2)
+                                    }
+                                    .foregroundStyle(.white)
+                                }
+                            }
                         }
-                        .padding(.bottom, 30)
+                        .padding(.bottom, 40)
                     }
                 }
             }
@@ -206,6 +222,7 @@ struct QRScannerView: View {
                     } label: {
                         Image(systemName: "xmark")
                             .imageScale(.medium)
+                            .font(.headline.weight(.bold))
                     }
                     .foregroundStyle(.white)
                 }

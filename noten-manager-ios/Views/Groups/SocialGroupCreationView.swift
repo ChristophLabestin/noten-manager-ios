@@ -120,10 +120,9 @@ struct SocialGroupCreationView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button { dismiss() } label: {
-                        Image(systemName: "chevron.down")
-                            .font(.headline)
-                            .foregroundStyle(isDark ? .white : .black)
+                        ToolbarIcon(symbol: "chevron.down", showDot: false)
                     }
+                    .accessibilityLabel("Schließen")
                 }
             }
         }

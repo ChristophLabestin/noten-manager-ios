@@ -15,6 +15,9 @@ struct GroupJoinView: View {
     private var isDark: Bool { store.darkMode }
     private var animationsOn: Bool { store.animationsEnabled }
     
+    @State private var joinPreview: JoinPreview?
+    @State private var showConfirmation: Bool = false
+    
     init(initialCode: String = "") {
         self.initialCode = initialCode
         self._code = State(initialValue: initialCode)
@@ -99,13 +102,13 @@ struct GroupJoinView: View {
                     
                     // Join Button
                     Button {
-                        Task { await joinGroup() }
+                        Task { await fetchPreview() }
                     } label: {
                         if isJoining {
                             ProgressView()
                                 .tint(.indigo)
                         } else {
-                            Text("Beitreten")
+                            Text("Weiter")
                         }
                     }
                     .buttonStyle(SoftTintButtonStyle(accent: .indigo))
@@ -140,6 +143,13 @@ struct GroupJoinView: View {
                     }
                 }
             }
+            .sheet(isPresented: $showConfirmation) {
+                if let preview = joinPreview {
+                    JoinConfirmationSheet(preview: preview) {
+                        Task { await joinGroup() }
+                    }
+                }
+            }
         }
         .presentationDetents([.medium, .large])
     }
@@ -161,6 +171,32 @@ struct GroupJoinView: View {
         return components.filter { $0.count >= 4 } // Erlaube etwas Flexibilität, aber min 4 Chars
     }
     
+    @MainActor
+    private func fetchPreview() async {
+        let codesToJoin = extractCodes(from: code)
+        guard let singleCode = codesToJoin.first else { return }
+        
+        // If multiple codes, just bypass and join directly or handle differently?
+        // User said "joining a class or social group", usually singular.
+        if codesToJoin.count > 1 {
+            await joinGroup()
+            return
+        }
+        
+        isJoining = true
+        errorMessage = nil
+        do {
+            let preview = try await store.fetchJoinPreview(code: singleCode)
+            self.joinPreview = preview
+            self.showConfirmation = true
+        } catch {
+            errorMessage = error.localizedDescription
+            let generator = UINotificationFeedbackGenerator()
+            generator.notificationOccurred(.error)
+        }
+        isJoining = false
+    }
+
     @MainActor
     private func joinGroup() async {
         let codesToJoin = extractCodes(from: code)

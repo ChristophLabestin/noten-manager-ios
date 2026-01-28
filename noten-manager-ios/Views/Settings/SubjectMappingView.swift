@@ -92,10 +92,12 @@ struct SubjectMappingView: View {
             .background(ThemedBackground(isDark: isDark, isFeminine: isFeminine, intensity: store.themeBackgroundIntensity))
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Später") {
+                    Button {
                         dismiss()
+                    } label: {
+                        ToolbarIcon(symbol: "xmark", showDot: false)
                     }
-                    .font(.subheadline)
+                    .accessibilityLabel("Später")
                 }
             }
             .onAppear {

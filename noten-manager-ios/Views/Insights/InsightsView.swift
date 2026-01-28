@@ -11,6 +11,7 @@ struct InsightsView: View {
     @State private var showNotifications: Bool = false
     @State private var includeDroppedHalfYears: Bool = false
     @AppStorage("launchOfferPurchased") private var launchOfferPurchased = false
+    @State private var selectedHalfYear: Int = 0 // 0: Alle, 1: 1.hj, 2: 2.hj
     @ObservedObject private var notificationInbox = NotificationInboxStore.shared
     var onOpenCreationMenu: () -> Void = {}
 
@@ -29,7 +30,7 @@ struct InsightsView: View {
             droppedHalfYearProvider: { subject in
                 includeDroppedHalfYears ? nil : subject.droppedHalfYear
             },
-            halfYearFilter: nil,
+            halfYearFilter: selectedHalfYear == 0 ? nil : selectedHalfYear,
             fachreferat: store.fachreferat,
             seminar: store.seminarPerformance,
             practical: store.practicalPerformance,
@@ -57,23 +58,32 @@ struct InsightsView: View {
 
     private func subjectAverage(_ subject: Subject) -> Double? {
         let droppedHalf = includeDroppedHalfYears ? nil : subject.droppedHalfYear
-        let v1 = droppedHalf == 1 ? nil : store.bestAvailableHalfYearValue(subject: subject, halfYear: 1)
-        let v2 = droppedHalf == 2 ? nil : store.bestAvailableHalfYearValue(subject: subject, halfYear: 2)
-        switch (v1, v2) {
-        case let (a?, b?):
-            return (a + b) / 2.0
-        case let (a?, nil):
-            return a
-        case let (nil, b?):
-            return b
-        default:
-            return nil
+        
+        if selectedHalfYear == 1 {
+            return droppedHalf == 1 ? nil : store.bestAvailableHalfYearValue(subject: subject, halfYear: 1)
+        } else if selectedHalfYear == 2 {
+            return droppedHalf == 2 ? nil : store.bestAvailableHalfYearValue(subject: subject, halfYear: 2)
+        } else {
+            let v1 = droppedHalf == 1 ? nil : store.bestAvailableHalfYearValue(subject: subject, halfYear: 1)
+            let v2 = droppedHalf == 2 ? nil : store.bestAvailableHalfYearValue(subject: subject, halfYear: 2)
+            switch (v1, v2) {
+            case let (a?, b?):
+                return (a + b) / 2.0
+            case let (a?, nil):
+                return a
+            case let (nil, b?):
+                return b
+            default:
+                return nil
+            }
         }
     }
 
     private var totalGradesCount: Int {
         subjectsWithoutFachreferat.reduce(0) { partial, subject in
-            partial + (store.gradesBySubject[subject.name]?.count ?? 0)
+            let grades = store.gradesBySubject[subject.name] ?? []
+            let filteredGrades = selectedHalfYear == 0 ? grades : grades.filter { $0.halfYear == selectedHalfYear }
+            return partial + filteredGrades.count
         }
     }
 
@@ -213,6 +223,14 @@ struct InsightsView: View {
                     Text("Schnitt, Fächer & Fortschritt")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                    
+                    Picker("Halbjahr", selection: $selectedHalfYear) {
+                        Text("Alle").tag(0)
+                        Text("1.hj").tag(1)
+                        Text("2.hj").tag(2)
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.top, 8)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .softFadeIn(enabled: animationsOn, delay: 0.05, offset: 10)
@@ -251,22 +269,24 @@ struct InsightsView: View {
                 .softFadeIn(enabled: animationsOn, delay: 0.06, offset: 12)
 
                 // Halbjahresvergleich
-                let hj1 = halfYearAverage(1)
-                let hj2 = halfYearAverage(2)
-                if hj1 != nil || hj2 != nil {
-                    SettingsCard(
-                        title: "Halbjahre im Vergleich",
-                        subtitle: "Streichung: \(store.maxDroppableHalfYears) möglich",
-                        systemImage: "rectangle.split.2x1",
-                        accent: .cyan
-                    ) {
-                        HStack {
-                            halfYearChip(title: "1. Halbjahr", value: hj1)
-                            Spacer()
-                            halfYearChip(title: "2. Halbjahr", value: hj2)
+                if selectedHalfYear == 0 {
+                    let hj1 = halfYearAverage(1)
+                    let hj2 = halfYearAverage(2)
+                    if hj1 != nil || hj2 != nil {
+                        SettingsCard(
+                            title: "Halbjahresvergleich",
+                            subtitle: "Streichung: \(store.maxDroppableHalfYears) möglich",
+                            systemImage: "rectangle.split.2x1",
+                            accent: .cyan
+                        ) {
+                            HStack {
+                                halfYearChip(title: "1. Halbjahr", value: hj1)
+                                Spacer()
+                                halfYearChip(title: "2. Halbjahr", value: hj2)
+                            }
                         }
+                        .softFadeIn(enabled: animationsOn, delay: 0.10)
                     }
-                    .softFadeIn(enabled: animationsOn, delay: 0.10)
                 }
 
                 // Top-Fächer
@@ -419,7 +439,8 @@ struct InsightsView: View {
     @ViewBuilder
     private func subjectInsightRow(subject: Subject, accent: Color) -> some View {
         let avg = subjectAverage(subject)
-        let gradesCount = store.gradesBySubject[subject.name]?.count ?? 0
+        let allGrades = store.gradesBySubject[subject.name] ?? []
+        let gradesCount = selectedHalfYear == 0 ? allGrades.count : allGrades.filter { $0.halfYear == selectedHalfYear }.count
 
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 6) {
@@ -455,7 +476,8 @@ struct InsightsView: View {
     @ViewBuilder
     private func subjectOverviewRow(subject: Subject) -> some View {
         let avg = subjectAverage(subject)
-        let gradesCount = store.gradesBySubject[subject.name]?.count ?? 0
+        let allGrades = store.gradesBySubject[subject.name] ?? []
+        let gradesCount = selectedHalfYear == 0 ? allGrades.count : allGrades.filter { $0.halfYear == selectedHalfYear }.count
 
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 6) {

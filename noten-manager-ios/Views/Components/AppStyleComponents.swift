@@ -389,6 +389,14 @@ struct ToolbarIcon: View {
     }
 }
 
+struct ToolbarLoadingIcon: View {
+    var body: some View {
+        ProgressView()
+            .controlSize(.small)
+            .padding(4)
+    }
+}
+
 struct PillBadge: View {
     let text: String
     let systemImage: String

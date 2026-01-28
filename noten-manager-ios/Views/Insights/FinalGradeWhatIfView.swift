@@ -105,19 +105,18 @@ struct FinalGradeWhatIfView: View {
                     Button {
                         dismiss()
                     } label: {
-                        Image(systemName: "chevron.down")
-                            .imageScale(.medium)
-                            .foregroundStyle(Color.primary)
+                        ToolbarIcon(symbol: "chevron.down", showDot: false)
                     }
                     .accessibilityLabel("Schließen")
                 }
                 
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Fertig") {
+                    Button {
                         dismiss()
+                    } label: {
+                        ToolbarIcon(symbol: "checkmark", showDot: false)
                     }
-                    .font(.headline)
-                    .foregroundStyle(accentColor)
+                    .accessibilityLabel("Fertig")
                 }
             }
         }

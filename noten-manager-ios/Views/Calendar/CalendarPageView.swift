@@ -151,16 +151,32 @@ struct CalendarPageView: View {
                         .padding(.horizontal, 20)
                     
                     let upcoming = upcomingExams(from: selectedDate).prefix(3)
-                    LazyVStack(spacing: 12) {
-                        ForEach(upcoming) { exam in
-                            ExamRowView(exam: exam, onTap: {
-                                detailExam = exam
-                            }) {
-                                 contextMenuContent(for: exam)
+                    if upcoming.isEmpty {
+                        VStack(spacing: 8) {
+                            Image(systemName: "calendar.badge.clock")
+                                .font(.title2)
+                                .foregroundStyle(.secondary.opacity(0.5))
+                            Text("Keine anstehenden Klausuren")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 24)
+                        .background(Color.formSectionBackground.opacity(0.5))
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .padding(.horizontal, 16)
+                    } else {
+                        LazyVStack(spacing: 12) {
+                            ForEach(upcoming) { exam in
+                                ExamRowView(exam: exam, onTap: {
+                                    detailExam = exam
+                                }) {
+                                     contextMenuContent(for: exam)
+                                }
                             }
                         }
+                        .padding(.horizontal, 16)
                     }
-                    .padding(.horizontal, 16)
                     
                     // MARK: - Settings Toggle
                     HStack {

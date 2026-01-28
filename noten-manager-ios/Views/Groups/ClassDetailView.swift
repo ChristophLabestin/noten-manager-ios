@@ -14,6 +14,7 @@ struct ClassDetailView: View {
     @State private var showAddGroupsSheet: Bool = false
     @State private var showAddBranchSheet: Bool = false
     @State private var showLinkClassSheet: Bool = false
+    @State private var showEditClassSheet: Bool = false
     @State private var showSubjectMapping: Bool = false
 
     @State private var classCourses: [Course] = []
@@ -163,50 +164,65 @@ struct ClassDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button {
-                        showCreateCourseSheet = true
-                    } label: {
-                        Label("Neuer Kurs", systemImage: "book.fill")
+                HStack(spacing: 8) {
+                    if isOwner {
+                        Button {
+                            showEditClassSheet = true
+                        } label: {
+                            ToolbarIcon(symbol: "pencil", showDot: false)
+                        }
                     }
                     
-                    Button {
-                        showAddGroupByCodeSheet = true
+                    Menu {
+                        Button {
+                            showCreateCourseSheet = true
+                        } label: {
+                            Label("Neuer Kurs", systemImage: "book.fill")
+                        }
+                        
+                        Button {
+                            showAddGroupByCodeSheet = true
+                        } label: {
+                            Label("Gruppe hinzufügen (Code)", systemImage: "rectangle.and.pencil.and.ellipsis")
+                        }
+                        
+                        Button {
+                            showLinkClassSheet = true
+                        } label: {
+                            Label("Wahlpflichtfach verknüpfen", systemImage: "link")
+                        }
+                        
+                        Divider()
+                        
+                        Button {
+                            showCreateGroupSheet = true
+                        } label: {
+                            Label("Neue Gruppe (Legacy)", systemImage: "person.3.fill")
+                        }
+                        
+                        Divider()
+                        
+                        Button {
+                            showAddBranchSheet = true
+                        } label: {
+                            Label("Zweig hinzufügen", systemImage: "arrow.triangle.branch")
+                        }
+                        
+                        Button {
+                            showAddGroupsSheet = true
+                        } label: {
+                            Label("Bestehende Gruppe hinzufügen", systemImage: "person.2.badge.plus")
+                        }
                     } label: {
-                        Label("Gruppe hinzufügen (Code)", systemImage: "rectangle.and.pencil.and.ellipsis")
+                        ToolbarIcon(symbol: "plus", showDot: false)
                     }
-                    
-                    Button {
-                        showLinkClassSheet = true
-                    } label: {
-                        Label("Wahlpflichtfach verknüpfen", systemImage: "link")
-                    }
-                    
-                    Divider()
-                    
-                    Button {
-                        showCreateGroupSheet = true
-                    } label: {
-                        Label("Neue Gruppe (Legacy)", systemImage: "person.3.fill")
-                    }
-                    
-                    Divider()
-                    
-                    Button {
-                        showAddBranchSheet = true
-                    } label: {
-                        Label("Zweig hinzufügen", systemImage: "arrow.triangle.branch")
-                    }
-                    
-                    Button {
-                        showAddGroupsSheet = true
-                    } label: {
-                        Label("Bestehende Gruppe hinzufügen", systemImage: "person.2.badge.plus")
-                    }
-                } label: {
-                    Image(systemName: "plus")
-                        .foregroundStyle(colorScheme == .dark ? Color.white : Color.black)
                 }
+            }
+        }
+        .sheet(isPresented: $showEditClassSheet) {
+            if let _ = schoolClass {
+                ClassEditView(classId: classId)
+                    .environmentObject(store)
             }
         }
         .sheet(isPresented: $showCreateGroupSheet) {
@@ -242,7 +258,7 @@ struct ClassDetailView: View {
                 .environmentObject(store)
         }
         .sheet(isPresented: $showSubjectMapping) {
-            SubjectMappingView(classId: classId, courses: myCourses)
+            SubjectMappingView(classId: classId, courses: coursesForMapping)
                 .environmentObject(store)
         }
     }
@@ -467,6 +483,32 @@ struct ClassDetailView: View {
             !allClassGroupIds.contains(gid) &&
             !store.migratedGroupIds.contains(gid) &&
             store.groupOwners[gid] == uid
+        }
+    }
+    
+    private var coursesForMapping: [Course] {
+        // 1. Identify joined branches (names) from currently subscribed courses
+        let joinedBranchNames = Set(myCourses.compactMap { course -> String? in
+            if case .branch(let name) = course.type { return name }
+            return nil
+        })
+        
+        // 2. Identify joined WP groups (ids) - from store state
+        let joinedWPGroupIds = Set(store.wahlpflichtfachGroupIds)
+        
+        // 3. Filter all class courses
+        return classCourses.filter { course in
+            guard let type = course.type else { return false }
+            switch type {
+            case .mandatory:
+                return true // Always include mandatory courses
+            case .branch(let name):
+                return joinedBranchNames.contains(name)
+            case .wahlpflicht(let id):
+                return joinedWPGroupIds.contains(id)
+            case .elective:
+                return false
+            }
         }
     }
     
@@ -793,7 +835,7 @@ private struct BranchDetailRow: View {
             return "\(subscribedCount)/\(coursesToDisplay.count) Kurse abonniert"
         case .elective(let group):
             let subjects = group.subjects.joined(separator: ", ")
-            return subjects.isEmpty ? "\(coursesToDisplay.count) Fächer" : subjects
+            return "\(coursesToDisplay.count) Kurse: \(subjects)"
         }
     }
     
@@ -981,53 +1023,121 @@ struct AddGroupByCodeSheet: View {
     
     @State private var groupCode: String = ""
     @State private var branchName: String = ""
+    @State private var isWahlpflicht: Bool = false
     @State private var isAdding: Bool = false
     @State private var errorMessage: String?
     
+    private var isDark: Bool { store.darkMode }
+    private var isFeminine: Bool { store.theme == "feminine" }
+    
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    TextField("Gruppencode", text: $groupCode)
-                        .textInputAutocapitalization(.characters)
-                        .font(.body.monospaced())
-                } header: {
-                    Text("Gruppencode")
-                } footer: {
-                    Text("Der Code der bestehenden Gruppe, die du hinzufügen möchtest.")
-                }
-                
-                Section {
-                    TextField("Zweig-Name", text: $branchName)
-                } header: {
-                    Text("Zweig-Name")
-                } footer: {
-                    Text("Die Fächer dieser Gruppe werden als Kurse für diesen Zweig erstellt.")
-                }
-                
-                if let error = errorMessage {
-                    Section {
-                        Text(error)
-                            .foregroundStyle(.red)
+            ScrollView {
+                VStack(spacing: 24) {
+                    // Header
+                    VStack(spacing: 4) {
+                        Image(systemName: "person.3.fill")
+                            .font(.system(size: 40))
+                            .foregroundStyle(.purple)
+                            .padding(.bottom, 4)
+                        
+                        Text("Gruppe hinzufügen")
+                            .font(.title3.weight(.bold))
+                        
+                        Text("Füge eine bestehende Gruppe per Code hinzu.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 16)
                     }
+                    .padding(.top, 16)
+                    
+                    // Code Input
+                    SettingsCard(
+                        title: "Gruppencode",
+                        subtitle: "Der Code der zu importierenden Gruppe",
+                        systemImage: "qrcode",
+                        accent: .purple
+                    ) {
+                        TextField("Code eingeben (z.B. A1B2C3)", text: $groupCode)
+                            .textInputAutocapitalization(.characters)
+                            .font(.body.monospaced())
+                            .padding(12)
+                            .background(Color.formInputBackground)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+                    
+                    // Configuration
+                    SettingsCard(
+                        title: "Konfiguration",
+                        subtitle: "Wie soll die Gruppe hinzugefügt werden?",
+                        systemImage: "gearshape.fill",
+                        accent: .cyan
+                    ) {
+                        VStack(alignment: .leading, spacing: 16) {
+                            // Type Selection
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Typ")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                                    
+                                Picker("Typ", selection: $isWahlpflicht) {
+                                    Text("Zweig").tag(false)
+                                    Text("Wahlpflichtfach").tag(true)
+                                }
+                                .pickerStyle(.segmented)
+                            }
+
+                            // Branch/WP Name
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(isWahlpflicht ? "Name des Wahlpflichtfachs" : "Zweigname (z.B. Technik)")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                                
+                                TextField(isWahlpflicht ? "Name eingeben..." : "Zweigname eingeben...", text: $branchName)
+                                    .padding(12)
+                                    .background(Color.formInputBackground)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                        }
+                        .padding(.vertical, 8)
+                    }
+
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .foregroundStyle(.red)
+                            .font(.caption)
+                            .padding(.horizontal, 16)
+                    }
+
+                    // Add Button
+                    Button {
+                        Task { await addGroup() }
+                    } label: {
+                        if isAdding {
+                            ProgressView().tint(.purple)
+                        } else {
+                            Label(isWahlpflicht ? "Als Wahlpflichtfach hinzufügen" : "Als Zweig hinzufügen", systemImage: isWahlpflicht ? "star.fill" : "arrow.branch")
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .buttonStyle(SoftTintButtonStyle(accent: .purple))
+                    .disabled(isAdding || groupCode.isEmpty || branchName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .padding(.top, 8)
                 }
+                .padding(16)
             }
-            .navigationTitle("Gruppe hinzufügen")
+            .background(ThemedBackground(isDark: isDark, isFeminine: isFeminine, intensity: store.themeBackgroundIntensity))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") { dismiss() }
-                }
-                
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Hinzufügen") {
-                        Task { await addGroup() }
+                    Button { dismiss() } label: {
+                        ToolbarIcon(symbol: "xmark", showDot: false)
                     }
-                    .disabled(groupCode.isEmpty || branchName.isEmpty || isAdding)
                 }
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
     }
     
     @MainActor
@@ -1036,7 +1146,12 @@ struct AddGroupByCodeSheet: View {
         errorMessage = nil
         
         do {
-            try await store.addLegacyGroupToClass(classId: classId, groupCode: groupCode.trimmingCharacters(in: .whitespacesAndNewlines), branchName: branchName.trimmingCharacters(in: .whitespacesAndNewlines))
+            try await store.addLegacyGroupToClass(
+                classId: classId,
+                groupCode: groupCode.trimmingCharacters(in: .whitespacesAndNewlines),
+                branchName: branchName.trimmingCharacters(in: .whitespacesAndNewlines),
+                isWahlpflicht: isWahlpflicht
+            )
             let generator = UINotificationFeedbackGenerator()
             generator.notificationOccurred(.success)
             onComplete()
@@ -1259,7 +1374,7 @@ private struct GroupBranchSelectionRow: View {
     }
 }
 
-// MARK: - Add Branch Sheet
+// MARK: - Add Branch Or Elective Sheet
 
 struct AddBranchSheet: View {
     @Environment(\.dismiss) private var dismiss
@@ -1268,11 +1383,46 @@ struct AddBranchSheet: View {
     let classId: String
     let onComplete: () -> Void
     
-    @State private var branchName: String = ""
+    @State private var type: BranchType = .branch
+    @State private var name: String = ""
     @State private var subjects: [String] = []
     @State private var newSubjectText: String = ""
     @State private var isCreating: Bool = false
     @State private var errorMessage: String?
+    
+    // Type enum
+    enum BranchType {
+        case branch
+        case elective
+        
+        var title: String {
+            switch self {
+            case .branch: return "Zweig"
+            case .elective: return "Wahlpflichtfach"
+            }
+        }
+        
+        var icon: String {
+            switch self {
+            case .branch: return "arrow.triangle.branch"
+            case .elective: return "star.fill"
+            }
+        }
+        
+        var color: Color {
+            switch self {
+            case .branch: return .purple
+            case .elective: return .teal
+            }
+        }
+        
+        var description: String {
+            switch self {
+            case .branch: return "Erstelle einen neuen Zweig für die Klasse."
+            case .elective: return "Erstelle eine neue Wahlpflichtfach-Gruppe."
+            }
+        }
+    }
     
     private var isDark: Bool { store.darkMode }
     private var isFeminine: Bool { store.theme == "feminine" }
@@ -1283,30 +1433,41 @@ struct AddBranchSheet: View {
                 VStack(spacing: 20) {
                     // Header
                     VStack(spacing: 4) {
-                        Image(systemName: "arrow.triangle.branch")
+                        Image(systemName: type.icon)
                             .font(.system(size: 40))
-                            .foregroundStyle(.purple)
+                            .foregroundStyle(type.color)
                             .padding(.bottom, 4)
+                            .transition(.scale.combined(with: .opacity))
+                            .id(type) // Animate change
                         
-                        Text("Neuer Zweig")
+                        Text("Neuer \(type.title)")
                             .font(.title3.weight(.bold))
                         
-                        Text("Erstelle einen neuen Zweig mit eigenen Fächern.")
+                        Text(type.description)
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 16)
                     }
                     .padding(.top, 16)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: type)
                     
-                    // Branch Name
+                    // Type Picker
+                    Picker("Typ", selection: $type) {
+                        Text("Zweig").tag(BranchType.branch)
+                        Text("Wahlpflichtfach").tag(BranchType.elective)
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal)
+                    
+                    // Name
                     SettingsCard(
-                        title: "Zweig-Name",
-                        subtitle: "z.B. Naturwissenschaft, Sprachen, etc.",
+                        title: "Name",
+                        subtitle: type == .branch ? "z.B. Naturwissenschaft, Sprachen" : "z.B. Informatik, Spanisch",
                         systemImage: "tag.fill",
-                        accent: .purple
+                        accent: type.color
                     ) {
-                        TextField("Zweig-Name", text: $branchName)
+                        TextField("Name eingeben", text: $name)
                             .font(.body)
                             .padding(12)
                             .background(Color.formInputBackground)
@@ -1329,7 +1490,9 @@ struct AddBranchSheet: View {
                                             Text(subject)
                                                 .font(.subheadline)
                                             Button {
-                                                subjects.removeAll { $0 == subject }
+                                                withAnimation {
+                                                    subjects.removeAll { $0 == subject }
+                                                }
                                             } label: {
                                                 Image(systemName: "xmark.circle.fill")
                                                     .font(.caption)
@@ -1371,21 +1534,24 @@ struct AddBranchSheet: View {
                         Text(error)
                             .foregroundStyle(.red)
                             .font(.caption)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
                     }
                     
                     // Create Button
                     Button {
-                        Task { await createBranch() }
+                        Task { await createGroup() }
                     } label: {
                         if isCreating {
-                            ProgressView().tint(.purple)
+                            ProgressView().tint(type.color)
                         } else {
-                            Text("Zweig erstellen")
+                            Text("Erstellen")
+                                .frame(maxWidth: .infinity)
                         }
                     }
-                    .buttonStyle(SoftTintButtonStyle(accent: .purple))
-                    .disabled(branchName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || subjects.isEmpty || isCreating)
-                    .padding(.top, 4)
+                    .buttonStyle(SoftTintButtonStyle(accent: type.color))
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || subjects.isEmpty || isCreating)
+                    .padding(.top, 8)
                     .padding(.bottom, 20)
                 }
                 .padding(16)
@@ -1395,44 +1561,44 @@ struct AddBranchSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button { dismiss() } label: {
-                        Image(systemName: "chevron.down")
-                            .font(.headline)
-                            .foregroundStyle(isDark ? .white : .black)
+                        ToolbarIcon(symbol: "chevron.down", showDot: false)
                     }
                 }
             }
         }
-        .presentationDetents([.large])
     }
     
     private func addSubject() {
         let trimmed = newSubjectText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !subjects.contains(trimmed) else { return }
-        subjects.append(trimmed)
-        newSubjectText = ""
+        if !trimmed.isEmpty && !subjects.contains(trimmed) {
+            withAnimation {
+                subjects.append(trimmed)
+                newSubjectText = ""
+            }
+        }
     }
     
     @MainActor
-    private func createBranch() async {
+    private func createGroup() async {
         isCreating = true
         errorMessage = nil
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         
         do {
-            _ = try await store.addBranchToClass(
-                classId: classId,
-                branchName: branchName.trimmingCharacters(in: .whitespacesAndNewlines),
-                subjects: subjects
-            )
-            let generator = UINotificationFeedbackGenerator()
-            generator.notificationOccurred(.success)
+            switch type {
+            case .branch:
+                _ = try await store.addBranchToClass(classId: classId, branchName: trimmedName, subjects: subjects)
+            case .elective:
+                _ = try await store.addWahlpflichtfachGroupToClass(classId: classId, name: trimmedName, subjects: subjects)
+            }
+            
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
             onComplete()
             dismiss()
         } catch {
             errorMessage = error.localizedDescription
-            let generator = UINotificationFeedbackGenerator()
-            generator.notificationOccurred(.error)
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
         }
-        
         isCreating = false
     }
 }

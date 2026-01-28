@@ -4,7 +4,7 @@ import FirebaseAuth
 
 struct OnboardingFunnelView: View {
     enum Step: String, CaseIterable {
-        case welcome, legacy, schoolYear, joinClass, subjects, finish
+        case welcome, legacy, schoolYear, prevYearPrompt, joinClass, subjects, finish
     }
 
     struct PendingSubject: Identifiable, Hashable {
@@ -12,6 +12,7 @@ struct OnboardingFunnelView: View {
         let name: String
         let type: Int
         let isElective: Bool
+        var gradingMode: GradingMode
     }
     
     enum BranchStream: String, CaseIterable, Identifiable {
@@ -27,51 +28,51 @@ struct OnboardingFunnelView: View {
         
         var defaultSubjects: [PendingSubject] {
             let common = [
-                PendingSubject(name: "Deutsch", type: 1, isElective: false),
-                PendingSubject(name: "Mathematik", type: 1, isElective: false),
-                PendingSubject(name: "Englisch", type: 1, isElective: false),
-                PendingSubject(name: "Religion/Ethik", type: 2, isElective: false),
-                PendingSubject(name: "Geschichte", type: 2, isElective: false),
-                PendingSubject(name: "Sozialkunde", type: 2, isElective: false)
+                PendingSubject(name: "Deutsch", type: 1, isElective: false, gradingMode: .withSchulaufgaben),
+                PendingSubject(name: "Mathematik", type: 1, isElective: false, gradingMode: .withSchulaufgaben),
+                PendingSubject(name: "Englisch", type: 1, isElective: false, gradingMode: .withSchulaufgaben),
+                PendingSubject(name: "Religion/Ethik", type: 2, isElective: false, gradingMode: .withoutSchulaufgaben),
+                PendingSubject(name: "Geschichte", type: 2, isElective: false, gradingMode: .withoutSchulaufgaben),
+                PendingSubject(name: "Sozialkunde", type: 2, isElective: false, gradingMode: .withoutSchulaufgaben)
             ]
             
             switch self {
             case .manual: return []
             case .technik:
                 return common + [
-                    PendingSubject(name: "Physik", type: 1, isElective: false),
-                    PendingSubject(name: "Chemie", type: 1, isElective: false),
-                    PendingSubject(name: "Informatik", type: 1, isElective: false)
+                    PendingSubject(name: "Physik", type: 1, isElective: false, gradingMode: .withSchulaufgaben),
+                    PendingSubject(name: "Chemie", type: 1, isElective: false, gradingMode: .withSchulaufgaben),
+                    PendingSubject(name: "Informatik", type: 1, isElective: false, gradingMode: .withSchulaufgaben)
                 ]
             case .wirtschaft:
                 return common + [
-                    PendingSubject(name: "BWR", type: 1, isElective: false),
-                    PendingSubject(name: "VWL", type: 1, isElective: false),
-                    PendingSubject(name: "Informatik", type: 1, isElective: false)
+                    PendingSubject(name: "BWR", type: 1, isElective: false, gradingMode: .withSchulaufgaben),
+                    PendingSubject(name: "VWL", type: 1, isElective: false, gradingMode: .withSchulaufgaben),
+                    PendingSubject(name: "Informatik", type: 1, isElective: false, gradingMode: .withSchulaufgaben)
                 ]
             case .sozial:
                 return common + [
-                    PendingSubject(name: "Pädagogik/Psychologie", type: 1, isElective: false),
-                    PendingSubject(name: "Biologie", type: 1, isElective: false),
-                    PendingSubject(name: "Soziologie", type: 1, isElective: false)
+                    PendingSubject(name: "Pädagogik/Psychologie", type: 1, isElective: false, gradingMode: .withSchulaufgaben),
+                    PendingSubject(name: "Biologie", type: 1, isElective: false, gradingMode: .withSchulaufgaben),
+                    PendingSubject(name: "Soziologie", type: 1, isElective: false, gradingMode: .withSchulaufgaben)
                 ]
             case .gesundheit:
                 return common + [
-                    PendingSubject(name: "Gesundheit", type: 1, isElective: false),
-                    PendingSubject(name: "Biologie", type: 1, isElective: false),
-                    PendingSubject(name: "Chemie", type: 1, isElective: false)
+                    PendingSubject(name: "Gesundheit", type: 1, isElective: false, gradingMode: .withSchulaufgaben),
+                    PendingSubject(name: "Biologie", type: 1, isElective: false, gradingMode: .withSchulaufgaben),
+                    PendingSubject(name: "Chemie", type: 1, isElective: false, gradingMode: .withSchulaufgaben)
                 ]
             case .gestaltung:
                 return common + [
-                    PendingSubject(name: "Gestaltung", type: 1, isElective: false),
-                    PendingSubject(name: "Kunst", type: 1, isElective: false),
-                    PendingSubject(name: "Medien", type: 1, isElective: false)
+                    PendingSubject(name: "Gestaltung", type: 1, isElective: false, gradingMode: .withSchulaufgaben),
+                    PendingSubject(name: "Kunst", type: 1, isElective: false, gradingMode: .withSchulaufgaben),
+                    PendingSubject(name: "Medien", type: 1, isElective: false, gradingMode: .withSchulaufgaben)
                 ]
             case .agrar:
                 return common + [
-                    PendingSubject(name: "Agrarwirtschaft", type: 1, isElective: false),
-                    PendingSubject(name: "Biologie", type: 1, isElective: false),
-                    PendingSubject(name: "Chemie", type: 1, isElective: false)
+                    PendingSubject(name: "Agrarwirtschaft", type: 1, isElective: false, gradingMode: .withSchulaufgaben),
+                    PendingSubject(name: "Biologie", type: 1, isElective: false, gradingMode: .withSchulaufgaben),
+                    PendingSubject(name: "Chemie", type: 1, isElective: false, gradingMode: .withSchulaufgaben)
                 ]
             }
         }
@@ -107,7 +108,7 @@ struct OnboardingFunnelView: View {
     @State private var pendingPrevSubjectNames: Set<String> = []
     @State private var pendingManualSubjects: [PendingSubject] = []
     @State private var manualNameInput: String = ""
-    @State private var manualType: Int = 1
+
     @State private var manualIsElective: Bool = false
     @State private var manualError: String?
     // @State private var groupSubjectCandidates: [PendingGroupSubject] = [] // Removed
@@ -135,7 +136,11 @@ struct OnboardingFunnelView: View {
     @State private var showScanner: Bool = false
     @State private var showHelpSheet: Bool = false
     @State private var showFeatureBriefing: Bool = false
+
     @State private var wasAlreadyConfigured: Bool = false
+    
+    // New: Previous Year Prompt
+    @State private var wantsPrevYear: Bool = false
 
 
     struct ClassJoinContext: Identifiable {
@@ -179,6 +184,7 @@ struct OnboardingFunnelView: View {
         case .welcome: return "Jetzt einrichten"
         case .legacy: return "Daten übernehmen"
         case .schoolYear: return "Weiter"
+        case .prevYearPrompt: return "Weiter"
         case .joinClass: 
              if hasJoinedClasses { return "Weiter" }
              return onboardingClassCode.isEmpty ? "Überspringen" : "Klasse beitreten"
@@ -202,6 +208,7 @@ struct OnboardingFunnelView: View {
         case .welcome: withAnimation { currentStep = .schoolYear }
         case .legacy: handleLegacyChoice(keep: true)
         case .schoolYear: handleSchoolYearContinue()
+        case .prevYearPrompt: withAnimation { currentStep = .joinClass }
         case .joinClass: handleJoinClassAction()
         case .subjects: withAnimation { currentStep = .finish }
         case .finish: finishSetup()
@@ -261,8 +268,30 @@ struct OnboardingFunnelView: View {
 
     private var visibleSteps: [Step] {
         Step.allCases.filter { step in
-            step != .legacy || legacyStepRequired
+            if step == .legacy && !legacyStepRequired { return false }
+            if step == .prevYearPrompt && !shouldShowPrevYearPrompt { return false }
+            return true
         }
+    }
+    
+    private var shouldShowPrevYearPrompt: Bool {
+        // Only show if FOS and Grade 12 or 13 selected
+        // AND we are not "handling legacy choice" (because legacy import usually brings years)
+        // Wait... legacy import sets `legacySelectedSubjects` etc.
+        // Let's rely on basic inputs:
+        let grade = pendingGradeYear == 0 ? gradeSelection : pendingGradeYear
+        let type = pendingSchoolType // default .bos but updated in bootstrap
+        // FOS 12 or 13 implies a previous year (11 or 12) exists
+        // BOS 12 does NOT imply 11. BOS 13 implies 12.
+        if isSchoolYearChange {
+             // If manual change, we might skip this unless explicitly helpful?
+             // Actually, usually helpful for fresh setup.
+             // Let's enable for FOS 12/13.
+             return type == .fos && (grade == 12 || grade == 13)
+        }
+        
+        // Initial setup
+        return selectedSchoolType == .fos && (gradeSelection == 12 || gradeSelection == 13)
     }
 
 
@@ -303,6 +332,11 @@ struct OnboardingFunnelView: View {
                         
                         SchoolYearPage()
                             .tag(Step.schoolYear)
+                        
+                        if shouldShowPrevYearPrompt {
+                            PrevYearPage()
+                                .tag(Step.prevYearPrompt)
+                        }
                         
                         JoinClassPage()
                             .tag(Step.joinClass)
@@ -528,7 +562,11 @@ struct OnboardingFunnelView: View {
         pendingSchoolType = selectedSchoolType
         pendingGradeYear = gradeSelection
         
-        Task { await loadPrevYearSubjects() }
+        // Optimization: Skip loading previous year subjects for manual restarts
+        // unless explicitly needed. Manual restarts usually imply just re-doing the current year.
+        if isSchoolYearChange || !store.onboardingAlreadyCompleted {
+            Task { await loadPrevYearSubjects() }
+        }
     }
     
     private var availableSchoolYears: [String] {
@@ -604,7 +642,11 @@ struct OnboardingFunnelView: View {
                 store.activeSchoolYearId = targetId
                 isSavingSchoolYear = false
                 withAnimation {
-                    currentStep = .joinClass
+                    if shouldShowPrevYearPrompt {
+                        currentStep = .prevYearPrompt
+                    } else {
+                        currentStep = .joinClass
+                    }
                 }
             }
         }
@@ -681,10 +723,16 @@ struct OnboardingFunnelView: View {
         if isSchoolYearChange {
             dismiss()
             onFinished()
-        } else if isManualRestart {
             // If it was a manual restart, we MUST reset the flag to false
             // to allow the user to trigger it again later from settings.
             store.onboardingRequired = false
+            
+            // Fix: Confirm online session
+            if let uid = authManager.currentUser?.uid {
+                OfflineModeManager.shared.recordOnlineLogin(uid: uid)
+                OfflineModeManager.shared.deactivateOfflineMode()
+            }
+            
             dismiss()
             onFinished()
         } else {
@@ -739,9 +787,13 @@ struct OnboardingFunnelView: View {
             manualNameInput = ""
             return
         }
-        let subj = PendingSubject(name: name, type: manualType, isElective: manualIsElective)
-        pendingManualSubjects.append(subj)
-        manualNameInput = ""
+        // Default to withSchulaufgaben (type 1)
+        let type = 1
+        let subj = PendingSubject(name: name, type: type, isElective: manualIsElective, gradingMode: .withSchulaufgaben)
+        withAnimation {
+            pendingManualSubjects.append(subj)
+            manualNameInput = ""
+        }
     }
 }
 
@@ -1287,7 +1339,7 @@ extension OnboardingFunnelView {
                                             if isImported {
                                                 pendingManualSubjects.removeAll { $0.name == name }
                                             } else {
-                                                pendingManualSubjects.append(PendingSubject(name: name, type: 1, isElective: false))
+                                                pendingManualSubjects.append(PendingSubject(name: name, type: 1, isElective: false, gradingMode: .withSchulaufgaben))
                                             }
                                         } label: {
                                             HStack(spacing: 4) {
@@ -1351,6 +1403,8 @@ extension OnboardingFunnelView {
                             .padding(12)
                             .background(Color.formInputBackground)
                             .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .onSubmit { addPendingManualSubject() }
+                            .submitLabel(.done)
                         
                         Button {
                             addPendingManualSubject()
@@ -1362,6 +1416,7 @@ extension OnboardingFunnelView {
                         .disabled(manualNameInput.isEmpty)
                     }
                     .padding(.horizontal, 24)
+
                 }
 
                 VStack(alignment: .leading, spacing: 16) {
@@ -1379,24 +1434,18 @@ extension OnboardingFunnelView {
                             .glassCard()
                             .padding(.horizontal, 20)
                     } else {
-                        VStack(spacing: 10) {
-                            ForEach(pendingManualSubjects) { subj in
-                                HStack {
-                                    Text(subj.name)
-                                        .font(.subheadline.weight(.medium))
-                                    Spacer()
-                                    Button {
+                        VStack(spacing: 8) {
+                            ForEach($pendingManualSubjects) { $subj in
+                                SubjectCreationRow(
+                                    name: subj.name,
+                                    hasSA: Binding(
+                                        get: { subj.gradingMode == .withSchulaufgaben },
+                                        set: { subj.gradingMode = $0 ? .withSchulaufgaben : .withoutSchulaufgaben }
+                                    ),
+                                    onDelete: {
                                         pendingManualSubjects.removeAll { $0.id == subj.id }
-                                    } label: {
-                                        Image(systemName: "trash")
-                                            .font(.caption)
-                                            .foregroundStyle(.red)
                                     }
-                                }
-                                .padding(14)
-                                .background(Color.formCardBackground)
-                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.primary.opacity(0.05), lineWidth: 1))
+                                )
                             }
                         }
                         .padding(.horizontal, 20)
@@ -1404,6 +1453,83 @@ extension OnboardingFunnelView {
                 }
 
                 Spacer(minLength: 120) // Extra space for fixed button
+            }
+        }
+    }
+
+    @ViewBuilder
+    func PrevYearPage() -> some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 24) {
+                HeaderSection(
+                    icon: "clock.arrow.circlepath",
+                    title: "11. Klasse hinzufügen?",
+                    subtitle: "Für dein Fachabitur zählen die Noten der 11. Klasse."
+                )
+                
+                SettingsCard(
+                    title: "Rückwirkend anlegen",
+                    subtitle: "Optional",
+                    systemImage: "calendar.badge.plus",
+                    accent: .orange
+                ) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Möchtest du das vorherige Schuljahr direkt mit anlegen?")
+                            .font(.headline)
+                        
+                        Text("Wir erstellen ein leeres Schuljahr für dich. Du kannst deine Fächer und Noten aus der 11. später jederzeit nachtragen.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        
+                        HStack(spacing: 12) {
+                            Button {
+                                withAnimation { wantsPrevYear = true }
+                            } label: {
+                                HStack {
+                                    Text("Ja, anlegen")
+                                    if wantsPrevYear {
+                                        Image(systemName: "checkmark.circle.fill")
+                                    }
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background(wantsPrevYear ? Color.orange : Color.formInputBackground)
+                                .foregroundStyle(wantsPrevYear ? .white : .primary)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(wantsPrevYear ? Color.clear : Color.primary.opacity(0.1), lineWidth: 1)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            
+                            Button {
+                                withAnimation { wantsPrevYear = false }
+                            } label: {
+                                HStack {
+                                    Text("Nein, überspringen")
+                                    if !wantsPrevYear {
+                                        Image(systemName: "checkmark.circle.fill")
+                                    }
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background(!wantsPrevYear ? Color.secondary.opacity(0.2) : Color.formInputBackground)
+                                .foregroundStyle(!wantsPrevYear ? .primary : .primary)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(!wantsPrevYear ? Color.clear : Color.primary.opacity(0.1), lineWidth: 1)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.top, 4)
+                }
+                .padding(.horizontal, 20)
+                
+                Spacer(minLength: 120)
             }
         }
     }
@@ -1463,18 +1589,51 @@ extension OnboardingFunnelView {
 
         isFinishing = true
         Task {
-            let targetId = pendingSchoolYearId ?? schoolYearInput.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
-            let created = await store.createSchoolYear(name: targetId)
-            if created == nil {
-                await store.setActiveSchoolYear(id: targetId)
+            // Correctly derive parameters based on whether we are in "School Year Change" mode (using pending vars) 
+            // OR initial onboarding setup (using state vars directly if pending not yet set? actually pending IS set in handleSchoolYearContinue)
+            // safer to use pending variables as they are the "commit" buffer.
+            
+            let currentId = pendingSchoolYearId ?? schoolYearInput.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+            let currentGrade = pendingGradeYear > 0 ? pendingGradeYear : gradeSelection
+            let currentType = pendingSchoolType // this is reliable
+            
+            // 1. Create PREVIOUS year if requested
+            if wantsPrevYear {
+                if let prevId = previousSchoolYearId(from: currentId) {
+                    let prevGrade = currentGrade - 1
+                    // Create empty year (passed nil for subjects/copying)
+                    _ = await store.createSchoolYear(name: prevId, gradeYear: prevGrade, schoolType: currentType)
+                }
             }
             
-            // Apply Mandatory Subjects from selection
+            // 2. Create/Activate CURRENT year
+            let created = await store.createSchoolYear(name: currentId, gradeYear: currentGrade, schoolType: currentType)
+            if created == nil {
+                await store.setActiveSchoolYear(id: currentId)
+            }
+            
+            // Apply Mandatory Subjects to CURRENT year
             for subj in pendingManualSubjects {
-                try? await store.addSubjectToFirestore(name: subj.name, type: subj.type, date: Date(), isElective: subj.isElective)
+                try? await store.addSubjectToFirestore(
+                    name: subj.name, 
+                    type: subj.type, 
+                    date: Date(), 
+                    isElective: subj.isElective,
+                    gradingMode: subj.gradingMode,
+                    targetSchoolYearId: currentId 
+                )
             }
             
             await store.markOnboardingCompletedIfPossible()
+            
+            // Fix: Explicitly confirm online session to prevent fallback to offline mode
+            if let uid = authManager.currentUser?.uid {
+                await MainActor.run {
+                    OfflineModeManager.shared.recordOnlineLogin(uid: uid)
+                    OfflineModeManager.shared.deactivateOfflineMode()
+                }
+            }
+            
             await MainActor.run {
                 isFinishing = false
                 dismiss()

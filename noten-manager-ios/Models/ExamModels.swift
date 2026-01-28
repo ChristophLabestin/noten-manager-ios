@@ -4,6 +4,7 @@ struct Exam: Codable, Identifiable, Hashable, Sendable {
     let id: String
     let groupId: String?
     let courseId: String?
+    let classId: String?
     let subjectName: String
     let subjectKey: String?
     let title: String
@@ -24,6 +25,7 @@ struct Exam: Codable, Identifiable, Hashable, Sendable {
         id: String,
         groupId: String?,
         courseId: String? = nil,
+        classId: String? = nil,
         subjectName: String,
         subjectKey: String?,
         title: String,
@@ -43,6 +45,7 @@ struct Exam: Codable, Identifiable, Hashable, Sendable {
         self.id = id
         self.groupId = groupId
         self.courseId = courseId
+        self.classId = classId
         self.subjectName = subjectName
         self.subjectKey = subjectKey
         self.title = title
@@ -64,6 +67,7 @@ struct Exam: Codable, Identifiable, Hashable, Sendable {
         case id
         case groupId
         case courseId
+        case classId
         case subjectName
         case subjectKey
         case title
@@ -86,6 +90,7 @@ struct Exam: Codable, Identifiable, Hashable, Sendable {
         id = try container.decode(String.self, forKey: .id)
         groupId = try container.decodeIfPresent(String.self, forKey: .groupId)
         courseId = try container.decodeIfPresent(String.self, forKey: .courseId)
+        classId = try container.decodeIfPresent(String.self, forKey: .classId)
         subjectName = try container.decode(String.self, forKey: .subjectName)
         subjectKey = try container.decodeIfPresent(String.self, forKey: .subjectKey)
         title = try container.decode(String.self, forKey: .title)
@@ -119,6 +124,7 @@ struct Exam: Codable, Identifiable, Hashable, Sendable {
         try container.encode(id, forKey: .id)
         try container.encodeIfPresent(groupId, forKey: .groupId)
         try container.encodeIfPresent(courseId, forKey: .courseId)
+        try container.encodeIfPresent(classId, forKey: .classId)
         try container.encode(subjectName, forKey: .subjectName)
         try container.encodeIfPresent(subjectKey, forKey: .subjectKey)
         try container.encode(title, forKey: .title)

@@ -1,5 +1,6 @@
 import SwiftUI
 import FirebaseAuth
+import Foundation
 
 struct ClassesListView: View {
     @EnvironmentObject var store: GradesStore
@@ -16,10 +17,16 @@ struct ClassesListView: View {
     @State private var showScannerSheet = false
     @State private var scanError: String?
     @State private var showScanErrorAlert = false
+    @State private var showManualJoinSheet = false
+    @State private var joinPreview: JoinPreview?
     @State private var showGroupMergeSheet = false
     @State private var showSocialCreateSheet = false
     @State private var showClassesOnboarding = false
     @State private var showExplainingSheet = false
+    
+    // For Class Join Context (Course Selection)
+    @State private var showCourseSelection: Bool = false
+    @State private var joinContext: UnifiedJoinView.ClassJoinContext?
     
     private var animationsOn: Bool { store.animationsEnabled }
     
@@ -86,6 +93,34 @@ struct ClassesListView: View {
         .sheet(isPresented: $showScannerSheet) {
             QRScannerView { scannedCode in
                 handleScannedCode(scannedCode)
+            } onManualEntry: {
+                showScannerSheet = false
+                // Small delay to let scanner dismiss before showing next sheet
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    showManualJoinSheet = true
+                }
+            }
+        }
+        .sheet(isPresented: $showManualJoinSheet) {
+            UnifiedJoinView()
+                .environmentObject(store)
+        }
+        .sheet(item: $joinPreview) { preview in
+            JoinConfirmationSheet(preview: preview) {
+                Task { await performConfirmedJoin(preview: preview) }
+            }
+            .environmentObject(store)
+        }
+        .navigationDestination(isPresented: $showCourseSelection) {
+            if let ctx = joinContext {
+                CourseJoinView(
+                    classId: ctx.id,
+                    className: ctx.name,
+                    config: ctx.config,
+                    linkedClassIds: ctx.linkedClassIds,
+                    onJoinSuccess: { }
+                )
+                .environmentObject(store)
             }
         }
         .sheet(isPresented: $showGroupMergeSheet) {
@@ -268,7 +303,27 @@ struct ClassesListView: View {
                     courseCount: store.courses.filter { $0.classId == cid }.count,
                     branchCount: store.classDetails[cid]?.config?.branches?.count ?? 0,
                     onLeave: { classPendingLeave = cid },
-                    onDelete: { classPendingDelete = cid }
+                    onDelete: { classPendingDelete = cid },
+                    onFinishSetup: {
+                        Task {
+                            do {
+                                let info = try await store.fetchClassInfo(with: cid)
+                                if let config = info.config {
+                                    await MainActor.run {
+                                        self.joinContext = UnifiedJoinView.ClassJoinContext(
+                                            id: info.id,
+                                            name: info.name,
+                                            config: config,
+                                            linkedClassIds: info.linkedClassIds ?? []
+                                        )
+                                        self.showCourseSelection = true
+                                    }
+                                }
+                            } catch {
+                                print("Error fetching class info for setup: \(error)")
+                            }
+                        }
+                    }
                 )
                 .softFadeIn(enabled: animationsOn, delay: 0.15 + (Double(index) * 0.05), offset: 12)
             }
@@ -319,13 +374,6 @@ struct ClassesListView: View {
             accent: .indigo
         ) {
             VStack(spacing: 12) {
-                // Section: Klassen
-                Text("Klassen")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.leading, 4)
-                
                 Button {
                     showCreateSheet = true
                 } label: {
@@ -335,79 +383,31 @@ struct ClassesListView: View {
                 .buttonStyle(SoftTintButtonStyle(accent: .indigo))
                 
                 Button {
+                    showSocialCreateSheet = true
+                } label: {
+                    Label("Neue soziale Gruppe", systemImage: "person.2.badge.plus.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(SoftTintButtonStyle(accent: .purple))
+                
+                Button {
                     showScannerSheet = true
                 } label: {
-                    Label("Klasse beitreten (QR)", systemImage: "qrcode.viewfinder")
+                    Label("Beitreten", systemImage: "qrcode.viewfinder")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(SoftTintButtonStyle(accent: .cyan))
-                
-                Button {
-                    showJoinSheet = true
-                } label: {
-                    Label("Klassen-Code eingeben", systemImage: "keyboard")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(SoftTintButtonStyle(accent: .gray))
-                
-                if !store.groupsHidden {
-                    Divider()
-                        .padding(.vertical, 4)
-                    
-                    // Section: Gruppen & Soziales
-                    Text("Gruppen & Soziales")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.leading, 4)
-                    
-                    Button {
-                        showSocialCreateSheet = true
-                    } label: {
-                        Label("Neue soziale Gruppe", systemImage: "person.2.badge.plus.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(SoftTintButtonStyle(accent: .purple))
-
-                    Button {
-                        showScannerSheet = true
-                    } label: {
-                        Label("Gruppe beitreten (QR)", systemImage: "qrcode.viewfinder")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(SoftTintButtonStyle(accent: .cyan))
-                    
-                    Button {
-                        showGroupJoinSheet = true
-                    } label: {
-                        Label("Gruppen-Code eingeben", systemImage: "keyboard")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(SoftTintButtonStyle(accent: .gray))
-                }
             }
         }
     }
     
     private func handleScannedCode(_ scannedCode: String) {
-        // Deep link format: notenmanager://join/group/CODE or notenmanager://join/class/CODE
+        let code = extractPureCode(from: scannedCode)
         Task {
             do {
-                if store.groupsHidden {
-                    let code = scannedCode.components(separatedBy: "/").last ?? scannedCode
-                    try await store.joinClass(with: code)
-                } else {
-                    if scannedCode.contains("join/class/") {
-                        let code = scannedCode.components(separatedBy: "/").last ?? scannedCode
-                        try await store.joinClass(with: code)
-                    } else if scannedCode.contains("join/group/") || !scannedCode.contains("://") {
-                        // If it's a group link or just a raw code, treat as group
-                        let code = scannedCode.components(separatedBy: "/").last ?? scannedCode
-                        let (_, errors) = await store.joinSharedGroups(codes: [code])
-                        if let firstError = errors.first {
-                            throw NSError(domain: "App", code: -1, userInfo: [NSLocalizedDescriptionKey: firstError.value])
-                        }
-                    }
+                let preview = try await store.fetchJoinPreview(code: code)
+                await MainActor.run {
+                    self.joinPreview = preview
                 }
             } catch {
                 await MainActor.run {
@@ -416,6 +416,46 @@ struct ClassesListView: View {
                 }
             }
         }
+    }
+    
+    @MainActor
+    private func performConfirmedJoin(preview: JoinPreview) async {
+        do {
+            if preview.type == .schoolClass {
+                // 1. Join Class Immediately for Persistence
+                try await store.joinClass(with: preview.id)
+                
+                // 2. Prepare Context for Optional Selection
+                let info = try await store.fetchClassInfo(with: preview.id)
+                if let config = info.config {
+                    self.joinContext = UnifiedJoinView.ClassJoinContext(
+                        id: info.id,
+                        name: info.name,
+                        config: config,
+                        linkedClassIds: info.linkedClassIds ?? []
+                    )
+                    self.showCourseSelection = true
+                } else {
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                }
+            } else {
+                let (_, errors) = await store.joinSharedGroups(codes: [preview.id])
+                if let error = errors.first {
+                    throw NSError(domain: "Join", code: -1, userInfo: [NSLocalizedDescriptionKey: error.value])
+                }
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            }
+        } catch {
+            self.scanError = error.localizedDescription
+            self.showScanErrorAlert = true
+        }
+    }
+    
+    private func extractPureCode(from raw: String) -> String {
+        if raw.contains("://") || raw.contains("http"), let url = URL(string: raw) {
+            return url.lastPathComponent
+        }
+        return raw.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
@@ -451,42 +491,96 @@ private struct LegacyGroupMigrationSheet: View {
     @State private var isMigrating = false
     @State private var errorMessage: String?
 
+    private var isFeminine: Bool { store.theme == "feminine" }
+    private var isDark: Bool { store.darkMode }
+
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Gruppe") {
-                    Text(store.groupNames[groupId] ?? groupId)
-                        .font(.headline)
-                }
-
-                Section("Aktion") {
-                    Button {
-                        Task { await migrateToNewClass() }
-                    } label: {
-                        Label("Neue Klasse erstellen", systemImage: "plus.rectangle.fill.on.rectangle.fill")
-                    }
-                    .disabled(isMigrating)
-
-                    if ownedClassIds.isEmpty {
-                        Text("Keine eigenen Klassen gefunden.")
-                            .font(.caption)
+            ScrollView {
+                VStack(spacing: 24) {
+                    // Header
+                    VStack(spacing: 4) {
+                        Image(systemName: "square.stack.3d.up.fill")
+                            .font(.system(size: 40))
+                            .foregroundStyle(.indigo)
+                            .padding(.bottom, 4)
+                        
+                        Text("Gruppe migrieren")
+                            .font(.title3.weight(.bold))
+                        
+                        Text("Wähle eine Option, um diese Gruppe in das neue Klassensystem zu übertragen.")
+                            .font(.callout)
                             .foregroundStyle(.secondary)
-                    } else {
-                        NavigationLink("Als Zweig zu Klasse hinzufügen", value: MigrationRoute.addToClass)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 16)
                     }
-                }
+                    .padding(.top, 16)
 
-                if let errorMessage {
-                    Section {
+                    // Group Details
+                    SettingsCard(
+                        title: "Ausgewählte Gruppe",
+                        subtitle: "Diese Gruppe wird migriert",
+                        systemImage: "person.3.fill",
+                        accent: .orange
+                    ) {
+                        Text(store.groupNames[groupId] ?? groupId)
+                            .font(.headline)
+                            .padding(.vertical, 4)
+                    }
+
+                    // Actions
+                    VStack(spacing: 12) {
+                        Button {
+                            Task { await migrateToNewClass() }
+                        } label: {
+                            if isMigrating {
+                                ProgressView().tint(.indigo)
+                            } else {
+                                Label("Als neue Klasse erstellen", systemImage: "plus.rectangle.fill.on.rectangle.fill")
+                                    .frame(maxWidth: .infinity)
+                            }
+                        }
+                        .buttonStyle(SoftTintButtonStyle(accent: .indigo))
+                        .disabled(isMigrating)
+
+                        if !ownedClassIds.isEmpty {
+                            NavigationLink(value: MigrationRoute.addToClass) {
+                                Label("Zu bestehender Klasse hinzufügen", systemImage: "arrow.branch")
+                                    .font(.subheadline.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                                    .padding()
+                                    .background(Color.cyan.opacity(0.1))
+                                    .foregroundStyle(.cyan)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12).strokeBorder(.cyan.opacity(0.2), lineWidth: 1)
+                                    )
+                            }
+                        } else {
+                            Text("Keine eigenen Klassen gefunden, um diese Gruppe als Zweig hinzuzufügen.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.top, 4)
+                        }
+                    }
+
+                    if let errorMessage {
                         Text(errorMessage)
                             .foregroundStyle(.red)
+                            .font(.caption)
+                            .padding(.horizontal, 16)
                     }
                 }
+                .padding(16)
             }
-            .navigationTitle("Gruppe migrieren")
+            .background(ThemedBackground(isDark: isDark, isFeminine: isFeminine, intensity: store.themeBackgroundIntensity))
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") { dismiss() }
+                    Button { dismiss() } label: {
+                        ToolbarIcon(symbol: "chevron.down", showDot: false)
+                    }
                 }
             }
             .navigationDestination(for: MigrationRoute.self) { _ in
@@ -530,50 +624,129 @@ private struct AddLegacyGroupToClassForm: View {
 
     @State private var selectedClassId: String = ""
     @State private var branchName: String = ""
+    @State private var isWahlpflicht: Bool = false
     @State private var isSaving = false
+    @State private var isMigrating = false
     @State private var errorMessage: String?
 
-    var body: some View {
-        Form {
-            Section("Gruppe") {
-                Text(store.groupNames[groupId] ?? groupId)
-                    .font(.headline)
-            }
+    private var isFeminine: Bool { store.theme == "feminine" }
+    private var isDark: Bool { store.darkMode }
 
-            Section("Klasse auswählen") {
-                if ownedClassIds.isEmpty {
-                    Text("Keine Klassen vorhanden.")
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 24) {
+                // ... (Header remains same)
+                VStack(spacing: 4) {
+                    Image(systemName: "arrow.branch")
+                        .font(.system(size: 40))
+                        .foregroundStyle(.cyan)
+                        .padding(.bottom, 4)
+                    
+                    Text("Als Zweig hinzufügen")
+                        .font(.title3.weight(.bold))
+                    
+                    Text("Wähle eine bestehende Klasse aus, zu der diese Gruppe als neuer Zweig oder Wahlpflichtfach hinzugefügt werden soll.")
+                        .font(.callout)
                         .foregroundStyle(.secondary)
-                } else {
-                    Picker("Klasse", selection: $selectedClassId) {
-                        ForEach(ownedClassIds, id: \.self) { cid in
-                            Text(store.classNames[cid] ?? cid).tag(cid)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 16)
+                }
+                .padding(.top, 16)
+
+                // Selection Card
+                SettingsCard(
+                    title: "Konfiguration",
+                    subtitle: "Wähle Zielklasse und Typ",
+                    systemImage: "gearshape.fill",
+                    accent: .cyan
+                ) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        // Class Picker
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Zielklasse")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                            
+                            if ownedClassIds.isEmpty {
+                                Text("Keine Klassen vorhanden.")
+                                    .foregroundStyle(.secondary)
+                                    .padding()
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(Color.formInputBackground)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                            } else {
+                                Picker("Klasse", selection: $selectedClassId) {
+                                    ForEach(ownedClassIds, id: \.self) { cid in
+                                        Text(store.classNames[cid] ?? cid).tag(cid)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .padding(4)
+                                .frame(maxWidth: .infinity)
+                                .background(Color.formInputBackground)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                        }
+                        
+                        // Type Selection
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Typ")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                                
+                            Picker("Typ", selection: $isWahlpflicht) {
+                                Text("Zweig").tag(false)
+                                Text("Wahlpflichtfach").tag(true)
+                            }
+                            .pickerStyle(.segmented)
+                        }
+
+                        // Name TextField
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(isWahlpflicht ? "Name des Wahlpflichtfachs" : "Zweigname (z.B. Technik)")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                            
+                            TextField("Name eingeben...", text: $branchName)
+                                .padding(12)
+                                .background(Color.formInputBackground)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
                         }
                     }
+                    .padding(.vertical, 8)
                 }
-            }
 
-            Section("Zweigname") {
-                TextField("Zweigname", text: $branchName)
-            }
-
-            if let errorMessage {
-                Section {
+                if let errorMessage {
                     Text(errorMessage)
                         .foregroundStyle(.red)
+                        .font(.caption)
+                        .padding(.horizontal, 16)
                 }
+
+                // Add Button
+                Button {
+                    Task { await addToClass() }
+                } label: {
+                    if isSaving {
+                        ProgressView().tint(.cyan)
+                    } else {
+                        Label(isWahlpflicht ? "Als Wahlpflichtfach hinzufügen" : "Als Zweig hinzufügen", systemImage: isWahlpflicht ? "star.fill" : "arrow.branch")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(SoftTintButtonStyle(accent: .cyan))
+                .disabled(isSaving || selectedClassId.isEmpty || branchName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .padding(.top, 8)
             }
+            .padding(16)
         }
-        .navigationTitle("Als Zweig hinzufügen")
+        .background(ThemedBackground(isDark: isDark, isFeminine: isFeminine, intensity: store.themeBackgroundIntensity))
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-                Button("Abbrechen") { dismiss() }
-            }
-            ToolbarItem(placement: .confirmationAction) {
-                Button(isSaving ? "Speichern..." : "Hinzufügen") {
-                    Task { await addToClass() }
+                Button { dismiss() } label: {
+                    ToolbarIcon(symbol: "xmark", showDot: false)
                 }
-                .disabled(isSaving || selectedClassId.isEmpty || branchName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .onAppear {
@@ -587,12 +760,17 @@ private struct AddLegacyGroupToClassForm: View {
     }
 
     private func addToClass() async {
-        let trimmedBranch = branchName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !selectedClassId.isEmpty, !trimmedBranch.isEmpty else { return }
+        let trimmedName = branchName.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        guard !selectedClassId.isEmpty, !trimmedName.isEmpty else { return }
         isSaving = true
         defer { isSaving = false }
         do {
-            try await store.addLegacyGroupToClass(classId: selectedClassId, groupCode: groupId, branchName: trimmedBranch)
+            try await store.addLegacyGroupToClass(
+                classId: selectedClassId,
+                groupCode: groupId,
+                branchName: trimmedName,
+                isWahlpflicht: isWahlpflicht
+            )
             onComplete()
             dismiss()
         } catch {
@@ -610,6 +788,7 @@ private struct ClassCardView: View {
     let branchCount: Int
     let onLeave: () -> Void
     let onDelete: () -> Void
+    let onFinishSetup: () -> Void
     
     @State private var showShareSheet = false
     
@@ -657,31 +836,45 @@ private struct ClassCardView: View {
                 }
                 
                 // Action Buttons
-                HStack(spacing: 12) {
-                    Button {
-                        showShareSheet = true
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "qrcode")
-                            Text("Teilen")
+                if courseCount > 0 {
+                    HStack(spacing: 12) {
+                        Button {
+                            showShareSheet = true
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "qrcode")
+                                Text("Teilen")
+                            }
+                            .font(.caption.weight(.semibold))
+                            .frame(maxWidth: .infinity)
                         }
-                        .font(.caption.weight(.semibold))
+                        .buttonStyle(SoftTintButtonStyle(accent: .indigo, verticalPadding: 10))
+                        
+                        NavigationLink {
+                            ClassDetailView(classId: classId)
+                                .environmentObject(store)
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text("Öffnen")
+                                Image(systemName: "chevron.right")
+                            }
+                            .font(.caption.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(SoftTintButtonStyle(accent: .cyan, verticalPadding: 10))
+                    }
+                } else {
+                    Button {
+                        onFinishSetup()
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "sparkles")
+                            Text("Setup abschließen")
+                        }
+                        .font(.caption.weight(.bold))
                         .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(SoftTintButtonStyle(accent: .indigo, verticalPadding: 10))
-                    
-                    NavigationLink {
-                        ClassDetailView(classId: classId)
-                            .environmentObject(store)
-                    } label: {
-                        HStack(spacing: 6) {
-                            Text("Öffnen")
-                            Image(systemName: "chevron.right")
-                        }
-                        .font(.caption.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(SoftTintButtonStyle(accent: .cyan, verticalPadding: 10))
                 }
             }
         }

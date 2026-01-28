@@ -71,13 +71,25 @@ struct ClassGroupCreationView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") { dismiss() }
+                    Button {
+                        dismiss()
+                    } label: {
+                        ToolbarIcon(symbol: "xmark", showDot: false)
+                    }
+                    .accessibilityLabel("Abbrechen")
                 }
                 
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Erstellen") {
+                    Button {
                         Task { await createGroup() }
+                    } label: {
+                        if isLoading {
+                            ToolbarLoadingIcon()
+                        } else {
+                            ToolbarIcon(symbol: "checkmark", showDot: false)
+                        }
                     }
+                    .accessibilityLabel("Erstellen")
                     .disabled(isLoading || (creationMode == 1 && manualSubjectName.isEmpty) || (creationMode == 0 && availableSubjects.isEmpty))
                 }
             }

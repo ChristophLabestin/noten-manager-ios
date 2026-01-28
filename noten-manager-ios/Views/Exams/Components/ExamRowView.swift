@@ -70,7 +70,7 @@ struct ExamRowView<Actions: View>: View {
                                 .font(.caption2.weight(.bold))
                                 .foregroundStyle(.secondary)
                             
-                            if exam.isShared {
+                            if isSharedExam {
                                 Image(systemName: "person.2.fill")
                                     .font(.caption2)
                                     .foregroundStyle(.blue)
@@ -89,8 +89,8 @@ struct ExamRowView<Actions: View>: View {
                             .lineLimit(2)
                             .strikethrough(exam.isCompleted)
                         
-                        if let context = contextName {
-                            Text(context)
+                        if let sharing = sharingLabel {
+                            Text(sharing)
                                 .font(.caption2)
                                 .foregroundStyle(.blue)
                         }
@@ -145,14 +145,14 @@ struct ExamRowView<Actions: View>: View {
         }
         return store.resolveLocalSubjectNameForExam(exam) ?? exam.subjectName
     }
+    private var isSharedExam: Bool {
+        exam.isShared || exam.courseId != nil || exam.groupId != nil || exam.classId != nil
+    }
     
-    private var contextName: String? {
-        guard exam.isShared else { return nil }
-        let name = store.resolveContextName(groupId: exam.groupId, courseId: exam.courseId)
-            .replacingOccurrences(of: resolvedSubjectName, with: "")
-            .trimmingCharacters(in: .punctuationCharacters)
-            .trimmingCharacters(in: .whitespaces)
-        return name.isEmpty ? nil : name
+    private var sharingLabel: String? {
+        guard isSharedExam else { return nil }
+        let name = store.resolveContextName(groupId: exam.groupId, courseId: exam.courseId, classId: exam.classId)
+        return name.isEmpty ? nil : "Geteilt mit \(name)"
     }
     
     private let examDayFormatter: DateFormatter = {

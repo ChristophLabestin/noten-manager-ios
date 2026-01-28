@@ -47,18 +47,28 @@ struct WebDataMergeSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Abbrechen") { dismiss() }
+                    Button { dismiss() } label: {
+                        ToolbarIcon(symbol: "xmark", showDot: false)
+                    }
+                    .accessibilityLabel("Abbrechen")
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Übernehmen") {
+                    Button {
                         Task {
                             isApplying = true
                             await store.applyWebImport(resolutions: resolutions)
                             isApplying = false
                             dismiss()
                         }
+                    } label: {
+                        if isApplying {
+                            ToolbarLoadingIcon()
+                        } else {
+                            ToolbarIcon(symbol: "checkmark", showDot: false)
+                        }
                     }
                     .disabled(isApplying)
+                    .accessibilityLabel("Übernehmen")
                 }
             }
             .overlay {

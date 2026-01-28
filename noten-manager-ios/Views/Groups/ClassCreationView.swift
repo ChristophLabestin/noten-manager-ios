@@ -86,9 +86,9 @@ struct ClassCreationView: View {
                         accent: .indigo
                     ) {
                         VStack(alignment: .leading, spacing: 12) {
-                            FlowLayout(spacing: 8) {
+                            VStack(spacing: 8) {
                                 ForEach($commonSubjects) { $subject in
-                                    SubjectCreationPill(
+                                    SubjectCreationRow(
                                         name: subject.name,
                                         hasSA: $subject.hasSchulaufgabe,
                                         onDelete: {
@@ -221,7 +221,6 @@ struct ClassCreationView: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
         .sheet(isPresented: $showSubjectMapping, onDismiss: {
             dismiss()
         }) {
@@ -329,11 +328,10 @@ struct SubjectGroupEditCard: View {
                 
                 Divider()
                 
-                // Subjects Flow Layout
                 if !subjects.isEmpty {
-                    FlowLayout(spacing: 8) {
+                    VStack(spacing: 8) {
                         ForEach($subjects) { $subject in
-                            SubjectCreationPill(
+                            SubjectCreationRow(
                                 name: subject.name,
                                 hasSA: $subject.hasSchulaufgabe,
                                 color: color,
@@ -391,42 +389,65 @@ struct SubjectGroupEditCard: View {
     }
 }
 
-struct SubjectCreationPill: View {
+struct SubjectCreationRow: View {
     let name: String
     @Binding var hasSA: Bool
     var color: Color = .indigo
     let onDelete: () -> Void
     
     var body: some View {
-        HStack(spacing: 8) {
-            Text(name)
-                .font(.subheadline.weight(.semibold))
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name)
+                    .font(.subheadline.weight(.bold))
+                
+                Text(hasSA ? "Mit Schulaufgaben" : "ohne Schulaufgaben")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            
+            Spacer()
             
             Button {
-                withAnimation(.spring()) {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                     hasSA.toggle()
                 }
             } label: {
-                Text("SA")
-                    .font(.system(size: 10, weight: .bold))
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 2)
-                    .background(hasSA ? color : Color.secondary.opacity(0.2))
-                    .foregroundStyle(hasSA ? .white : .secondary)
-                    .cornerRadius(4)
+                HStack(spacing: 4) {
+                    Text("SA")
+                        .font(.system(size: 10, weight: .black))
+                    Image(systemName: hasSA ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 14))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(hasSA ? color.opacity(0.15) : Color.secondary.opacity(0.1))
+                .foregroundStyle(hasSA ? color : .secondary)
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(hasSA ? color.opacity(0.3) : Color.clear, lineWidth: 1)
+                )
             }
             
             Button(action: onDelete) {
-                Image(systemName: "xmark")
-                    .font(.caption2.bold())
-                    .foregroundStyle(color.opacity(0.5))
+                Image(systemName: "trash")
+                    .font(.subheadline)
+                    .foregroundStyle(.red.opacity(0.7))
+                    .padding(8)
+                    .background(Color.red.opacity(0.05))
+                    .clipShape(Circle())
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(color.opacity(0.1))
-        .foregroundStyle(color)
-        .clipShape(Capsule())
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.formInputBackground.opacity(0.5))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(color.opacity(0.1), lineWidth: 1)
+        )
     }
 }
 

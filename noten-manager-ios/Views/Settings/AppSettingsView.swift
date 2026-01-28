@@ -2027,7 +2027,7 @@ struct AppSettingsView: View {
                     guard !isCreatingSchoolYearLocal else { return }
                     isCreatingSchoolYearLocal = true
                     defer { isCreatingSchoolYearLocal = false }
-                    let created = await store.createSchoolYear(name: newSchoolYearName)
+                    let created = await store.createSchoolYear(name: newSchoolYearName, gradeYear: nil, schoolType: nil)
                     if let id = created {
                         schoolYearMessage = "Neues Schuljahr \(id) aktiviert."
                         schoolYearError = nil
@@ -2391,9 +2391,7 @@ struct AppSettingsView: View {
                                     cancel()
                                     dismiss()
                                 } label: {
-                                    Image(systemName: "xmark")
-                                        .imageScale(.medium)
-                                        .foregroundStyle(Color.primary)
+                                    ToolbarIcon(symbol: "xmark", showDot: false)
                                 }
                                 .accessibilityLabel("Abbrechen")
                             }
@@ -2523,9 +2521,7 @@ struct AppSettingsView: View {
                                     cancel()
                                     dismiss()
                                 } label: {
-                                    Image(systemName: "xmark")
-                                        .imageScale(.medium)
-                                        .foregroundStyle(Color.primary)
+                                    ToolbarIcon(symbol: "xmark", showDot: false)
                                 }
                                 .accessibilityLabel("Abbrechen")
                             }
@@ -2820,9 +2816,7 @@ struct AppSettingsView: View {
                                 Button {
                                     dismiss()
                                 } label: {
-                                    Image(systemName: "chevron.down")
-                                        .imageScale(.medium)
-                                        .foregroundStyle(Color.primary)
+                                    ToolbarIcon(symbol: "chevron.down", showDot: false)
                                 }
                                 .accessibilityLabel("Schließen")
                             }
@@ -3427,9 +3421,7 @@ struct AppSettingsView: View {
                                     isPresented = false
                                     dismiss()
                                 } label: {
-                                    Image(systemName: "xmark")
-                                        .imageScale(.medium)
-                                        .foregroundStyle(Color.primary)
+                                    ToolbarIcon(symbol: "xmark", showDot: false)
                                 }
                                 .accessibilityLabel("Abbrechen")
                             }

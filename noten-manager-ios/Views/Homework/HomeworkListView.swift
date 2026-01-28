@@ -135,9 +135,7 @@ struct HomeworkListView: View {
                     Button {
                         dismiss()
                     } label: {
-                        Image(systemName: "chevron.down")
-                            .imageScale(.medium)
-                            .foregroundStyle(Color.primary)
+                        ToolbarIcon(symbol: "chevron.down", showDot: false)
                     }
                     .accessibilityLabel("Schließen")
                 }
@@ -145,8 +143,7 @@ struct HomeworkListView: View {
                     Button {
                         showAddHomework()
                     } label: {
-                        Image(systemName: "plus")
-                            .foregroundStyle(Color.primary)
+                        ToolbarIcon(symbol: "plus", showDot: false)
                     }
                     .accessibilityLabel("Hausaufgabe hinzufügen")
                 }
@@ -242,12 +239,12 @@ struct HomeworkListView: View {
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(.secondary)
                     
-                    if hw.isShared {
+                    if hw.isShared || hw.courseId != nil || hw.groupId != nil {
                         Image(systemName: "person.2.fill") // Group Icon
                             .font(.caption2)
                             .foregroundStyle(.blue)
                          
-                         let contextName = store.resolveContextName(groupId: hw.groupId, courseId: hw.courseId).replacingOccurrences(of: resolvedSubjectName(for: hw), with: "").trimmingCharacters(in: .punctuationCharacters).trimmingCharacters(in: .whitespaces)
+                         let contextName = store.resolveContextName(groupId: hw.groupId, courseId: hw.courseId)
                          if !contextName.isEmpty {
                              Text("• \(contextName)")
                                 .font(.caption2)
@@ -569,8 +566,7 @@ private struct LocalHomeworkReminderSheet: View {
                     Button {
                         dismiss()
                     } label: {
-                        Image(systemName: "xmark")
-                            .imageScale(.medium)
+                        ToolbarIcon(symbol: "xmark", showDot: false)
                     }
                     .accessibilityLabel("Abbrechen")
                 }
@@ -579,10 +575,9 @@ private struct LocalHomeworkReminderSheet: View {
                         Task { await save() }
                     } label: {
                         if isSaving {
-                            ProgressView()
+                            ToolbarLoadingIcon()
                         } else {
-                            Image(systemName: "checkmark")
-                                .imageScale(.medium)
+                            ToolbarIcon(symbol: "checkmark", showDot: false)
                         }
                     }
                     .accessibilityLabel("Speichern")

@@ -124,10 +124,9 @@ struct ShareCodeSheet: View {
                     Button {
                         dismiss()
                     } label: {
-                        Image(systemName: "chevron.down")
-                            .imageScale(.medium)
-                            .foregroundStyle(colorScheme == .dark ? Color.white : Color.black)
+                        ToolbarIcon(symbol: "chevron.down", showDot: false)
                     }
+                    .accessibilityLabel("Schließen")
                 }
             }
         }

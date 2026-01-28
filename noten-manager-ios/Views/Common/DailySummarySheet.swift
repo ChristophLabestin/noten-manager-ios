@@ -50,11 +50,13 @@ struct DailySummarySheet: View {
             .navigationTitle("Tagesübersicht")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button("Fertig") {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
                         dismiss()
+                    } label: {
+                        ToolbarIcon(symbol: "checkmark", showDot: false)
                     }
-                    .font(.body.weight(.semibold))
+                    .accessibilityLabel("Fertig")
                 }
             }
         }
@@ -90,6 +92,12 @@ struct DailySummarySheet: View {
                                 Text(exam.subjectName)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                            }
+                            let sharing = store.resolveContextName(groupId: exam.groupId, courseId: exam.courseId)
+                            if !sharing.isEmpty {
+                                Text("Geteilt mit \(sharing)")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.blue)
                             }
                         }
                         Spacer()
@@ -134,6 +142,12 @@ struct DailySummarySheet: View {
                                 Text(hw.subjectName)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                            }
+                            let sharing = store.resolveContextName(groupId: hw.groupId, courseId: hw.courseId)
+                            if !sharing.isEmpty {
+                                Text("Geteilt mit \(sharing)")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.blue)
                             }
                         }
                         Spacer()

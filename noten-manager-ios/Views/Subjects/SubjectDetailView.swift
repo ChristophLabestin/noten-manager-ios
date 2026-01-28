@@ -80,7 +80,9 @@ struct SubjectDetailView: View {
     @State private var detailExam: Exam? = nil
     @State private var detailHomework: Homework? = nil
     @State private var editingExam: Exam? = nil
+
     @State private var editingHomework: Homework? = nil
+    @State private var showSetFixedAverageSheet: Bool = false
     
     private var editSheetTitle: String {
         let name = editName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -108,6 +110,10 @@ struct SubjectDetailView: View {
         _currentIsElective = State(initialValue: subject.isElective)
         let gm = subject.gradingMode ?? (subject.type == 1 ? .withSchulaufgaben : .withoutSchulaufgaben)
         _currentGradingMode = State(initialValue: gm)
+    }
+    
+    private var activeSubject: Subject {
+        store.subjects.first(where: { $0.name == currentSubjectName }) ?? subject
     }
     
 
@@ -154,11 +160,15 @@ struct SubjectDetailView: View {
     }
     
     private func averageForSubject() -> Double? {
-        let droppedHalf = subject.droppedHalfYear
+        if let vYear = activeSubject.fixedAverageYearly, halfYear == .all {
+            return vYear
+        }
+    
+        let droppedHalf = activeSubject.droppedHalfYear
         switch halfYear {
         case .all:
-            let v1 = droppedHalf == 1 ? nil : store.bestAvailableHalfYearValue(subject: subject, halfYear: 1)
-            let v2 = droppedHalf == 2 ? nil : store.bestAvailableHalfYearValue(subject: subject, halfYear: 2)
+            let v1 = droppedHalf == 1 ? nil : store.bestAvailableHalfYearValue(subject: activeSubject, halfYear: 1)
+            let v2 = droppedHalf == 2 ? nil : store.bestAvailableHalfYearValue(subject: activeSubject, halfYear: 2)
             switch (v1, v2) {
             case let (a?, b?):
                 return (a + b) / 2.0
@@ -171,10 +181,10 @@ struct SubjectDetailView: View {
             }
         case .one:
             if droppedHalf == 1 { return nil }
-            return store.bestAvailableHalfYearValue(subject: subject, halfYear: 1)
+            return store.bestAvailableHalfYearValue(subject: activeSubject, halfYear: 1)
         case .two:
             if droppedHalf == 2 { return nil }
-            return store.bestAvailableHalfYearValue(subject: subject, halfYear: 2)
+            return store.bestAvailableHalfYearValue(subject: activeSubject, halfYear: 2)
         }
     }
     
@@ -252,7 +262,7 @@ struct SubjectDetailView: View {
     private func matchesSubject(name: String) -> Bool {
         let target = currentSubjectName.lowercased()
         let alias = currentAlias?.lowercased()
-        let original = subject.name.lowercased()
+        let original = activeSubject.name.lowercased()
         let lookup = name.lowercased()
         return lookup == target || lookup == original || (alias != nil && lookup == alias)
     }
@@ -313,8 +323,8 @@ struct SubjectDetailView: View {
                     if halfYear == .all {
                         let halfYears = Set(allGrades.compactMap { $0.halfYear })
                         if halfYears.count == 1, let onlyHalf = halfYears.first {
-                            let comp = store.computeHalfYearFoboso(subject: subject, halfYear: onlyHalf)
-                            let value = fobosoValueText(comp, subject: subject, halfYear: onlyHalf)
+                            let comp = store.computeHalfYearFoboso(subject: activeSubject, halfYear: onlyHalf)
+                            let value = fobosoValueText(comp, subject: activeSubject, halfYear: onlyHalf)
                             StatChip(title: "\(onlyHalf). Hj", value: value, accent: .teal)
                         } else {
                             let avg = averageForSubject()
@@ -322,8 +332,8 @@ struct SubjectDetailView: View {
                         }
                     } else {
                         let half = (halfYear == .one) ? 1 : 2
-                        let comp = store.computeHalfYearFoboso(subject: subject, halfYear: half)
-                        StatChip(title: "\(half). Hj", value: fobosoValueText(comp, subject: subject, halfYear: half), accent: .teal)
+                        let comp = store.computeHalfYearFoboso(subject: activeSubject, halfYear: half)
+                        StatChip(title: "\(half). Hj", value: fobosoValueText(comp, subject: activeSubject, halfYear: half), accent: .teal)
                     }
                     StatChip(title: "Noten", value: "\(allGrades.count)", accent: .orange)
                     StatChip(title: "Klausuren", value: "\(upcomingExamsCount)", accent: .mint)
@@ -332,7 +342,7 @@ struct SubjectDetailView: View {
                 if halfYear != .all {
                     let half = (halfYear == .one) ? 1 : 2
                     // Always show the calculated grade value
-                    if let value = store.bestAvailableHalfYearValue(subject: subject, halfYear: half) {
+                    if let value = store.bestAvailableHalfYearValue(subject: activeSubject, halfYear: half) {
                         StatChip(title: "\(half). Hj", value: String(format: "%.\(store.mssDecimalPrecision)f Punkte", value), accent: .teal)
                     }
                 }
@@ -758,10 +768,8 @@ struct SubjectDetailView: View {
                         Button {
                             cancelEditSubject()
                         } label: {
-                            Image(systemName: "chevron.down")
-                                .imageScale(.medium)
+                            ToolbarIcon(symbol: "chevron.down", showDot: false)
                         }
-                        .foregroundStyle(.primary)
                         .accessibilityLabel("Abbrechen")
                     }
                     ToolbarItem(placement: .confirmationAction) {
@@ -769,13 +777,11 @@ struct SubjectDetailView: View {
                             Task { await handleSaveSubject() }
                         } label: {
                             if isSavingSubject {
-                                ProgressView()
+                                ToolbarLoadingIcon()
                             } else {
-                                Image(systemName: "checkmark")
-                                    .imageScale(.medium)
+                                ToolbarIcon(symbol: "checkmark", showDot: false)
                             }
                         }
-                        .foregroundStyle(.primary)
                         .accessibilityLabel("Speichern")
                         .disabled(isSavingSubject)
                     }
@@ -895,7 +901,8 @@ struct SubjectDetailView: View {
             AddActionChooserView(
                 onHomework: { showAddHomeworkSheet = true },
                 onGrade: { showAddGradeSheet = true },
-                onExam: { showAddExamSheet = true }
+                onExam: { showAddExamSheet = true },
+                onSetAverage: { showSetFixedAverageSheet = true }
             )
             .environmentObject(store)
 #if os(iOS)
@@ -920,6 +927,20 @@ struct SubjectDetailView: View {
                 AddExamView(preselectedSubjectName: currentSubjectName)
                     .environmentObject(store)
             }
+        }
+        .sheet(isPresented: $showSetFixedAverageSheet) {
+            SetFixedAverageView(
+                subjectName: currentSubjectName,
+                currentHalfYear1: activeSubject.fixedAverageHalfYear1,
+                currentHalfYear2: activeSubject.fixedAverageHalfYear2,
+                currentYearly: activeSubject.fixedAverageYearly,
+                calculatedHalfYear1: store.computeHalfYearFoboso(subject: activeSubject, halfYear: 1).rawFinal ?? store.bestAvailableHalfYearValue(subject: activeSubject, halfYear: 1), // simplified logic usage
+                calculatedHalfYear2: store.computeHalfYearFoboso(subject: activeSubject, halfYear: 2).rawFinal ?? store.bestAvailableHalfYearValue(subject: activeSubject, halfYear: 2),
+                calculatedYearly: nil // Yearly dynamic usually needs complex recalc, leaving nil for now or could implement simplified version
+            ) { v1, v2, vY in
+                await store.updateSubjectFixedAverages(subjectName: currentSubjectName, val1: v1, val2: v2, valYear: vY)
+            }
+            .presentationDetents([.large])
         }
         .sheet(item: $examForNewGrade) { exam in
             let note = noteForExam(exam)
@@ -1017,6 +1038,12 @@ struct SubjectDetailView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                let sharing = store.resolveContextName(groupId: exam.groupId, courseId: exam.courseId)
+                if !sharing.isEmpty {
+                    Text("Geteilt mit \(sharing)")
+                        .font(.caption2)
+                        .foregroundStyle(.blue)
+                }
                 if let notes = exam.notes, !notes.isEmpty {
                     Text(notes)
                         .font(.caption2)
@@ -1113,6 +1140,12 @@ struct SubjectDetailView: View {
                     if let badge {
                         attentionBadge(badge.text, color: badge.color, icon: badge.icon)
                     }
+                }
+                let sharing = store.resolveContextName(groupId: homework.groupId, courseId: homework.courseId)
+                if !sharing.isEmpty {
+                    Text("Geteilt mit \(sharing)")
+                        .font(.caption2)
+                        .foregroundStyle(.blue)
                 }
             }
             Spacer()
@@ -1247,6 +1280,7 @@ struct SubjectDetailView: View {
         let onHomework: () -> Void
         let onGrade: () -> Void
         let onExam: () -> Void
+        let onSetAverage: () -> Void
         @EnvironmentObject private var store: GradesStore
         @Environment(\.colorScheme) private var colorScheme
         @Environment(\.dismiss) private var dismiss
@@ -1277,6 +1311,16 @@ struct SubjectDetailView: View {
                                 icon: "calendar.badge.clock",
                                 color: .orange,
                                 action: onExam
+                            )
+                            
+                            Divider()
+                                .padding(.vertical, 4)
+                            
+                            listActionRow(
+                                title: "Festen Schnitt setzen",
+                                icon: "slider.horizontal.3",
+                                color: .teal,
+                                action: onSetAverage
                             )
                         }
                     }

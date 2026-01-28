@@ -549,13 +549,12 @@ struct AuthView: View {
                     Button {
                         showResetSheet = false
                     } label: {
-                        Image(systemName: "xmark")
-                            .imageScale(.medium)
+                        ToolbarIcon(symbol: "xmark", showDot: false)
                     }
                     .accessibilityLabel("Abbrechen")
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Senden") {
+                    Button {
                         let email = resetEmail.trimmingCharacters(in: .whitespacesAndNewlines)
                         guard !email.isEmpty else {
                             resetInfo = "Bitte gib deine E-Mail ein."
@@ -565,8 +564,15 @@ struct AuthView: View {
                             await authManager.resetPassword(email: email)
                             resetInfo = "E-Mail zum Zurücksetzen wurde gesendet (falls Konto existiert)."
                         }
+                    } label: {
+                        if authManager.isLoading {
+                            ToolbarLoadingIcon()
+                        } else {
+                            ToolbarIcon(symbol: "paperplane", showDot: false)
+                        }
                     }
                     .disabled(authManager.isLoading)
+                    .accessibilityLabel("Senden")
                 }
             }
             .onAppear {

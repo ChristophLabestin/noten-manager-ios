@@ -77,6 +77,9 @@ struct EditExamView: View {
             } else if let cid = exam.courseId {
                 _selectedCourseIds = State(initialValue: [cid])
                 _shareWithGroup = State(initialValue: true)
+            } else if let clid = exam.classId {
+                _selectedClassIds = State(initialValue: [clid])
+                _shareWithGroup = State(initialValue: true)
             }
         }
     }
@@ -140,7 +143,7 @@ struct EditExamView: View {
             return "Sonstige Leistung"
         }
         let options = weightOptions(for: gradingMode)
-        if let match = options.first(where: { $0.value == examWeight }) {
+        if let match = options.first(where: { $0.type == examAssessmentType }) {
             return match.title
         }
         return "Art auswählen"
@@ -604,9 +607,7 @@ struct EditExamView: View {
                     Button {
                         dismiss()
                     } label: {
-                        Image(systemName: "xmark")
-                            .imageScale(.medium)
-                            .foregroundStyle(Color.primary)
+                        ToolbarIcon(symbol: "xmark", showDot: false)
                     }
                     .accessibilityLabel("Abbrechen")
                 }
@@ -615,11 +616,9 @@ struct EditExamView: View {
                         Task { await save() }
                     } label: {
                         if isSaving {
-                            ProgressView()
+                            ToolbarLoadingIcon()
                         } else {
-                            Image(systemName: "checkmark")
-                                .imageScale(.medium)
-                                .foregroundStyle(Color.primary)
+                            ToolbarIcon(symbol: "checkmark", showDot: false)
                         }
                     }
                     .accessibilityLabel("Speichern")
@@ -697,23 +696,41 @@ struct EditExamView: View {
             let hasTime = includeTime
             if exam.isShared {
                 if let gid = exam.groupId {
-                    try await store.updateSharedExamInGroup(
-                        groupId: gid,
-                        id: exam.id,
-                        subjectName: effectiveSubject,
-                        subjectKey: relatedSubject,
-                        title: trimmedTitle,
-                        notes: storedNotes,
-                        date: examDate,
-                        hasTime: hasTime,
-                        weight: weightToStore,
-                        customWeight: customWeight,
-                        assessmentType: allowWeights && !useCustomWeight ? examAssessmentType : nil,
-                        reminderAt: reminder
-                    )
+                    if store.wahlpflichtfachGroupIds.contains(gid) {
+                        try await store.updateSharedExamInWpGroup(
+                            wpGroupId: gid,
+                            id: exam.id,
+                            subjectName: effectiveSubject,
+                            subjectKey: relatedSubject,
+                            title: trimmedTitle,
+                            notes: storedNotes,
+                            date: examDate,
+                            hasTime: hasTime,
+                            weight: weightToStore,
+                            customWeight: customWeight,
+                            assessmentType: allowWeights && !useCustomWeight ? examAssessmentType : nil,
+                            reminderAt: reminder
+                        )
+                    } else {
+                        try await store.updateSharedExamInGroup(
+                            groupId: gid,
+                            id: exam.id,
+                            subjectName: effectiveSubject,
+                            subjectKey: relatedSubject,
+                            title: trimmedTitle,
+                            notes: storedNotes,
+                            date: examDate,
+                            hasTime: hasTime,
+                            weight: weightToStore,
+                            customWeight: customWeight,
+                            assessmentType: allowWeights && !useCustomWeight ? examAssessmentType : nil,
+                            reminderAt: reminder
+                        )
+                    }
                     try await store.setUserReminderForSharedExam(examId: exam.id, reminderAt: reminder, groupId: gid)
                     await store.setUserNoteForSharedExam(examId: exam.id, note: personalNote, groupId: gid)
                 } else if let cid = exam.courseId {
+                     // Course-level exams: nested path classes/{classId}/courses/{courseId}/exams
                      try await store.updateSharedExamInCourse(
                         courseId: cid,
                         id: exam.id,
@@ -728,10 +745,25 @@ struct EditExamView: View {
                         assessmentType: allowWeights && !useCustomWeight ? examAssessmentType : nil,
                         reminderAt: reminder
                      )
-                     // Reminders for course exams? Currently simpler model, but let's assume we can set reminders on the "Course Exam" ID generally or via same method if ID is unique.
-                     // setUserReminderForSharedExam expects groupId opt.
                      try await store.setUserReminderForSharedExam(examId: exam.id, reminderAt: reminder, groupId: nil) 
-                     // nil groupId works as long as ID is unique in sharedExams list.
+                     await store.setUserNoteForSharedExam(examId: exam.id, note: personalNote, groupId: nil)
+                } else if let clid = exam.classId {
+                     // Class-level exams: classes/{classId}/exams
+                     try await store.updateSharedExamInClass(
+                        classId: clid,
+                        id: exam.id,
+                        subjectName: effectiveSubject,
+                        subjectKey: relatedSubject,
+                        title: trimmedTitle,
+                        notes: storedNotes,
+                        date: examDate,
+                        hasTime: hasTime,
+                        weight: weightToStore,
+                        customWeight: customWeight,
+                        assessmentType: allowWeights && !useCustomWeight ? examAssessmentType : nil,
+                        reminderAt: reminder
+                     )
+                     try await store.setUserReminderForSharedExam(examId: exam.id, reminderAt: reminder, groupId: nil)
                      await store.setUserNoteForSharedExam(examId: exam.id, note: personalNote, groupId: nil)
                 } else {
                     // Fallback or Error
@@ -772,8 +804,18 @@ struct EditExamView: View {
     private func deleteExam() async {
         guard !isDeleting else { return }
         isDeleting = true
-        if exam.isShared, let gid = exam.groupId {
-            await store.deleteSharedExamFromGroup(groupId: gid, id: exam.id)
+        if exam.isShared {
+            if let gid = exam.groupId {
+                if store.wahlpflichtfachGroupIds.contains(gid) {
+                    await store.deleteSharedExamFromWpGroup(wpGroupId: gid, id: exam.id)
+                } else {
+                    await store.deleteSharedExamFromGroup(groupId: gid, id: exam.id)
+                }
+            } else if let cid = exam.courseId {
+                try? await store.deleteExamFromCourse(courseId: cid, examId: exam.id)
+            } else if let clid = exam.classId {
+                await store.deleteSharedExamFromClass(classId: clid, id: exam.id)
+            }
         } else {
             await store.deleteExamFromFirestore(id: exam.id)
         }
@@ -878,57 +920,101 @@ struct EditExamView: View {
         guard let currentId = currentUserId, exam.creatorId == currentId else { return }
         
         // 1. Check if the current source was deselected
-        // If the exam is from a course (exam.courseId) and that course is NOT in selectedCourseIds:
+        if let clid = exam.classId, !selectedClassIds.contains(clid) {
+            await store.deleteSharedExamFromClass(classId: clid, id: exam.id)
+        }
         if let cid = exam.courseId, !selectedCourseIds.contains(cid) {
-             // Unshare (delete) from this course
-             // Note: GradesStore might need a specific delete method for courses if different from groups?
-             // `deleteCourse` removes the course. `deleteSharedExamFromGroup` removes from `groups/{gid}`.
-             // We need `deleteExamFromCourse`.
-             try? await store.deleteExamFromCourse(courseId: cid, examId: exam.id)
+            try? await store.deleteExamFromCourse(courseId: cid, examId: exam.id)
+        }
+        if let gid = exam.groupId, !selectedGroupIds.contains(gid) {
+            if store.wahlpflichtfachGroupIds.contains(gid) {
+                await store.deleteSharedExamFromWpGroup(wpGroupId: gid, id: exam.id)
+            } else {
+                await store.deleteSharedExamFromGroup(groupId: gid, id: exam.id)
+            }
         }
 
         // 2. Share to new targets
-        // Note: This creates NEW copies. Existing copies in other groups are not tracked here unless we query them.
-        // We only "manage" the current exam instance and "add" new ones.
-        // To avoid creating duplicates in the CURRENT source, filter it out.
+        let overrideSubjectName = subjects.contains(where: { $0.name == subjectName }) ? nil : subjectName
+        let effectiveSubject = isFachreferatExam ? "Fachreferat" : subjectName
+        let weightToStore = useCustomWeight ? nil : examWeight
+        let customWeight = useCustomWeight ? parsedCustomWeight() : nil
         
-        let targetCourseIds = selectedCourseIds.filter { $0 != exam.courseId }
-        // Classes logic for new targets
-        // Add course IDs from selected classes
-        var finalCourseIds = targetCourseIds
-        for classId in selectedClassIds {
-             let cids = store.courses.filter { $0.classId == classId }.map { $0.id }
-             for cid in cids where cid != exam.courseId {
-                 // Check if already in finalCourseIds
-                 if !finalCourseIds.contains(cid) {
-                     finalCourseIds.insert(cid)
-                 }
-             }
+        // Share to new Classes
+        let targetClassIds = selectedClassIds.filter { $0 != exam.classId }
+        for clid in targetClassIds {
+            _ = try? await store.addExamToClass(
+                classId: clid,
+                subjectName: isGeneralEvent ? (overrideSubjectName ?? "Termin") : effectiveSubject,
+                title: title,
+                notes: notes,
+                date: combinedExamDate(),
+                hasTime: includeTime,
+                weight: weightToStore,
+                customWeight: customWeight,
+                assessmentType: useCustomWeight ? nil : examAssessmentType,
+                reminderAt: hasReminder ? reminderDate : nil,
+                requiresGrade: requiresGrade
+            )
         }
         
-        // Use shareToGroups logic (but customized for editing context to avoid side effects like dismissing prematurely)
-        // Actually, we can just reuse the core logic of `shareToGroups` manually.
+        // Share to new Wahlpflicht/Courses
+        let targetCourseIds = selectedCourseIds.filter { $0 != exam.courseId }
+        for cid in targetCourseIds {
+            if let course = store.courses.first(where: { $0.id == cid }) {
+                if case .wahlpflicht(let wpId) = course.type {
+                    // Only share if not already the current source
+                    if exam.groupId != wpId {
+                        _ = try? await store.addExamToWahlpflichtfachGroup(
+                            wpGroupId: wpId,
+                            subjectName: isGeneralEvent ? (overrideSubjectName ?? "Termin") : effectiveSubject,
+                            title: title,
+                            notes: notes,
+                            date: combinedExamDate(),
+                            hasTime: includeTime,
+                            weight: weightToStore,
+                            customWeight: customWeight,
+                            assessmentType: useCustomWeight ? nil : examAssessmentType,
+                            reminderAt: hasReminder ? reminderDate : nil,
+                            requiresGrade: requiresGrade
+                        )
+                    }
+                } else {
+                    _ = try? await store.addExamToCourse(
+                        courseId: cid,
+                        subjectName: overrideSubjectName,
+                        title: title,
+                        notes: notes,
+                        date: combinedExamDate(),
+                        hasTime: includeTime,
+                        weight: weightToStore,
+                        customWeight: customWeight,
+                        assessmentType: useCustomWeight ? nil : examAssessmentType,
+                        reminderAt: hasReminder ? reminderDate : nil,
+                        requiresGrade: requiresGrade
+                    )
+                }
+            }
+        }
         
-        let overrideSubjectName = subjects.contains(where: { $0.name == subjectName }) ? nil : subjectName
-        
-        for courseId in finalCourseIds {
-             do {
-                 _ = try await store.addExamToCourse(
-                     courseId: courseId,
-                     subjectName: overrideSubjectName,
-                     title: title,
-                     notes: notes,
-                     date: combinedExamDate(),
-                     hasTime: includeTime,
-                     weight: useCustomWeight ? nil : examWeight,
-                     customWeight: useCustomWeight ? parsedCustomWeight() : nil,
-                     assessmentType: useCustomWeight ? nil : examAssessmentType,
-                     reminderAt: hasReminder ? reminderDate : nil,
-                     requiresGrade: requiresGrade
-                 )
-             } catch {
-                 print("Error adding to course \(courseId): \(error)")
-             }
+        // Share to new Social Groups
+        let targetSocialGroupIds = Array(selectedGroupIds.filter { gid in
+            gid != exam.groupId && (store.groupTypes[gid] == "social")
+        })
+        if !targetSocialGroupIds.isEmpty {
+            _ = try? await store.addExamToGroups(
+                subjectName: isGeneralEvent ? (overrideSubjectName ?? "Termin") : effectiveSubject,
+                title: title,
+                notes: notes,
+                date: combinedExamDate(),
+                hasTime: includeTime,
+                weight: weightToStore,
+                customWeight: customWeight,
+                assessmentType: useCustomWeight ? nil : examAssessmentType,
+                reminderAt: hasReminder ? reminderDate : nil,
+                requiresGrade: requiresGrade,
+                targetGroupIds: targetSocialGroupIds
+            )
         }
         
     }

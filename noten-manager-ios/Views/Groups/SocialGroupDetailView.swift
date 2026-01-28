@@ -52,9 +52,9 @@ struct SocialGroupDetailView: View {
                 Button {
                     showShareSheet = true
                 } label: {
-                    Image(systemName: "square.and.arrow.up")
-                        .foregroundStyle(isDark ? .white : .black)
+                    ToolbarIcon(symbol: "square.and.arrow.up", showDot: false)
                 }
+                .accessibilityLabel("Teilen")
             }
         }
         .sheet(isPresented: $showShareSheet) {

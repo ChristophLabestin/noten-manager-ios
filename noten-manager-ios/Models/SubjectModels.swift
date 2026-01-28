@@ -69,6 +69,11 @@ struct Subject: Codable, Identifiable, Hashable {
     let writtenExamPointsEncrypted: String?
     let oralExamPointsEncrypted: String?
     let isElective: Bool
+    
+    // Fixed Averages (Overrides)
+    let fixedAverageHalfYear1: Double?
+    let fixedAverageHalfYear2: Double?
+    let fixedAverageYearly: Double?
 
     init(name: String,
          type: Int,
@@ -86,7 +91,10 @@ struct Subject: Codable, Identifiable, Hashable {
          examPointsEncrypted: String? = nil,
          writtenExamPointsEncrypted: String? = nil,
          oralExamPointsEncrypted: String? = nil,
-         isElective: Bool = false) {
+         isElective: Bool = false,
+         fixedAverageHalfYear1: Double? = nil,
+         fixedAverageHalfYear2: Double? = nil,
+         fixedAverageYearly: Double? = nil) {
         self.name = name
         self.type = type
         self.gradingMode = gradingMode
@@ -104,6 +112,9 @@ struct Subject: Codable, Identifiable, Hashable {
         self.writtenExamPointsEncrypted = writtenExamPointsEncrypted
         self.oralExamPointsEncrypted = oralExamPointsEncrypted
         self.isElective = isElective
+        self.fixedAverageHalfYear1 = fixedAverageHalfYear1
+        self.fixedAverageHalfYear2 = fixedAverageHalfYear2
+        self.fixedAverageYearly = fixedAverageYearly
     }
 }
 

@@ -512,7 +512,7 @@ struct MainView: View {
 
     @MainActor
     private func createNextSchoolYear(id: String) async {
-        let created = await gradesStore.createSchoolYear(name: id)
+        let created = await gradesStore.createSchoolYear(name: id, gradeYear: nil, schoolType: nil)
         if created == nil {
             await gradesStore.setActiveSchoolYear(id: id)
         }
@@ -599,11 +599,9 @@ struct MainView: View {
         Button {
             showOfflineBannerTemporarily()
         } label: {
-            Image(systemName: "wifi.slash")
-                .imageScale(.medium)
+            ToolbarIcon(symbol: "wifi.slash", showDot: false)
         }
         .buttonStyle(.plain)
-        .foregroundStyle(.primary)
     }
 
     private func showOfflineBannerTemporarily() {
@@ -724,11 +722,9 @@ struct MainView: View {
         Button {
             showEmailBannerTemporarily()
         } label: {
-            Image(systemName: "info.circle.fill")
-                .imageScale(.medium)
+            ToolbarIcon(symbol: "info.circle.fill", showDot: false)
         }
         .buttonStyle(.plain)
-        .foregroundStyle(Color.orange.opacity(0.85))
     }
 
     private func showEmailBannerTemporarily() {

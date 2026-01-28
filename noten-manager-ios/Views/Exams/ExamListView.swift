@@ -240,6 +240,27 @@ struct ExamListView: View {
         } label: {
             Label("Löschen", systemImage: "trash")
         }
+        
+        // Migration option for legacy exams
+        if exam.groupId != nil && exam.courseId == nil && exam.classId == nil && store.activeClassId != nil {
+            Button {
+                Task {
+                    if let activeClass = store.activeClassId {
+                        // Attempt to find a matching course in the active class
+                        let matchingCourse = store.courses.first { 
+                            $0.classId == activeClass && $0.subjectKey == exam.subjectKey 
+                        }
+                        try? await store.migrateSharedExamToClass(
+                            exam: exam, 
+                            targetClassId: activeClass, 
+                            targetCourseId: matchingCourse?.id
+                        )
+                    }
+                }
+            } label: {
+                Label("In Klasse verschieben", systemImage: "arrow.right.doc.on.clipboard")
+            }
+        }
     }
 
     private var bodyContent: some View {
@@ -302,9 +323,7 @@ struct ExamListView: View {
             Button {
                 dismiss()
             } label: {
-                Image(systemName: "chevron.down")
-                    .imageScale(.medium)
-                    .foregroundStyle(Color.primary)
+                ToolbarIcon(symbol: "chevron.down", showDot: false)
             }
             .accessibilityLabel("Schließen")
         }
@@ -312,8 +331,7 @@ struct ExamListView: View {
             Button {
                 showAddChooser = true
             } label: {
-                Image(systemName: "plus")
-                    .foregroundStyle(Color.primary)
+                ToolbarIcon(symbol: "plus", showDot: false)
             }
         }
     }
@@ -421,9 +439,7 @@ struct ExamListView: View {
                             Button {
                                 showRescheduleSheet = false
                             } label: {
-                                Image(systemName: "chevron.down")
-                                    .imageScale(.medium)
-                                    .foregroundStyle(Color.primary)
+                                ToolbarIcon(symbol: "chevron.down", showDot: false)
                             }
                         }
                         ToolbarItem(placement: .confirmationAction) {
@@ -436,9 +452,7 @@ struct ExamListView: View {
                                     }
                                 }
                             } label: {
-                                Image(systemName: "checkmark")
-                                    .imageScale(.medium)
-                                    .foregroundStyle(Color.primary)
+                                ToolbarIcon(symbol: "checkmark", showDot: false)
                             }
                         }
                     }
@@ -602,7 +616,17 @@ struct ExamListView: View {
     private func deleteExamConfirmed(_ exam: Exam) async {
         if exam.isShared {
             if let gid = exam.groupId {
-                await store.deleteSharedExamFromGroup(groupId: gid, id: exam.id)
+                if store.wahlpflichtfachGroupIds.contains(gid) {
+                    await store.deleteSharedExamFromWpGroup(wpGroupId: gid, id: exam.id)
+                } else {
+                    await store.deleteSharedExamFromGroup(groupId: gid, id: exam.id)
+                }
+            } else if let cid = exam.courseId {
+                // Course-level exams: nested path classes/{classId}/courses/{courseId}/exams
+                try? await store.deleteExamFromCourse(courseId: cid, examId: exam.id)
+            } else if let clid = exam.classId {
+                // Class-level exams: classes/{classId}/exams
+                await store.deleteSharedExamFromClass(classId: clid, id: exam.id)
             }
         } else {
             await store.deleteExamFromFirestore(id: exam.id)
@@ -628,6 +652,11 @@ struct ExamDetailSheet: View {
     private var groupName: String {
         guard let gid = exam.groupId else { return "" }
         return store.groupNames[gid] ?? gid
+    }
+
+    private var sharingInfo: String? {
+        let name = store.resolveContextName(groupId: exam.groupId, courseId: exam.courseId, classId: exam.classId)
+        return name.isEmpty ? nil : "Diese Prüfung ist geteilt mit \(name)"
     }
 
     private var potentialDuplicate: Exam? {
@@ -689,6 +718,14 @@ struct ExamDetailSheet: View {
                                         value: groupName,
                                         icon: "person.3.fill",
                                         tint: .blue
+                                    )
+                                }
+                                if let info = sharingInfo {
+                                    detailRow(
+                                        title: "Geteilt mit",
+                                        value: info,
+                                        icon: "shareplay",
+                                        tint: .purple
                                     )
                                 }
                             }
@@ -925,6 +962,15 @@ struct ExamDetailSheet: View {
                     .presentationDetents([.medium])
                 }
             }
+            .alert("Prüfung löschen?", isPresented: $showDeleteAlert) {
+                Button("Löschen", role: .destructive) {
+                    Task { await deleteExamConfirmed() }
+                }
+                Button("Abbrechen", role: .cancel) {}
+            } message: {
+                Text("Bist du sicher? Dies kann nicht widerrufen werden.")
+            }
+            .presentationDetents([.fraction(0.85), .large])
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button {
@@ -949,6 +995,27 @@ struct ExamDetailSheet: View {
                 }
             }
         }
+    }
+
+    private func deleteExamConfirmed() async {
+        if exam.isShared {
+            if let gid = exam.groupId {
+                if store.wahlpflichtfachGroupIds.contains(gid) {
+                    await store.deleteSharedExamFromWpGroup(wpGroupId: gid, id: exam.id)
+                } else {
+                    await store.deleteSharedExamFromGroup(groupId: gid, id: exam.id)
+                }
+            } else if let cid = exam.courseId {
+                // Course-level exams: nested path classes/{classId}/courses/{courseId}/exams
+                try? await store.deleteExamFromCourse(courseId: cid, examId: exam.id)
+            } else if let clid = exam.classId {
+                // Class-level exams: classes/{classId}/exams
+                await store.deleteSharedExamFromClass(classId: clid, id: exam.id)
+            }
+        } else {
+            await store.deleteExamFromFirestore(id: exam.id)
+        }
+        dismiss()
     }
 
     private func formattedDateTime(_ date: Date) -> String {

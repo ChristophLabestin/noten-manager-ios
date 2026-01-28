@@ -22,51 +22,84 @@ struct ShareTargetSelector: View {
             systemImage: shareWithGroup ? "person.3.fill" : "lock.fill",
             accent: shareWithGroup ? .indigo : .secondary
         ) {
-            SettingsSectionBox {
-                VStack(alignment: .leading, spacing: 16) {
-                    // Main Toggle
-                    Toggle(isOn: $shareWithGroup.animation(.snappy)) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Mit Klassen/Kursen teilen")
-                                .font(.body)
-                                .foregroundStyle(.primary)
-                            if !shareWithGroup {
-                                Text("Aktivieren, um diesen Eintrag für andere sichtbar zu machen.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .tint(.indigo)
-                    
-                    if shareWithGroup {
-                        if store.courses.isEmpty && store.classIds.isEmpty {
-                            // No classes/courses available
-                            HStack(spacing: 12) {
-                                Image(systemName: "person.2.slash.fill")
-                                    .font(.largeTitle)
-                                    .foregroundStyle(.secondary.opacity(0.5))
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Keine Klassen oder Kurse")
-                                        .font(.headline)
-                                    Text("Du bist noch keinen Klassen oder Kursen beigetreten.")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .padding(.vertical, 8)
-                        } else {
-                            // Selection Area
-                            VStack(alignment: .leading, spacing: 20) {
-                                
-                                // 1. Courses Section (Branch Level)
-                                if !availableCourses.isEmpty {
-                                    VStack(alignment: .leading, spacing: 10) {
-                                        Label("Klassen / Zweige", systemImage: "macwindow.on.rectangle")
-                                            .font(.footnote.weight(.semibold))
+            VStack(alignment: .leading, spacing: 16) {
+                // 1. Segmented Visibility Picker
+                Picker("Sichtbarkeit", selection: $shareWithGroup.animation(.snappy)) {
+                    Label("Privat", systemImage: "lock.fill").tag(false)
+                    Label("Teilen", systemImage: "person.3.fill").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 4)
+                
+                if shareWithGroup {
+                    SettingsSectionBox {
+                        VStack(alignment: .leading, spacing: 20) {
+                            if store.courses.isEmpty && store.classIds.isEmpty {
+                                // Empty State
+                                HStack(spacing: 12) {
+                                    Image(systemName: "person.2.slash.fill")
+                                        .font(.title2)
+                                        .foregroundStyle(.secondary.opacity(0.5))
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Keine Ziele verfügbar")
+                                            .font(.headline)
+                                        Text("Tritt erst einer Klasse oder einem Kurs bei.")
+                                            .font(.caption)
                                             .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .padding(.vertical, 8)
+                            } else {
+                                // Summary Info
+                                if !selectedCourseIds.isEmpty || !selectedClassIds.isEmpty {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "info.circle.fill")
+                                            .font(.caption)
+                                            .foregroundStyle(.indigo)
+                                        let classCount = selectedClassIds.count
+                                        let courseCount = selectedCourseIds.count
+                                        let text = [
+                                            classCount > 0 ? "\(classCount) \(classCount == 1 ? "Klasse" : "Klassen")" : nil,
+                                            courseCount > 0 ? "\(courseCount) \(courseCount == 1 ? "Kurs" : "Kurse")" : nil
+                                        ].compactMap { $0 }.joined(separator: " & ")
                                         
-                                        // Courses filtered by parent. Sort by label.
+                                        Text("Geteilt mit \(text)")
+                                            .font(.caption.weight(.medium))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .padding(.horizontal, 4)
+                                }
+
+                                // 2. Classes Section (Primary Classes)
+                                if !store.classIds.isEmpty {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("Meine Klassen")
+                                            .font(.caption.weight(.bold))
+                                            .foregroundStyle(.secondary)
+                                            .textCase(.uppercase)
+                                        
+                                        let uniqueClassIds = Array(Set(store.classIds)).sorted()
+                                        FlowLayout(spacing: 8) {
+                                            ForEach(uniqueClassIds, id: \.self) { cid in
+                                                ClassSelectionChip(
+                                                    classId: cid,
+                                                    isSelected: selectedClassIds.contains(cid)
+                                                ) {
+                                                    toggleClass(cid)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // 3. Courses Section (Specific Subjects/Branches)
+                                if !availableCourses.isEmpty {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("Teilnehmende Kurse")
+                                            .font(.caption.weight(.bold))
+                                            .foregroundStyle(.secondary)
+                                            .textCase(.uppercase)
+                                        
                                         let uniqueCourses = availableCourses.sorted { c1, c2 in
                                             courseLabel(for: c1) < courseLabel(for: c2)
                                         }
@@ -86,47 +119,46 @@ struct ShareTargetSelector: View {
                                     }
                                 }
                                 
-                                // 2. Classes Section (Legacy/Groups)
-                                if !store.classIds.isEmpty {
-                                    VStack(alignment: .leading, spacing: 10) {
-                                        Label("Klassen", systemImage: "rectangle.stack.fill")
-                                            .font(.footnote.weight(.semibold))
+                                // 4. Social Groups Section
+                                let socialGroupIds = store.groupIds.filter { store.groupTypes[$0] == "social" }.sorted()
+                                if !socialGroupIds.isEmpty {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("Soziale Gruppen")
+                                            .font(.caption.weight(.bold))
                                             .foregroundStyle(.secondary)
+                                            .textCase(.uppercase)
                                         
-                                        // Deduplicate class IDs to prevent crashes
-                                        let uniqueClassIds = Array(Set(store.classIds)).sorted()
                                         FlowLayout(spacing: 8) {
-                                            ForEach(uniqueClassIds, id: \.self) { cid in
-                                                ClassSelectionChip(
-                                                    classId: cid,
-                                                    isSelected: selectedClassIds.contains(cid)
+                                            ForEach(socialGroupIds, id: \.self) { gid in
+                                                GroupSelectionChip(
+                                                    groupId: gid,
+                                                    isSelected: selectedGroupIds.contains(gid),
+                                                    isAutoSelected: autoSelectedGroupIds.contains(gid),
+                                                    isImplicitlySelected: false
                                                 ) {
-                                                    toggleClass(cid)
+                                                    toggleGroup(gid)
                                                 }
                                             }
                                         }
                                     }
                                 }
-                                
-                                // Info Footer
-                                HStack(alignment: .top, spacing: 8) {
-                                    Image(systemName: "info.circle.fill")
-                                        .font(.caption)
-                                        .foregroundStyle(.indigo)
-                                        .padding(.top, 2)
-                                    Text("Geteilte Einträge sind für alle Mitglieder sichtbar.")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                .padding(12)
-                                .background(Color.indigo.opacity(0.05))
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                                Text("Geteilte Einträge sind für alle Mitglieder des Ziels sichtbar.")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                                    .padding(.top, 4)
                             }
-                            .transition(.move(edge: .top).combined(with: .opacity))
                         }
                     }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                } else {
+                    Text("Dieser Eintrag ist nur für dich sichtbar und wird nicht synchronisiert.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
                 }
             }
+            .padding(.vertical, 4)
         }
     }
     
@@ -145,18 +177,30 @@ struct ShareTargetSelector: View {
             selectedClassIds.insert(cid)
         }
     }
+
+    private func toggleGroup(_ gid: String) {
+        if selectedGroupIds.contains(gid) {
+            selectedGroupIds.remove(gid)
+        } else {
+            selectedGroupIds.insert(gid)
+        }
+    }
     
     private func courseLabel(for course: Course) -> String {
+        let uniqueClassIds = Set(store.classIds)
+        let showClassName = uniqueClassIds.count > 1
+        
         if let classId = course.classId, let className = store.classNames[classId], let type = course.type {
             switch type {
             case .mandatory:
-                return className
+                return showClassName ? className : "Klasse"
             case .branch(let branchName):
-                return "\(className) (\(branchName))"
+                return showClassName ? "\(className) (\(branchName))" : branchName
             case .elective:
-                return "\(course.name) (\(className))"
+                return showClassName ? "\(course.name) (\(className))" : course.name
             case .wahlpflicht(let groupId):
-                 return "\(store.wahlpflichtfachGroupNames[groupId] ?? "Wahlpflicht") (\(className))"
+                 let groupName = store.wahlpflichtfachGroupNames[groupId] ?? "Wahlpflicht"
+                 return showClassName ? "\(groupName) (\(className))" : groupName
             }
         }
         return course.name

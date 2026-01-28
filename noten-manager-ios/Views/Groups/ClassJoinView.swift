@@ -12,6 +12,8 @@ struct ClassJoinView: View {
     
     @State private var joinContext: ClassJoinContext?
     @State private var showCourseSelection: Bool = false
+    @State private var joinPreview: JoinPreview?
+    @State private var showConfirmation: Bool = false
     
     struct ClassJoinContext: Identifiable {
         let id: String
@@ -103,7 +105,7 @@ struct ClassJoinView: View {
                     
                     // Join Button
                     Button {
-                        Task { await checkAndJoin() }
+                        Task { await fetchPreview() }
                     } label: {
                         if isJoining {
                             ProgressView().tint(.indigo)
@@ -121,6 +123,13 @@ struct ClassJoinView: View {
             .sheet(isPresented: $showScanner) {
                 QRScannerView { scannedCode in
                     code = extractCode(from: scannedCode)
+                }
+            }
+            .sheet(isPresented: $showConfirmation) {
+                if let preview = joinPreview {
+                    JoinConfirmationSheet(preview: preview) {
+                        Task { await checkAndJoin() }
+                    }
                 }
             }
             .navigationDestination(isPresented: $showCourseSelection) {
@@ -143,14 +152,11 @@ struct ClassJoinView: View {
                     Button {
                         dismiss()
                     } label: {
-                        Image(systemName: "chevron.down")
-                            .font(.headline)
-                            .foregroundStyle(isDark ? .white : .black)
+                        ToolbarIcon(symbol: "chevron.down", showDot: false)
                     }
                 }
             }
         }
-        .presentationDetents([.medium, .large])
     }
     
     private func extractCode(from raw: String) -> String {
@@ -160,6 +166,22 @@ struct ClassJoinView: View {
         return raw.trimmingCharacters(in: .whitespacesAndNewlines)
     }
     
+    @MainActor
+    private func fetchPreview() async {
+        isJoining = true
+        errorMessage = nil
+        do {
+            let preview = try await store.fetchJoinPreview(code: code)
+            self.joinPreview = preview
+            self.showConfirmation = true
+        } catch {
+            errorMessage = error.localizedDescription
+            let generator = UINotificationFeedbackGenerator()
+            generator.notificationOccurred(.error)
+        }
+        isJoining = false
+    }
+
     @MainActor
     private func checkAndJoin() async {
         isJoining = true

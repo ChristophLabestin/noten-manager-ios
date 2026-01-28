@@ -207,9 +207,7 @@ struct AddHomeworkView: View {
                     Button {
                         dismiss()
                     } label: {
-                        Image(systemName: "xmark")
-                            .imageScale(.medium)
-                            .foregroundStyle(Color.primary)
+                        ToolbarIcon(symbol: "xmark", showDot: false)
                     }
                     .accessibilityLabel("Abbrechen")
                 }
@@ -218,11 +216,9 @@ struct AddHomeworkView: View {
                         Task { await save() }
                     } label: {
                         if isSaving {
-                            ProgressView()
+                            ToolbarLoadingIcon()
                         } else {
-                            Image(systemName: "checkmark")
-                                .imageScale(.medium)
-                                .foregroundStyle(Color.primary)
+                            ToolbarIcon(symbol: "checkmark", showDot: false)
                         }
                     }
                     .accessibilityLabel("Speichern")
@@ -267,13 +263,17 @@ struct AddHomeworkView: View {
                 
                 // 1. Share to Courses
                 for courseId in selectedCourseIds {
-                    _ = try await store.addHomeworkToCourse(
-                        courseId: courseId,
-                        title: trimmedTitle,
-                        dueDate: due,
-                        reminderAt: reminder
-                    )
-                    createdAny = true
+                    do {
+                        _ = try await store.addHomeworkToCourse(
+                            courseId: courseId,
+                            title: trimmedTitle,
+                            dueDate: due,
+                            reminderAt: reminder
+                        )
+                        createdAny = true
+                    } catch {
+                        ErrorLoggingService.logErrorIfEnabled(error)
+                    }
                 }
                 
                 // Fallback
