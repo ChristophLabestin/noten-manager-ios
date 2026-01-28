@@ -6245,21 +6245,17 @@ final class GradesStore: ObservableObject {
         }
         
         // Update class config to include new branch
-        if let data = classDoc.data(),
-           let configData = data["courseConfiguration"] as? [String: Any],
-           var branches = configData["branches"] as? [[String: Any]] {
+        if let data = classDoc.data() {
+            let configKey = data["courseConfiguration"] != nil ? "courseConfiguration" : (data["config"] != nil ? "config" : "courseConfiguration")
+            let configData = data[configKey] as? [String: Any]
+            var branches = configData?["branches"] as? [[String: Any]] ?? []
             // Check if branch already exists
             if !branches.contains(where: { ($0["name"] as? String) == branchName }) {
                 branches.append(["name": branchName, "id": branchName])
                 try await classRef.updateData([
-                    "courseConfiguration.branches": branches
+                    "\(configKey).branches": branches
                 ])
             }
-        } else {
-            // Initialize branch config if none exists
-            try await classRef.updateData([
-                "courseConfiguration.branches": [["name": branchName, "id": branchName]]
-            ])
         }
         
         return newCourseIds
@@ -6352,17 +6348,18 @@ final class GradesStore: ObservableObject {
         let classRef = db.collection("classes").document(classId)
         let doc = try await classRef.getDocument()
         guard let data = doc.data(),
-              let owner = data["ownerId"] as? String, owner == uid,
-              let config = data["courseConfiguration"] as? [String: Any],
-              var branches = config["branches"] as? [[String: Any]] else {
+              let owner = data["ownerId"] as? String, owner == uid else {
             return
         }
+        let configKey = data["courseConfiguration"] != nil ? "courseConfiguration" : (data["config"] != nil ? "config" : "courseConfiguration")
+        let config = data[configKey] as? [String: Any]
+        var branches = config?["branches"] as? [[String: Any]] ?? []
         
         // 1. Update config
         if let index = branches.firstIndex(where: { ($0["name"] as? String) == oldName }) {
             branches[index]["name"] = newName
             branches[index]["id"] = newName 
-            try await classRef.updateData(["courseConfiguration.branches": branches])
+            try await classRef.updateData(["\(configKey).branches": branches])
         }
         
         // 2. Update all courses associated with this branch in this class
@@ -6388,15 +6385,16 @@ final class GradesStore: ObservableObject {
         let classRef = db.collection("classes").document(classId)
         let doc = try await classRef.getDocument()
         guard let data = doc.data(),
-              let owner = data["ownerId"] as? String, owner == uid,
-              let config = data["courseConfiguration"] as? [String: Any],
-              var branches = config["branches"] as? [[String: Any]] else {
+              let owner = data["ownerId"] as? String, owner == uid else {
             return
         }
+        let configKey = data["courseConfiguration"] != nil ? "courseConfiguration" : (data["config"] != nil ? "config" : "courseConfiguration")
+        let config = data[configKey] as? [String: Any]
+        var branches = config?["branches"] as? [[String: Any]] ?? []
         
         // 1. Remove from config
         branches.removeAll { ($0["name"] as? String) == branchName }
-        try await classRef.updateData(["courseConfiguration.branches": branches])
+        try await classRef.updateData(["\(configKey).branches": branches])
         
         // 2. Delete/Archive associated courses
         let coursesSnap = try await classRef.collection("courses").getDocuments()
@@ -6597,7 +6595,8 @@ final class GradesStore: ObservableObject {
             memberCount: nil
         )
         
-        if let configData = data["courseConfiguration"] as? [String: Any],
+        let configSource = data["courseConfiguration"] as? [String: Any] ?? data["config"] as? [String: Any]
+        if let configData = configSource,
            let jsonData = try? JSONSerialization.data(withJSONObject: configData),
            let config = try? JSONDecoder().decode(ClassConfiguration.self, from: jsonData) {
             details.config = config
