@@ -2765,6 +2765,12 @@ final class GradesStore: ObservableObject {
     private var courseExamsListeners: [String: ListenerRegistration] = [:]
     private var courseHomeworksListeners: [String: ListenerRegistration] = [:]
     private let legacyCourseMigrationKey = "legacyCourseMigration_v1"
+    private func legacyCourseMigrationKeyForUser() -> String {
+        if let uid = Auth.auth().currentUser?.uid, !uid.isEmpty {
+            return "\(legacyCourseMigrationKey)_\(uid)"
+        }
+        return legacyCourseMigrationKey
+    }
 
     struct LegacyCourseCleanupSummary {
         var scanned = 0
@@ -2804,15 +2810,16 @@ final class GradesStore: ObservableObject {
     }
 
     private func hasMigratedLegacyCourse(_ courseId: String) -> Bool {
-        let list = UserDefaults.standard.array(forKey: legacyCourseMigrationKey) as? [String] ?? []
+        let list = UserDefaults.standard.array(forKey: legacyCourseMigrationKeyForUser()) as? [String] ?? []
         return list.contains(courseId)
     }
 
     private func markMigratedLegacyCourse(_ courseId: String) {
-        var list = UserDefaults.standard.array(forKey: legacyCourseMigrationKey) as? [String] ?? []
+        let key = legacyCourseMigrationKeyForUser()
+        var list = UserDefaults.standard.array(forKey: key) as? [String] ?? []
         if !list.contains(courseId) {
             list.append(courseId)
-            UserDefaults.standard.set(list, forKey: legacyCourseMigrationKey)
+            UserDefaults.standard.set(list, forKey: key)
         }
     }
 
