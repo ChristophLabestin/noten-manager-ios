@@ -314,6 +314,24 @@
 
 ---
 
+### 17) Group/Class/Wahlpflicht removal doesn’t fully clear shared listeners (medium)
+**Issue**
+- `updateGroupObservers`, `updateClassExamsObservers`, and `updateWahlpflichtfachExamsObservers` remove metadata listeners, but do not consistently remove exam/homework listeners or recompute shared lists when an ID is removed.
+
+**Evidence**
+- `updateGroupObservers` removes subject/mapping/name/member listeners only; exam/homework listeners are not removed there. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:10144-10210`
+- `updateClassExamsObservers` removes `classExamsByClass` entries but does not recompute. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:10369-10379`
+- `updateWahlpflichtfachExamsObservers` removes entries but does not recompute. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:10437-10447`
+
+**Impact / likely symptoms**
+- When a user is removed from a group/class (or leaves a Wahlpflicht group), stale shared exams/homeworks can remain visible until another unrelated listener fires.
+- Orphaned listeners can remain active for groups removed outside `leaveSharedGroup`.
+
+**Recommendation**
+- Ensure group/class/wahlpflicht observer cleanup removes all relevant listeners + data maps and triggers `recomputeSharedCollections()` when removals occur.
+
+---
+
 ## Additional Observations
 - `stopListening` does not stop course query listeners (`coursesQueriesListeners`) or course content listeners. Combined with missing cleanup of `courseExamsMap`, this can leave stale course data in memory. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:587-664, 2659-2701`
 - There are two different mapping stores: `groupMappings` (new) and `subjectMappings` (legacy). Only legacy migration copies `subjectMappings`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:166-177, 9759-9794`
