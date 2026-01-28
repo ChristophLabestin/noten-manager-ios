@@ -454,6 +454,22 @@
 
 ---
 
+### 26) Course/class deletions leave subcollections orphaned (low)
+**Issue**
+- `deleteClass` and `deleteCourse` delete parent documents but do not delete subcollections (`exams`, `homeworks`), leaving orphaned documents and potential storage growth.
+
+**Evidence**
+- `deleteClass` batches only course docs and class doc; subcollection deletion is explicitly skipped. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:5518-5534`
+- `deleteCourse` deletes only the course document. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:6616-6640`
+
+**Impact / likely symptoms**
+- Hidden orphaned data accumulates; storage grows; potential privacy risk if data is assumed deleted.
+
+**Recommendation**
+- Add recursive delete via Cloud Function or client-side cleanup of subcollections.
+
+---
+
 ## Additional Observations
 - `stopListening` does not stop course query listeners (`coursesQueriesListeners`) or course content listeners. Combined with missing cleanup of `courseExamsMap`, this can leave stale course data in memory. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:587-664, 2659-2701`
 - There are two different mapping stores: `groupMappings` (new) and `subjectMappings` (legacy). Only legacy migration copies `subjectMappings`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:166-177, 9759-9794`
