@@ -166,14 +166,19 @@ enum SchoolYearService {
         let simpleCollections = [
             "fachreferat",
             "practicalPerformance",
+            "seminar",
             "homeworks",
             "exams",
             "examGroupReminders",
             "homeworkGroupReminders",
             "examGroupCompleted",
             "homeworkGroupCompleted",
+            "examGroupNotes",
+            "homeworkGroupNotes",
+            "examGroupRescheduled",
             "subjectMappings",
-            "groupMappings"
+            "groupMappings",
+            "courseMappings"
         ]
         for name in simpleCollections {
             try await copyCollectionIfExists(from: userRef.collection(name), to: yearRef.collection(name))
@@ -1173,8 +1178,12 @@ final class GradesStore: ObservableObject {
             "homeworkGroupReminders",
             "examGroupCompleted",
             "homeworkGroupCompleted",
+            "examGroupNotes",
+            "homeworkGroupNotes",
+            "examGroupRescheduled",
             "subjectMappings",
-            "groupMappings"
+            "groupMappings",
+            "courseMappings"
         ]
         for name in simpleCollections {
             try await deleteCollection(yearRef.collection(name))
