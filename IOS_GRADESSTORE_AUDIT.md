@@ -409,6 +409,21 @@
 
 ---
 
+### 23) Leaving class ignores legacy top‑level courses (low/medium)
+**Issue**
+- `leaveClass` unsubscribes from `classes/{classId}/courses` only, but legacy top‑level `/courses` with `classId` can remain subscribed.
+
+**Evidence**
+- Unsubscribe uses only the class subcollection; no query against top‑level `courses`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:5428-5468`
+
+**Impact / likely symptoms**
+- Stale `subscribedCourseIds` linger after leaving a class with legacy courses.
+
+**Recommendation**
+- Also remove top‑level courses where `classId == classId` from subscriptions.
+
+---
+
 ## Additional Observations
 - `stopListening` does not stop course query listeners (`coursesQueriesListeners`) or course content listeners. Combined with missing cleanup of `courseExamsMap`, this can leave stale course data in memory. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:587-664, 2659-2701`
 - There are two different mapping stores: `groupMappings` (new) and `subjectMappings` (legacy). Only legacy migration copies `subjectMappings`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:166-177, 9759-9794`
