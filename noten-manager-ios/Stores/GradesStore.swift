@@ -5326,7 +5326,7 @@ final class GradesStore: ObservableObject {
         }
         
         // 2. Delete all Courses associated with this class
-        let coursesSnapshot = try await db.collection("courses").whereField("classId", isEqualTo: code).getDocuments()
+        let coursesSnapshot = try await classRef.collection("courses").getDocuments()
         let batch = db.batch()
         
         for courseDoc in coursesSnapshot.documents {
@@ -5486,7 +5486,7 @@ final class GradesStore: ObservableObject {
                             newExamData["assessmentType"] = derived.rawValue
                         }
                     }
-                    try? await db.collection("courses").document(targetCourseId).collection("exams").document(examDoc.documentID).setData(newExamData)
+                    try? await db.collection("classes").document(newClassId).collection("courses").document(targetCourseId).collection("exams").document(examDoc.documentID).setData(newExamData)
                 }
             }
         }
@@ -5501,7 +5501,7 @@ final class GradesStore: ObservableObject {
                 if let targetCourseId {
                     var newHwData = data
                     newHwData["migratedFromGroup"] = groupId
-                    try? await db.collection("courses").document(targetCourseId).collection("homeworks").document(hwDoc.documentID).setData(newHwData)
+                    try? await db.collection("classes").document(newClassId).collection("courses").document(targetCourseId).collection("homeworks").document(hwDoc.documentID).setData(newHwData)
                 }
             }
         }
@@ -5520,7 +5520,7 @@ final class GradesStore: ObservableObject {
                             newExamData["assessmentType"] = derived.rawValue
                         }
                     }
-                    try? await db.collection("courses").document(targetCourseId).collection("exams").document(examDoc.documentID).setData(newExamData, merge: true)
+                    try? await db.collection("classes").document(newClassId).collection("courses").document(targetCourseId).collection("exams").document(examDoc.documentID).setData(newExamData, merge: true)
                 }
             }
         }
@@ -5533,7 +5533,7 @@ final class GradesStore: ObservableObject {
                 if let targetCourseId {
                     var newHwData = data
                     newHwData["migratedFromGroup"] = groupId
-                    try? await db.collection("courses").document(targetCourseId).collection("homeworks").document(hwDoc.documentID).setData(newHwData, merge: true)
+                    try? await db.collection("classes").document(newClassId).collection("courses").document(targetCourseId).collection("homeworks").document(hwDoc.documentID).setData(newHwData, merge: true)
                 }
             }
         }
@@ -6002,7 +6002,7 @@ final class GradesStore: ObservableObject {
         var newCourseIds: [String] = []
         
         for subjectName in subjects {
-            let courseRef = db.collection("courses").document()
+            let courseRef = db.collection("classes").document(classId).collection("courses").document()
             let course = Course(
                 id: courseRef.documentID,
                 name: subjectName,
@@ -6033,7 +6033,7 @@ final class GradesStore: ObservableObject {
                             newData["assessmentType"] = derived.rawValue
                         }
                     }
-                    try? await db.collection("courses").document(targetCourseId).collection("exams").document(examDoc.documentID).setData(newData)
+                    try? await db.collection("classes").document(classId).collection("courses").document(targetCourseId).collection("exams").document(examDoc.documentID).setData(newData)
                 }
             }
         }
@@ -6051,7 +6051,7 @@ final class GradesStore: ObservableObject {
                             newData["assessmentType"] = derived.rawValue
                         }
                     }
-                    try? await db.collection("courses").document(targetCourseId).collection("exams").document(examDoc.documentID).setData(newData, merge: true)
+                    try? await db.collection("classes").document(classId).collection("courses").document(targetCourseId).collection("exams").document(examDoc.documentID).setData(newData, merge: true)
                 }
             }
         }
@@ -6065,7 +6065,7 @@ final class GradesStore: ObservableObject {
                 if let targetCourseId = subjectToCourseId[subjectName] {
                     var newData = data
                     newData["migratedFromGroup"] = groupCode
-                    try? await db.collection("courses").document(targetCourseId).collection("homeworks").document(hwDoc.documentID).setData(newData)
+                    try? await db.collection("classes").document(classId).collection("courses").document(targetCourseId).collection("homeworks").document(hwDoc.documentID).setData(newData)
                 }
             }
         }
@@ -6078,7 +6078,7 @@ final class GradesStore: ObservableObject {
                 if let targetCourseId = subjectToCourseId[subjectName] {
                     var newData = data
                     newData["migratedFromGroup"] = groupCode
-                    try? await db.collection("courses").document(targetCourseId).collection("homeworks").document(hwDoc.documentID).setData(newData, merge: true)
+                    try? await db.collection("classes").document(classId).collection("courses").document(targetCourseId).collection("homeworks").document(hwDoc.documentID).setData(newData, merge: true)
                 }
             }
         }
@@ -6228,7 +6228,7 @@ final class GradesStore: ObservableObject {
         
         // Create courses for each subject
         for subject in subjects {
-            let courseRef = db.collection("courses").document()
+            let courseRef = db.collection("classes").document(classId).collection("courses").document()
             let course = Course(
                 id: courseRef.documentID,
                 name: subject,
@@ -6306,7 +6306,7 @@ final class GradesStore: ObservableObject {
         // 3. Create Courses
         var newCourseIds: [String] = []
         for subject in subjects {
-            let courseRef = db.collection("courses").document()
+            let courseRef = db.collection("classes").document(classId).collection("courses").document()
             let course = Course(
                 id: courseRef.documentID,
                 name: subject,
@@ -6366,20 +6366,15 @@ final class GradesStore: ObservableObject {
         }
         
         // 2. Update all courses associated with this branch in this class
-        let coursesSnap = try await db.collection("courses")
-            .whereField("classId", isEqualTo: classId)
-            .getDocuments()
+        let coursesSnap = try await classRef.collection("courses").getDocuments()
             
         let batch = db.batch()
         for courseDoc in coursesSnap.documents {
-            if let typeMap = courseDoc.data()["type"] as? [String: Any],
-               let typeString = typeMap["case"] as? String,
-               typeString == "branch",
-               let associatedId = typeMap["associatedId"] as? String,
-               associatedId == oldName {
+            let info = extractCourseTypeInfo(from: courseDoc.data())
+            if info.type == "branch", info.associatedId == oldName {
                 
                 // Construct manually to match Firestore encoding of CourseType
-                let newTypeMap: [String: Any] = ["case": "branch", "associatedId": newName]
+                let newTypeMap: [String: Any] = ["type": "branch", "associatedId": newName]
                 batch.updateData(["type": newTypeMap], forDocument: courseDoc.reference)
             }
         }
@@ -6404,17 +6399,12 @@ final class GradesStore: ObservableObject {
         try await classRef.updateData(["courseConfiguration.branches": branches])
         
         // 2. Delete/Archive associated courses
-        let coursesSnap = try await db.collection("courses")
-            .whereField("classId", isEqualTo: classId)
-            .getDocuments()
+        let coursesSnap = try await classRef.collection("courses").getDocuments()
             
         let batch = db.batch()
         for courseDoc in coursesSnap.documents {
-            if let typeMap = courseDoc.data()["type"] as? [String: Any],
-               let typeString = typeMap["case"] as? String,
-               typeString == "branch",
-               let associatedId = typeMap["associatedId"] as? String,
-               associatedId == branchName {
+            let info = extractCourseTypeInfo(from: courseDoc.data())
+            if info.type == "branch", info.associatedId == branchName {
                 
                 batch.deleteDocument(courseDoc.reference)
             }
@@ -6464,7 +6454,7 @@ final class GradesStore: ObservableObject {
             throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Klasse nicht gefunden"])
         }
         
-        let courseRef = db.collection("courses").document()
+        let courseRef = db.collection("classes").document(classId).collection("courses").document()
         let course = Course(
             id: courseRef.documentID,
             name: name,
@@ -6484,13 +6474,24 @@ final class GradesStore: ObservableObject {
         guard let uid = Auth.auth().currentUser?.uid else {
             throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
         }
-        
+
+        if let course = courses.first(where: { $0.id == courseId }),
+           let classId = course.classId {
+            let courseRef = db.collection("classes").document(classId).collection("courses").document(courseId)
+            let doc = try await courseRef.getDocument()
+            guard let owner = doc.data()?["ownerId"] as? String, owner == uid else {
+                throw NSError(domain: "GradesStore", code: -4, userInfo: [NSLocalizedDescriptionKey: "Nur der Ersteller kann diesen Kurs löschen."])
+            }
+            try await courseRef.delete()
+            return
+        }
+
+        // Legacy fallback (top-level courses)
         let courseRef = db.collection("courses").document(courseId)
         let doc = try await courseRef.getDocument()
         guard let owner = doc.data()?["ownerId"] as? String, owner == uid else {
             throw NSError(domain: "GradesStore", code: -4, userInfo: [NSLocalizedDescriptionKey: "Nur der Ersteller kann diesen Kurs löschen."])
         }
-        
         try await courseRef.delete()
     }
 
@@ -9783,6 +9784,33 @@ final class GradesStore: ObservableObject {
         for (k,v) in map { s = s.replacingOccurrences(of: k, with: v) }
         let allowed = CharacterSet.alphanumerics
         return s.unicodeScalars.map { allowed.contains($0) ? String($0) : "-" }.joined().replacingOccurrences(of: "--", with: "-")
+    }
+
+    private func extractCourseTypeInfo(from data: [String: Any]) -> (type: String?, associatedId: String?) {
+        if let typeString = data["type"] as? String {
+            let assoc = data["associatedId"] as? String
+                ?? data["branch"] as? String
+                ?? data["branchName"] as? String
+            return (typeString, assoc)
+        }
+        guard let typeMap = data["type"] as? [String: Any] else { return (nil, nil) }
+        if let typeString = typeMap["case"] as? String ?? typeMap["type"] as? String {
+            let assoc = typeMap["associatedId"] as? String
+                ?? typeMap["branch"] as? String
+                ?? typeMap["branchName"] as? String
+            return (typeString, assoc)
+        }
+        if let branchContainer = typeMap["branch"] as? [String: Any],
+           let assoc = branchContainer["_0"] as? String {
+            return ("branch", assoc)
+        }
+        if let wpContainer = typeMap["wahlpflicht"] as? [String: Any],
+           let assoc = wpContainer["_0"] as? String {
+            return ("wahlpflicht", assoc)
+        }
+        if typeMap.keys.contains("mandatory") { return ("mandatory", nil) }
+        if typeMap.keys.contains("elective") { return ("elective", nil) }
+        return (nil, nil)
     }
 
     private func updateExamGroupSubjectsListenerIfNeeded(forceReload: Bool = false) {
