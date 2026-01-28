@@ -2749,6 +2749,14 @@ final class GradesStore: ObservableObject {
     private var courseHomeworksListeners: [String: ListenerRegistration] = [:]
     private let legacyCourseMigrationKey = "legacyCourseMigration_v1"
 
+    struct LegacyCourseCleanupSummary {
+        var scanned = 0
+        var migrated = 0
+        var deleted = 0
+        var skippedMissingClassId = 0
+        var errors = 0
+    }
+
     private func stopCourseContentListeners() {
         courseExamsListeners.values.forEach { $0.remove() }
         courseExamsListeners = [:]
@@ -2830,6 +2838,37 @@ final class GradesStore: ObservableObject {
         } catch {
             ErrorLoggingService.logErrorIfEnabled(error)
         }
+    }
+
+    func cleanupLegacyTopLevelCourses(deleteLegacy: Bool = false) async -> LegacyCourseCleanupSummary {
+        var summary = LegacyCourseCleanupSummary()
+        guard let uid = Auth.auth().currentUser?.uid else { return summary }
+        do {
+            let legacySnap = try await db.collection("courses").whereField("ownerId", isEqualTo: uid).getDocuments()
+            summary.scanned = legacySnap.documents.count
+            for doc in legacySnap.documents {
+                let data = doc.data()
+                guard let classId = data["classId"] as? String, !classId.isEmpty else {
+                    summary.skippedMissingClassId += 1
+                    continue
+                }
+                await migrateLegacyCourseContentIfNeeded(courseId: doc.documentID, classId: classId)
+                summary.migrated += 1
+
+                if deleteLegacy {
+                    let newRef = db.collection("classes").document(classId).collection("courses").document(doc.documentID)
+                    let newSnap = try await newRef.getDocument()
+                    if newSnap.exists {
+                        try await doc.reference.delete()
+                        summary.deleted += 1
+                    }
+                }
+            }
+        } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
+            summary.errors += 1
+        }
+        return summary
     }
 
     private func decodeCourseExam(from doc: QueryDocumentSnapshot, courseId: String, classId: String?) -> Exam? {
