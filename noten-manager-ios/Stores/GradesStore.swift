@@ -2716,7 +2716,9 @@ final class GradesStore: ObservableObject {
         // Identify IDs that are in `subscribedCourseIds` but NOT in `allCourses`.
         // Only run this check if we have received results for ALL chunks (to avoid premature deletion during loading).
         let totalChunks = (Double(subscribedCourseIds.count) / 30.0).rounded(.up)
-        if coursesQueryResults.count == Int(totalChunks) {
+        let baseChunkCount = Int(totalChunks)
+        let baseChunksReady = baseChunkCount > 0 && (0..<baseChunkCount).allSatisfy { coursesQueryResults[$0] != nil }
+        if baseChunksReady {
             let staleIds = subscribedCourseIds.filter { !foundIds.contains($0) }
             
             if !staleIds.isEmpty {
