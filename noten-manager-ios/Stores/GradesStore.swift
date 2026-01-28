@@ -4803,6 +4803,7 @@ final class GradesStore: ObservableObject {
                 wahlpflichtfachGroupNames[code] = name
                 wahlpflichtfachGroupOwners[code] = uid
             }
+            updateWahlpflichtfachExamsObservers()
         }
         
         return code
@@ -4852,6 +4853,7 @@ final class GradesStore: ObservableObject {
                  wahlpflichtfachGroupIds.append(code)
                  wahlpflichtfachGroupNames[code] = name
              }
+            updateWahlpflichtfachExamsObservers()
          }
     }
     
@@ -4922,6 +4924,7 @@ final class GradesStore: ObservableObject {
              wahlpflichtfachGroupIds.removeAll { $0 == code }
              wahlpflichtfachGroupNames.removeValue(forKey: code)
              wahlpflichtfachGroupOwners.removeValue(forKey: code)
+             updateWahlpflichtfachExamsObservers()
          }
     }
     
