@@ -2735,11 +2735,12 @@ final class GradesStore: ObservableObject {
         
         // Auto-Pruning:
         // Identify IDs that are in `subscribedCourseIds` but NOT in `allCourses`.
-        // Only run this check if we have received results for ALL chunks (to avoid premature deletion during loading).
-        let totalChunks = (Double(subscribedCourseIds.count) / Double(courseQueryChunkSize)).rounded(.up)
-        let baseChunkCount = Int(totalChunks)
-        let baseChunksReady = baseChunkCount > 0 && (0..<baseChunkCount).allSatisfy { coursesQueryResults[$0] != nil }
-        if baseChunksReady {
+        // Only run this check if we have received results for ALL chunk queries (group + legacy),
+        // to avoid premature deletion before legacy fallback results arrive.
+        let totalChunks = Int((Double(subscribedCourseIds.count) / Double(courseQueryChunkSize)).rounded(.up))
+        let baseChunksReady = totalChunks > 0 && (0..<totalChunks).allSatisfy { coursesQueryResults[$0] != nil }
+        let legacyChunksReady = totalChunks > 0 && (totalChunks..<(totalChunks * 2)).allSatisfy { coursesQueryResults[$0] != nil }
+        if baseChunksReady && legacyChunksReady {
             let staleIds = subscribedCourseIds.filter { !foundIds.contains($0) }
             
             if !staleIds.isEmpty {

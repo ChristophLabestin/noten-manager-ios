@@ -250,6 +250,9 @@
 **Recommendation**
 - Add a legacy fallback query on top-level `/courses` by `documentID`, and/or backfill `id` on those documents.
 
+**Status**
+- ✅ Fixed: legacy fallback query added; `decodeCourseDocument` backfills missing `id`; pruning waits for both group + legacy query results before removing stale IDs.
+
 ---
 
 ### 13) School year list ordering likely incorrect (low/medium)
