@@ -348,6 +348,21 @@
 
 ---
 
+### 19) Shared user settings collide across sources (medium)
+**Issue**
+- Per-user reminders/notes/completion for shared items are keyed by `groupId|docId` or just `docId`. For class/course shared exams and homeworks, `groupId` is `nil`, so different sources can collide if document IDs match.
+
+**Evidence**
+- `compoundId` uses `groupId` only, and fallbacks use just `exam.id` / `homework.id`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:2452-2578`
+
+**Impact / likely symptoms**
+- A reminder or completion flag from a course exam could mistakenly apply to a class/group exam with the same document ID.
+
+**Recommendation**
+- Scope per-user keys by source (e.g., `course:{courseId}|{docId}`, `class:{classId}|{docId}`) and keep a fallback for existing data.
+
+---
+
 ## Additional Observations
 - `stopListening` does not stop course query listeners (`coursesQueriesListeners`) or course content listeners. Combined with missing cleanup of `courseExamsMap`, this can leave stale course data in memory. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:587-664, 2659-2701`
 - There are two different mapping stores: `groupMappings` (new) and `subjectMappings` (legacy). Only legacy migration copies `subjectMappings`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:166-177, 9759-9794`
