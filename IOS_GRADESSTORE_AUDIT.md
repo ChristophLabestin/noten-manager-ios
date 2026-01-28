@@ -394,6 +394,21 @@
 
 ---
 
+### 22) Wahlpflicht exams listeners not refreshed on join/leave (low/medium)
+**Issue**
+- Joining or leaving a Wahlpflichtfach group updates local IDs but does not restart the exam listeners, so shared exams may not appear or may keep listening after leave.
+
+**Evidence**
+- `joinWahlpflichtfachGroup`/`leaveWahlpflichtfachGroup` update `wahlpflichtfachGroupIds` without calling `updateWahlpflichtfachExamsObservers`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:4777-4904`
+
+**Impact / likely symptoms**
+- Missing Wahlpflicht exams after join; lingering listeners after leave.
+
+**Recommendation**
+- Call `updateWahlpflichtfachExamsObservers()` after changes to `wahlpflichtfachGroupIds`.
+
+---
+
 ## Additional Observations
 - `stopListening` does not stop course query listeners (`coursesQueriesListeners`) or course content listeners. Combined with missing cleanup of `courseExamsMap`, this can leave stale course data in memory. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:587-664, 2659-2701`
 - There are two different mapping stores: `groupMappings` (new) and `subjectMappings` (legacy). Only legacy migration copies `subjectMappings`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:166-177, 9759-9794`
