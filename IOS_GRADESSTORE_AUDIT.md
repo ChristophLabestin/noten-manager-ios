@@ -470,6 +470,21 @@
 
 ---
 
+### 27) Class course fetch ignores legacy top‑level courses (low/medium)
+**Issue**
+- `fetchCoursesForClass` queries only `classes/{classId}/courses`, so legacy top‑level `/courses` with `classId` are skipped.
+
+**Evidence**
+- Fetch uses only class subcollection; no fallback query. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:5438-5445`
+
+**Impact / likely symptoms**
+- Join/leave flows that depend on `fetchCoursesForClass` won’t subscribe/unsubscribe to legacy courses.
+
+**Recommendation**
+- Merge in top‑level `/courses` where `classId == classId`.
+
+---
+
 ## Additional Observations
 - `stopListening` does not stop course query listeners (`coursesQueriesListeners`) or course content listeners. Combined with missing cleanup of `courseExamsMap`, this can leave stale course data in memory. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:587-664, 2659-2701`
 - There are two different mapping stores: `groupMappings` (new) and `subjectMappings` (legacy). Only legacy migration copies `subjectMappings`. `noten-manager-ios/noten-manager-ios/Stores/GradesStore.swift:166-177, 9759-9794`
