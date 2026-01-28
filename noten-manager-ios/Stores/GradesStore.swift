@@ -9721,10 +9721,13 @@ final class GradesStore: ObservableObject {
             // Delete the subject document itself
             try await subjectRef.delete()
             
-            // Remove from subscribedCourseIds if needed
-            if subscribedCourseIds.contains(subjectName) {
-                var updated = subscribedCourseIds
-                updated.removeAll { $0 == subjectName }
+            // Remove from subscribedCourseIds if needed (courses are stored by ID, not subject name)
+            let idsToRemove = subscribedCourseIds.filter { id in
+                guard let course = courses.first(where: { $0.id == id }) else { return false }
+                return course.name == subjectName || courseMappings[id] == subjectName
+            }
+            if !idsToRemove.isEmpty {
+                let updated = subscribedCourseIds.filter { !idsToRemove.contains($0) }
                 try? await yearRef.setData(["subscribedCourseIds": updated], merge: true)
                 await MainActor.run {
                     self.subscribedCourseIds = updated
