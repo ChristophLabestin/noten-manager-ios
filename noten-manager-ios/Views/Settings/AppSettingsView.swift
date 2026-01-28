@@ -94,6 +94,10 @@ struct AppSettingsView: View {
     @State private var isUpdatingPassword: Bool = false
     
     @State private var showWebMergeSheet: Bool = false
+    @State private var showMaintenanceTools: Bool = false
+    @State private var maintenanceMessage: String?
+    @State private var maintenanceIsError: Bool = false
+    @State private var isRunningLegacyCleanup: Bool = false
     
     init(scrollToAccount: Bool = false, onOpenCreationMenu: @escaping () -> Void = {}) {
         self.scrollToAccount = scrollToAccount
@@ -1429,8 +1433,83 @@ struct AppSettingsView: View {
                                 Text("App Version 1.4")
                                     .font(helperFont)
                                     .foregroundStyle(.secondary)
-                                
+                                    .onTapGesture(count: 7) {
+                                        showMaintenanceTools.toggle()
+                                        maintenanceMessage = showMaintenanceTools ? "Debug-Tools aktiviert." : nil
+                                        maintenanceIsError = false
+                                    }
+
                                 Divider()
+
+                                if showMaintenanceTools {
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        Button {
+                                            guard !isRunningLegacyCleanup else { return }
+                                            isRunningLegacyCleanup = true
+                                            maintenanceMessage = nil
+                                            maintenanceIsError = false
+                                            Task {
+                                                let summary = await store.cleanupLegacyTopLevelCourses(deleteLegacy: false)
+                                                await MainActor.run {
+                                                    isRunningLegacyCleanup = false
+                                                    maintenanceMessage = "Legacy-Kurse gescannt: \(summary.scanned) · Migriert: \(summary.migrated) · Übersprungen: \(summary.skippedMissingClassId) · Fehler: \(summary.errors)"
+                                                    maintenanceIsError = summary.errors > 0
+                                                }
+                                            }
+                                        } label: {
+                                            HStack {
+                                                Label("Legacy-Kurse migrieren", systemImage: "arrow.triangle.2.circlepath")
+                                                Spacer()
+                                                if isRunningLegacyCleanup {
+                                                    ProgressView()
+                                                } else {
+                                                    Image(systemName: "chevron.right")
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                            }
+                                        }
+                                        .buttonStyle(.plain)
+                                        .disabled(isRunningLegacyCleanup)
+
+                                        Button {
+                                            guard !isRunningLegacyCleanup else { return }
+                                            isRunningLegacyCleanup = true
+                                            maintenanceMessage = nil
+                                            maintenanceIsError = false
+                                            Task {
+                                                let summary = await store.cleanupLegacyTopLevelCourses(deleteLegacy: true)
+                                                await MainActor.run {
+                                                    isRunningLegacyCleanup = false
+                                                    maintenanceMessage = "Legacy-Kurse gescannt: \(summary.scanned) · Migriert: \(summary.migrated) · Gelöscht: \(summary.deleted) · Übersprungen: \(summary.skippedMissingClassId) · Fehler: \(summary.errors)"
+                                                    maintenanceIsError = summary.errors > 0
+                                                }
+                                            }
+                                        } label: {
+                                            HStack {
+                                                Label("Legacy-Kurse löschen", systemImage: "trash")
+                                                    .foregroundStyle(.red)
+                                                Spacer()
+                                                if isRunningLegacyCleanup {
+                                                    ProgressView()
+                                                } else {
+                                                    Image(systemName: "chevron.right")
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                            }
+                                        }
+                                        .buttonStyle(.plain)
+                                        .disabled(isRunningLegacyCleanup)
+
+                                        if let maintenanceMessage {
+                                            Text(maintenanceMessage)
+                                                .font(helperFont)
+                                                .foregroundStyle(maintenanceIsError ? .red : .secondary)
+                                        }
+                                    }
+                                    .padding(.bottom, 6)
+
+                                    Divider()
+                                }
                                 
                                 NavigationLink {
                                     PrivacyPolicyView()
@@ -3578,5 +3657,3 @@ struct AppSettingsView: View {
                     }
                 }
             }
-
-

@@ -2613,6 +2613,7 @@ final class GradesStore: ObservableObject {
     private var coursesQueriesListeners: [ListenerRegistration] = []
     private var coursesQueryResults: [Int: [Course]] = [:]
     private var coursePathById: [String: String] = [:]
+    private let courseQueryChunkSize = 10
 
     private func decodeCourseDocument(_ doc: QueryDocumentSnapshot) -> Course? {
         if let course = try? doc.data(as: Course.self) {
@@ -2690,8 +2691,8 @@ final class GradesStore: ObservableObject {
             return
         }
         
-        // Chunk IDs for Firestore "in" query limit (max 30)
-        let chunks = subscribedCourseIds.chunked(into: 30)
+        // Chunk IDs for Firestore "in" query limit (max 10 in older SDKs)
+        let chunks = subscribedCourseIds.chunked(into: courseQueryChunkSize)
         
         for (index, chunk) in chunks.enumerated() {
             // New Logic: Use Collection Group Query because courses are now in `classes/{cid}/courses`
@@ -2736,7 +2737,7 @@ final class GradesStore: ObservableObject {
         // Auto-Pruning:
         // Identify IDs that are in `subscribedCourseIds` but NOT in `allCourses`.
         // Only run this check if we have received results for ALL chunks (to avoid premature deletion during loading).
-        let totalChunks = (Double(subscribedCourseIds.count) / 30.0).rounded(.up)
+        let totalChunks = (Double(subscribedCourseIds.count) / Double(courseQueryChunkSize)).rounded(.up)
         let baseChunkCount = Int(totalChunks)
         let baseChunksReady = baseChunkCount > 0 && (0..<baseChunkCount).allSatisfy { coursesQueryResults[$0] != nil }
         if baseChunksReady {
@@ -6749,7 +6750,7 @@ final class GradesStore: ObservableObject {
 
     private func deleteCollectionDocs(_ collection: CollectionReference) async throws {
         while true {
-            let snapshot = try await collection.getDocuments()
+            let snapshot = try await collection.limit(to: 400).getDocuments()
             if snapshot.documents.isEmpty { break }
             let batch = db.batch()
             for doc in snapshot.documents {

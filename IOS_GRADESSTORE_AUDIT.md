@@ -452,6 +452,9 @@
 **Recommendation**
 - Confirm the current Firestore `in` limit and adjust chunk size accordingly.
 
+**Status**
+- Chunk size reduced to 10 to stay within older Firestore limits.
+
 ---
 
 ### 26) Course/class deletions leave subcollections orphaned (low)

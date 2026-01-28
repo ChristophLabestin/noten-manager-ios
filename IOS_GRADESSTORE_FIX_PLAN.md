@@ -43,6 +43,9 @@
 10) ✅ **Delete class/course removes subcollections**
    - `deleteClass` and `deleteCourse` now delete `exams`/`homeworks` subcollections (plus class `members`/`exams`).
 
+11) ✅ **Course query chunk size aligned with Firestore limits**
+   - Chunk size reduced to 10 for safer `in` queries.
+
 ---
 
 ## Phase 2 — Align schema + write paths
@@ -63,7 +66,7 @@
 ## Phase 3 — Data migration
 1) ◐ **Move top-level `/courses` into `classes/{classId}/courses`**
    - Implemented per-course migration when legacy path detected.
-   - Added opt-in helper `cleanupLegacyTopLevelCourses(deleteLegacy:)` for owner-scoped cleanup; not wired to UI.
+   - Added opt-in helper `cleanupLegacyTopLevelCourses(deleteLegacy:)` for owner-scoped cleanup; wired to hidden debug tools.
 2) ✅ **Backfill `id` fields for course exams/homeworks**
    - Decode path now writes missing `id` back to Firestore.
    - Course docs also backfill `classId` from path when missing.
