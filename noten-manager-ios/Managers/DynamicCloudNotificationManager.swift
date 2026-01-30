@@ -11,6 +11,7 @@ enum DynamicCloudNotificationManager {
         case openExam = "OPEN_EXAM"
         case openSheet = "OPEN_SHEET"
         case openSupportTicket = "openSupportTicket"
+        case openHomeworkDetail = "OPEN_HOMEWORK_DETAIL"
     }
 
     static func handleNotificationResponse(_ response: UNNotificationResponse) {
@@ -38,6 +39,12 @@ enum DynamicCloudNotificationManager {
             if let ticketId = userInfo["ticketId"] as? String {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     NotificationCenter.default.post(name: .openSupportTicket, object: ticketId)
+                }
+            }
+        case .openHomeworkDetail:
+            if let homeworkId = userInfo[payloadIdKey] as? String {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    NotificationCenter.default.post(name: .openHomeworkDetail, object: homeworkId)
                 }
             }
         }

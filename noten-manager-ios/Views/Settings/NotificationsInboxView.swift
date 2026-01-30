@@ -11,6 +11,27 @@ struct NotificationsInboxView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("launchOfferPurchased") private var launchOfferPurchased = false
+    @State private var activeSheet: NotificationSheet?
+
+    private enum NotificationSheet: Identifiable {
+        case exam(Exam)
+        case homework(Homework)
+        case daily(DailySummaryData)
+        case support
+        case examList
+        case homeworkList
+
+        var id: String {
+            switch self {
+            case .exam(let exam): return "exam_\(exam.id)"
+            case .homework(let homework): return "homework_\(homework.id)"
+            case .daily(let data): return "daily_\(data.id)"
+            case .support: return "support"
+            case .examList: return "examList"
+            case .homeworkList: return "homeworkList"
+            }
+        }
+    }
 
     private var displayItems: [NotificationInboxItem] {
         inbox.items
@@ -37,33 +58,45 @@ struct NotificationsInboxView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    // Broadcasts
-                    if !inbox.broadcasts.isEmpty {
-                        sectionHeader("Wichtige Meldungen")
+            List {
+                if !inbox.broadcasts.isEmpty {
+                    Section(header: sectionHeader("Wichtige Meldungen")) {
                         ForEach(inbox.broadcasts) { broadcast in
                             broadcastRow(broadcast)
-                        }
-                    }
-
-                    if LaunchOfferNotificationManager.isOfferActive(), !launchOfferPurchased {
-                        sectionHeader("Spezialangebot")
-                        importantNoticeCard
-                    }
-
-                    notificationsHeader
-                    if displayItems.isEmpty {
-                        emptyStateCard
-                    } else {
-                        ForEach(displayItems) { item in
-                            notificationRow(item)
+                                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
                         }
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+
+                if LaunchOfferNotificationManager.isOfferActive(), !launchOfferPurchased {
+                    Section(header: sectionHeader("Spezialangebot")) {
+                        importantNoticeCard
+                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                    }
+                }
+
+                Section(header: notificationsHeader) {
+                    if displayItems.isEmpty {
+                        emptyStateCard
+                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                    } else {
+                        ForEach(displayItems) { item in
+                            notificationRow(item)
+                                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                        }
+                    }
+                }
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
             .background(
                 ThemedBackground(
                     isDark: store.darkMode,
@@ -83,6 +116,31 @@ struct NotificationsInboxView: View {
             }
             .onAppear {
                 inbox.refreshFromDelivered()
+            }
+            .onChange(of: inbox.pendingOpenItem) { _, item in
+                guard let item else { return }
+                inbox.clearPendingOpen()
+                openNotification(item)
+            }
+            .sheet(item: $activeSheet) { sheet in
+                switch sheet {
+                case .exam(let exam):
+                    ExamDetailSheet(exam: exam, onEdit: { _ in })
+                case .homework(let homework):
+                    HomeworkDetailSheet(homework: homework, onEdit: { _ in })
+                case .daily(let data):
+                    DailySummarySheet(data: data)
+                        .environmentObject(store)
+                case .support:
+                    SupportHistoryView()
+                        .environmentObject(store)
+                case .examList:
+                    ExamListView()
+                        .environmentObject(store)
+                case .homeworkList:
+                    HomeworkListView()
+                        .environmentObject(store)
+                }
             }
         }
     }
@@ -191,41 +249,135 @@ struct NotificationsInboxView: View {
     }
 
     private func notificationRow(_ item: NotificationInboxItem) -> some View {
-        Button {
-            inbox.markRead(item.id)
-            onSelectNotification(item)
-            dismiss()
-        } label: {
-            SettingsCard(
-                title: item.title,
-                subtitle: formattedDate(item.date),
-                systemImage: iconName(for: item.kind),
-                accent: accentColor(for: item.kind),
-                trailing: {
-                    HStack(spacing: 8) {
-                        if !item.isRead {
-                            Circle()
-                                .fill(accentColor(for: item.kind))
-                                .frame(width: 8, height: 8)
-                        }
-                        Image(systemName: "chevron.right")
-                            .foregroundStyle(.secondary)
+        SettingsCard(
+            title: item.title,
+            subtitle: formattedDate(item.date),
+            systemImage: iconName(for: item.kind),
+            accent: accentColor(for: item.kind),
+            trailing: {
+                HStack(spacing: 8) {
+                    if !item.isRead {
+                        Circle()
+                            .fill(accentColor(for: item.kind))
+                            .frame(width: 8, height: 8)
                     }
-                }
-            ) {
-                if item.body.isEmpty {
-                    Text("Ohne zusätzliche Details")
-                        .font(.subheadline)
+                    Image(systemName: "chevron.right")
                         .foregroundStyle(.secondary)
-                } else {
-                    Text(item.body)
-                        .font(.body)
-                        .foregroundStyle(.primary)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
+        ) {
+            if item.body.isEmpty {
+                Text("Ohne zusätzliche Details")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text(item.body)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
-        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            openNotification(item)
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button(role: .destructive) {
+                inbox.remove(item)
+            } label: {
+                VStack(spacing: 6) {
+                    Image(systemName: "trash.fill")
+                        .font(.headline.weight(.bold))
+                    Text("Löschen")
+                        .font(.caption.weight(.semibold))
+                }
+            }
+            .tint(.red)
+        }
+    }
+
+    private func openNotification(_ item: NotificationInboxItem) {
+        inbox.markRead(item.id)
+        switch item.kind {
+        case .exam:
+            if let examId = item.examId,
+               let exam = store.allExams.first(where: { $0.id == examId }) {
+                activeSheet = .exam(exam)
+            } else {
+                activeSheet = .examList
+            }
+        case .homework:
+            if let homeworkId = item.homeworkId {
+                let homework = store.allHomeworks.first { hw in
+                    guard hw.id == homeworkId else { return false }
+                    if let gid = item.groupId {
+                        return hw.groupId == gid
+                    }
+                    return true
+                }
+                if let homework {
+                    activeSheet = .homework(homework)
+                } else {
+                    activeSheet = .homeworkList
+                }
+            } else {
+                activeSheet = .homeworkList
+            }
+        case .daily:
+            let examIds = item.examIds ?? (item.examId.map { [$0] } ?? [])
+            let homeworkIds = item.homeworkIds ?? (item.homeworkId.map { [$0] } ?? [])
+            let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+            let hasExplicitIds = !examIds.isEmpty || !homeworkIds.isEmpty
+            let tomorrowExams = hasExplicitIds
+                ? store.allExams.filter { examIds.contains($0.id) }
+                : store.allExams.filter { exam in
+                    !exam.isCompleted && Calendar.current.isDate(exam.date, inSameDayAs: tomorrow)
+                }
+            let tomorrowHomeworks = hasExplicitIds
+                ? store.allHomeworks.filter { homeworkIds.contains($0.id) }
+                : store.allHomeworks.filter { hw in
+                    guard !hw.isCompleted, let due = hw.dueDate else { return false }
+                    return Calendar.current.isDate(due, inSameDayAs: tomorrow)
+                }
+            activeSheet = .daily(DailySummaryData(exams: tomorrowExams, homeworks: tomorrowHomeworks, date: tomorrow))
+        case .support:
+            if let ticketId = item.ticketId {
+                store.pendingTicketId = ticketId
+            }
+            activeSheet = .support
+        case .unknown:
+            if let examId = item.examId,
+               let exam = store.allExams.first(where: { $0.id == examId }) {
+                activeSheet = .exam(exam)
+                return
+            }
+            if let homeworkId = item.homeworkId {
+                let homework = store.allHomeworks.first { hw in
+                    guard hw.id == homeworkId else { return false }
+                    if let gid = item.groupId {
+                        return hw.groupId == gid
+                    }
+                    return true
+                }
+                if let homework {
+                    activeSheet = .homework(homework)
+                    return
+                }
+            }
+            if (item.examIds?.isEmpty == false) || (item.homeworkIds?.isEmpty == false) || item.body.lowercased().contains("morgen") {
+                let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+                let tomorrowExams = store.allExams.filter { exam in
+                    !exam.isCompleted && Calendar.current.isDate(exam.date, inSameDayAs: tomorrow)
+                }
+                let tomorrowHomeworks = store.allHomeworks.filter { hw in
+                    guard !hw.isCompleted, let due = hw.dueDate else { return false }
+                    return Calendar.current.isDate(due, inSameDayAs: tomorrow)
+                }
+                activeSheet = .daily(DailySummaryData(exams: tomorrowExams, homeworks: tomorrowHomeworks, date: tomorrow))
+                return
+            }
+            onSelectNotification(item)
+        }
     }
 
     private func accentColor(for kind: NotificationInboxItem.Kind) -> Color {

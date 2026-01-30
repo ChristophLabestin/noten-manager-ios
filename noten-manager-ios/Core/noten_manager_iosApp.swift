@@ -11,7 +11,6 @@ import UIKit
 import FirebaseCore
 import FirebaseMessaging
 import FirebaseAuth
-import BackgroundTasks
 
 class AppDelegate: NSObject, UIApplicationDelegate, MessagingDelegate {
     func application(
@@ -30,25 +29,47 @@ class AppDelegate: NSObject, UIApplicationDelegate, MessagingDelegate {
         ExamNotificationManager.configureCategories()
         DailyReminderNotificationManager.configureCategories()
         LaunchOfferNotificationManager.configureCategory()
-        BackgroundRefreshManager.register()
-        BackgroundRefreshManager.schedule()
         if #unavailable(iOS 13.0) {
             UIApplication.shared.setMinimumBackgroundFetchInterval(15 * 60)
+        }
+        if #available(iOS 16.2, *) {
+            // Start monitoring Push-to-Start tokens for Live Activities (iOS 17.2+)
+            DispatchQueue.main.async {
+                ExamLiveActivityManager.startMonitoringPushToStartToken()
+            }
         }
         return true
     }
 
 
-    func application(_ application: UIApplication, performFetchWithCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
-        BackgroundRefreshManager.performBackgroundFetch(completion: completionHandler)
-    }
+
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         Messaging.messaging().apnsToken = deviceToken
+        FcmTokenManager.refreshAndSyncCurrentToken()
     }
 
     func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable : Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
         Messaging.messaging().appDidReceiveMessage(userInfo)
+        
+        // Handle Live Activity Start via FCM Data Message
+        if let type = userInfo["type"] as? String, type == "START_EXAM_ACTIVITY",
+           let examId = userInfo["examId"] as? String,
+           let title = userInfo["title"] as? String,
+           let timestamp = userInfo["examDate"] as? String, // ISO String expected
+           let date = ISO8601DateFormatter().date(from: timestamp) {
+            
+            let subject = userInfo["subject"] as? String
+            
+            Task { @MainActor in
+                if #available(iOS 16.2, *) {
+                    await ExamLiveActivityManager.start(examId: examId, title: title, subject: subject, date: date)
+                }
+            }
+            completionHandler(.newData)
+            return
+        }
+
         completionHandler(.noData)
     }
 
@@ -90,6 +111,7 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
             if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
                 // Post notification to open deep link in MainView
                 // Delay slightly to ensure UI is ready if cold launch
+                NotificationInboxStore.shared.queueOpen(item)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     NotificationCenter.default.post(name: .openNotificationItem, object: item)
                 }

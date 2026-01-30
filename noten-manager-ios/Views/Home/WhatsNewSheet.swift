@@ -49,6 +49,24 @@ struct WhatsNewSheet: View {
             description: "Exportiere deine Notenübersicht in einem komplett neu gestalteten, modernen Design.",
             systemImage: "doc.richtext.fill",
             accent: .green
+        ),
+        Feature(
+            title: "Neu: Tagesübersicht",
+            description: "Interaktive Tageszusammenfassung mit direkten Detailansichten für Klausuren & Hausaufgaben.",
+            systemImage: "calendar.badge.clock",
+            accent: .teal
+        ),
+        Feature(
+            title: "Support-Konversationen",
+            description: "Sieh den vollständigen Ticket-Verlauf und antworte direkt im Support-Center.",
+            systemImage: "bubble.left.and.bubble.right.fill",
+            accent: .orange
+        ),
+        Feature(
+            title: "Benachrichtigungs-Inbox",
+            description: "Neue Inbox & Einstellungen für Push- und In-App-Benachrichtigungen.",
+            systemImage: "tray.fill",
+            accent: .pink
         )
     ]
     

@@ -579,7 +579,7 @@ struct AddExamView: View {
                 // Collect unique targets to avoid double-sharing to the same collection
                 var targetClassIds = Set(selectedClassIds)
                 var targetWpGroupIds: Set<String> = []
-                var targetSocialGroupIds = Set(selectedGroupIds)
+                let targetSocialGroupIds = Set(selectedGroupIds)
                 
                 // Map courses to their respective higher-level collections
                 var remainingCourseIds: Set<String> = []

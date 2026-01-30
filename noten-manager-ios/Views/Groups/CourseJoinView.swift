@@ -8,13 +8,25 @@ struct CourseJoinView: View {
     let className: String
     let config: ClassConfiguration?
     let linkedClassIds: [String]
+    let targetSchoolYearId: String?
+    let updateLocalState: Bool
     let onJoinSuccess: () -> Void
     
-    init(classId: String, className: String, config: ClassConfiguration?, linkedClassIds: [String], onJoinSuccess: @escaping () -> Void) {
+    init(
+        classId: String,
+        className: String,
+        config: ClassConfiguration?,
+        linkedClassIds: [String],
+        targetSchoolYearId: String? = nil,
+        updateLocalState: Bool = true,
+        onJoinSuccess: @escaping () -> Void
+    ) {
         self.classId = classId
         self.className = className
         self.config = config
         self.linkedClassIds = linkedClassIds
+        self.targetSchoolYearId = targetSchoolYearId
+        self.updateLocalState = updateLocalState
         self.onJoinSuccess = onJoinSuccess
     }
     
@@ -468,7 +480,12 @@ struct CourseJoinView: View {
             selected.append(contentsOf: electiveCourses.filter { selectedElectiveIds.contains($0.id) })
             
             // 1. Join Class & Standard Courses
-            try await store.joinClassWithBranch(classId: classId, selectedCourses: selected)
+            try await store.joinClassWithBranch(
+                classId: classId,
+                selectedCourses: selected,
+                targetSchoolYearId: targetSchoolYearId,
+                updateLocalState: updateLocalState
+            )
             
             // 2. Join Elective Groups explicitly
             // Identify selected groups
@@ -481,7 +498,7 @@ struct CourseJoinView: View {
                     let ids = itemCourses.map { $0.id }
                     let isSelected = ids.contains { selectedWahlpflichtIds.contains($0) }
                     
-                    if isSelected {
+                    if isSelected, updateLocalState {
                         try? await store.joinWahlpflichtfachGroup(with: group.id, inClass: classId)
                     }
                 }
@@ -489,11 +506,15 @@ struct CourseJoinView: View {
             
             // Join Linked Classes
             for code in selectedLinkedClasses {
-                try? await store.joinClass(with: code) 
+                _ = try? await store.joinClass(
+                    with: code,
+                    targetSchoolYearId: targetSchoolYearId,
+                    updateLocalState: updateLocalState
+                )
             }
             
             // Automatic Subject Creation for New Users
-            if store.subjects.isEmpty {
+            if updateLocalState && store.subjects.isEmpty {
                 print("🆕 New User detected: Automatically creating subjects for selected courses...")
                 var createdNames: Set<String> = []
                 
@@ -535,7 +556,7 @@ struct CourseJoinView: View {
             self.joinedCourses = selected
             
             // Always show subject mapping to confirm selections
-            if !selected.isEmpty {
+            if updateLocalState && !selected.isEmpty {
                 self.showSubjectMapping = true
             } else {
                 onJoinSuccess()

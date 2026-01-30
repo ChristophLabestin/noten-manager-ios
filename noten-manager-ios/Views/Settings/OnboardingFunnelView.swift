@@ -138,9 +138,15 @@ struct OnboardingFunnelView: View {
     @State private var showFeatureBriefing: Bool = false
 
     @State private var wasAlreadyConfigured: Bool = false
+    @State private var shouldPromptPrevYear: Bool = false
     
     // New: Previous Year Prompt
     @State private var wantsPrevYear: Bool = false
+    
+    // School-year scoped class state for onboarding
+    @State private var onboardingClassIds: [String] = []
+    @State private var onboardingClassNames: [String: String] = [:]
+    @State private var joinedClassSubjectCount: Int = 0
 
 
     struct ClassJoinContext: Identifiable {
@@ -187,7 +193,7 @@ struct OnboardingFunnelView: View {
         case .prevYearPrompt: return "Weiter"
         case .joinClass: 
              if hasJoinedClasses { return "Weiter" }
-             return onboardingClassCode.isEmpty ? "Überspringen" : "Klasse beitreten"
+             return onboardingClassCode.isEmpty ? "Weiter" : "Beitreten"
         case .subjects: return "Weiter"
         case .finish: return "Setup abschließen"
         }
@@ -230,7 +236,26 @@ struct OnboardingFunnelView: View {
     }
 
     private var hasJoinedClasses: Bool {
-        !store.classIds.isEmpty
+        !currentJoinClassIds.isEmpty
+    }
+
+    private var pendingYearId: String {
+        let pending = pendingSchoolYearId ?? schoolYearInput.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        return pending.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+    }
+
+    private var usesPendingClassContext: Bool {
+        guard !pendingYearId.isEmpty else { return false }
+        guard let activeId = store.activeSchoolYearId else { return true }
+        return pendingYearId != activeId
+    }
+
+    private var currentJoinClassIds: [String] {
+        usesPendingClassContext ? onboardingClassIds : store.classIds
+    }
+
+    private var currentJoinClassNames: [String: String] {
+        usesPendingClassContext ? onboardingClassNames : store.classNames
     }
     
     // Helper to extract code from URL
@@ -269,29 +294,13 @@ struct OnboardingFunnelView: View {
     private var visibleSteps: [Step] {
         Step.allCases.filter { step in
             if step == .legacy && !legacyStepRequired { return false }
-            if step == .prevYearPrompt && !shouldShowPrevYearPrompt { return false }
+            if step == .prevYearPrompt && !shouldPromptPrevYear { return false }
             return true
         }
     }
     
-    private var shouldShowPrevYearPrompt: Bool {
-        // Only show if FOS and Grade 12 or 13 selected
-        // AND we are not "handling legacy choice" (because legacy import usually brings years)
-        // Wait... legacy import sets `legacySelectedSubjects` etc.
-        // Let's rely on basic inputs:
-        let grade = pendingGradeYear == 0 ? gradeSelection : pendingGradeYear
-        let type = pendingSchoolType // default .bos but updated in bootstrap
-        // FOS 12 or 13 implies a previous year (11 or 12) exists
-        // BOS 12 does NOT imply 11. BOS 13 implies 12.
-        if isSchoolYearChange {
-             // If manual change, we might skip this unless explicitly helpful?
-             // Actually, usually helpful for fresh setup.
-             // Let's enable for FOS 12/13.
-             return type == .fos && (grade == 12 || grade == 13)
-        }
-        
-        // Initial setup
-        return selectedSchoolType == .fos && (gradeSelection == 12 || gradeSelection == 13)
+    private func computePrevYearPrompt(schoolType: SchoolType, grade: Int) -> Bool {
+        schoolType == .fos && (grade == 12 || grade == 13)
     }
 
 
@@ -333,7 +342,7 @@ struct OnboardingFunnelView: View {
                         SchoolYearPage()
                             .tag(Step.schoolYear)
                         
-                        if shouldShowPrevYearPrompt {
+                        if shouldPromptPrevYear {
                             PrevYearPage()
                                 .tag(Step.prevYearPrompt)
                         }
@@ -346,42 +355,40 @@ struct OnboardingFunnelView: View {
                         
                         FinishPage()
                             .tag(Step.finish)
-                    }
-                    .tabViewStyle(.page(indexDisplayMode: .never))
                 }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+            }
                 
-                VStack(spacing: 0) {
-                    Spacer()
-                    VStack(spacing: 8) {
-                        Button {
-                            handlePrimaryAction()
-                        } label: {
-                            HStack {
-                                if isSavingSchoolYear || isFinishing || isHandlingLegacyChoice || isJoiningClass {
-                                    ProgressView().tint(.white)
-                                } else {
-                                    Text(primaryActionTitle)
+                GeometryReader { geometry in
+                    VStack(spacing: 0) {
+                        Spacer()
+                        VStack(spacing: 8) {
+                            Button {
+                                handlePrimaryAction()
+                            } label: {
+                                HStack {
+                                    if isSavingSchoolYear || isFinishing || isHandlingLegacyChoice || isJoiningClass {
+                                        ProgressView().tint(.white)
+                                    } else {
+                                        Text(primaryActionTitle)
+                                    }
                                 }
                             }
+                            .buttonStyle(PremiumOnboardingButtonStyle(accent: accentPrimary))
+                            .disabled(isPrimaryActionDisabled)
                         }
-                        .buttonStyle(PremiumOnboardingButtonStyle(accent: accentPrimary))
                         .padding(.horizontal, 24)
-                        .disabled(isPrimaryActionDisabled)
-                        
-                        // Tighter bottom spacing for premium feel
-                        Spacer().frame(height: 16)
-                    }
-                    .background(
-                        LinearGradient(
-                            colors: [.clear, Color.black.opacity(0.15)],
-                            startPoint: .top,
-                            endPoint: .bottom
+                        .padding(.bottom, geometry.safeAreaInsets.bottom > 0 ? 8 : 16)
+                        .background(
+                            LinearGradient(
+                                colors: [.clear, Color.black.opacity(0.15)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
                         )
-                        .ignoresSafeArea()
-                    )
+                    }
                 }
-                .allowsHitTesting(true)
-                .ignoresSafeArea(.keyboard, edges: .bottom)
+                .ignoresSafeArea(.keyboard)
                 .navigationTitle("")
                 .toolbar {
                     ToolbarItem(placement: .navigationBarLeading) {
@@ -436,6 +443,30 @@ struct OnboardingFunnelView: View {
                     bootstrapDefaults()
                     currentStep = .welcome
                 }
+                .onChange(of: selectedSchoolType) { _, newType in
+                    let allowed = gradeOptionsForSchoolType
+                    if !allowed.contains(gradeSelection) {
+                        gradeSelection = allowed.first ?? 0
+                    }
+                    if currentStep == .schoolYear {
+                        shouldPromptPrevYear = computePrevYearPrompt(schoolType: newType, grade: gradeSelection)
+                    }
+                }
+                .onChange(of: gradeSelection) { _, newGrade in
+                    if currentStep == .schoolYear {
+                        shouldPromptPrevYear = computePrevYearPrompt(schoolType: selectedSchoolType, grade: newGrade)
+                    }
+                }
+                .onChange(of: currentStep) { _, newStep in
+                    if newStep == .joinClass && usesPendingClassContext {
+                        Task { await loadOnboardingClasses() }
+                    }
+                }
+                .onChange(of: shouldPromptPrevYear) { _, newValue in
+                    if currentStep == .prevYearPrompt && !newValue {
+                        currentStep = .joinClass
+                    }
+                }
                 .sheet(isPresented: $showAddSubjectSheet) {
                     AddSubjectView()
                         .environmentObject(store)
@@ -447,16 +478,26 @@ struct OnboardingFunnelView: View {
                             className: ctx.name,
                             config: ctx.config,
                             linkedClassIds: ctx.linkedClassIds,
+                            targetSchoolYearId: usesPendingClassContext ? pendingYearId : nil,
+                            updateLocalState: !usesPendingClassContext,
                             onJoinSuccess: {
                                 showCourseJoinSheet = false
                                 self.mappedClassId = ctx.id
-                                // Check for mapping
-                                let missing = store.missingSubjects(for: ctx.id)
-                                if !missing.isEmpty {
-                                    self.joinedCoursesForMapping = missing
-                                    self.showSubjectMappingSheet = true
-                                } else {
+                                if usesPendingClassContext {
+                                    if !self.onboardingClassIds.contains(ctx.id) {
+                                        self.onboardingClassIds.append(ctx.id)
+                                    }
+                                    self.onboardingClassNames[ctx.id] = ctx.name
                                     withAnimation { currentStep = .subjects }
+                                } else {
+                                    // Check for mapping
+                                    let missing = store.missingSubjects(for: ctx.id)
+                                    if !missing.isEmpty {
+                                        self.joinedCoursesForMapping = missing
+                                        self.showSubjectMappingSheet = true
+                                    } else {
+                                        withAnimation { currentStep = .subjects }
+                                    }
                                 }
                             }
                         )
@@ -535,6 +576,9 @@ struct OnboardingFunnelView: View {
     }
 
     private var schoolYearAlreadyExists: Bool {
+        if store.onboardingRequired && !isSchoolYearChange {
+            return false
+        }
         let trimmed = schoolYearInput.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
         return store.schoolYears.contains(trimmed)
@@ -558,6 +602,7 @@ struct OnboardingFunnelView: View {
         } else {
             gradeSelection = allowed.first ?? 0
         }
+        shouldPromptPrevYear = computePrevYearPrompt(schoolType: selectedSchoolType, grade: gradeSelection)
         pendingSchoolYearId = schoolYearInput
         pendingSchoolType = selectedSchoolType
         pendingGradeYear = gradeSelection
@@ -572,14 +617,22 @@ struct OnboardingFunnelView: View {
     private var availableSchoolYears: [String] {
         let currentId = SchoolYearService.currentSchoolYearId()
         guard let startYear = Int(currentId.prefix(4)) else { return [currentId] }
-        
-        // Dynamic range: 5 years back to 2 years forward
-        return (-5...2).map { offset in
+        var years = (-5...2).map { offset in
             let start = startYear + offset
             let end = start + 1
             let endSuffix = String(format: "%02d", end % 100)
             return "\(start)-\(endSuffix)"
         }
+        let trimmed = schoolYearInput.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        if !trimmed.isEmpty && !years.contains(trimmed) {
+            years.append(trimmed)
+            years.sort { (lhs, rhs) in
+                let left = Int(lhs.prefix(4)) ?? 0
+                let right = Int(rhs.prefix(4)) ?? 0
+                return left < right
+            }
+        }
+        return years
     }
     
     private func loadPrevYearSubjects() async {
@@ -639,10 +692,12 @@ struct OnboardingFunnelView: View {
                 pendingSchoolYearId = targetId
                 pendingSchoolType = selectedSchoolType
                 pendingGradeYear = gradeSelection
-                store.activeSchoolYearId = targetId
+                shouldPromptPrevYear = computePrevYearPrompt(schoolType: selectedSchoolType, grade: gradeSelection)
+                onboardingClassIds = []
+                onboardingClassNames = [:]
                 isSavingSchoolYear = false
                 withAnimation {
-                    if shouldShowPrevYearPrompt {
+                    if shouldPromptPrevYear {
                         currentStep = .prevYearPrompt
                     } else {
                         currentStep = .joinClass
@@ -666,6 +721,8 @@ struct OnboardingFunnelView: View {
         
         isJoiningClass = true
         classJoinError = nil
+        let targetYearId = usesPendingClassContext ? pendingYearId : nil
+        let shouldUpdateLocal = !usesPendingClassContext
         
         Task {
             do {
@@ -695,17 +752,25 @@ struct OnboardingFunnelView: View {
                         self.showCourseJoinSheet = true
                     }
                 } else {
-                    try await store.joinClass(with: code)
+                    _ = try await store.joinClass(with: code, targetSchoolYearId: targetYearId, updateLocalState: shouldUpdateLocal)
                     await MainActor.run {
                         self.isJoiningClass = false
                         self.mappedClassId = info.id
                         
-                        let missing = store.missingSubjects(for: info.id)
-                        if !missing.isEmpty {
-                            self.joinedCoursesForMapping = missing
-                            self.showSubjectMappingSheet = true
-                        } else {
+                        if usesPendingClassContext {
+                            if !self.onboardingClassIds.contains(info.id) {
+                                self.onboardingClassIds.append(info.id)
+                            }
+                            self.onboardingClassNames[info.id] = info.name
                             withAnimation { currentStep = .subjects }
+                        } else {
+                            let missing = store.missingSubjects(for: info.id)
+                            if !missing.isEmpty {
+                                self.joinedCoursesForMapping = missing
+                                self.showSubjectMappingSheet = true
+                            } else {
+                                withAnimation { currentStep = .subjects }
+                            }
                         }
                     }
                 }
@@ -714,6 +779,36 @@ struct OnboardingFunnelView: View {
                     self.classJoinError = error.localizedDescription
                     self.isJoiningClass = false
                 }
+            }
+        }
+    }
+
+    private func loadOnboardingClasses() async {
+        guard let uid = authManager.currentUser?.uid else { return }
+        let targetId = pendingYearId
+        guard !targetId.isEmpty else { return }
+        do {
+            let yearRef = Firestore.firestore()
+                .collection("users")
+                .document(uid)
+                .collection("schoolYears")
+                .document(targetId)
+            let snap = try await yearRef.getDocument()
+            let ids = snap.data()?["classIds"] as? [String] ?? []
+            var names: [String: String] = [:]
+            for classId in ids {
+                if let info = try? await store.fetchClassInfo(with: classId) {
+                    names[classId] = info.name
+                }
+            }
+            await MainActor.run {
+                onboardingClassIds = ids
+                onboardingClassNames = names
+            }
+        } catch {
+            await MainActor.run {
+                onboardingClassIds = []
+                onboardingClassNames = [:]
             }
         }
     }
@@ -800,28 +895,17 @@ struct OnboardingFunnelView: View {
 // MARK: - Components
 extension OnboardingFunnelView {
     func HeaderSection(icon: String, title: String, subtitle: String) -> some View {
-        VStack(spacing: 16) {
-            ZStack {
-                Circle()
-                    .fill(accentPrimary.opacity(0.12))
-                    .frame(width: 80, height: 80)
-                Image(systemName: icon)
-                    .font(.system(size: 36, weight: .bold))
-                    .foregroundStyle(accentPrimary)
-            }
-            .padding(.top, 20)
-
-            VStack(spacing: 8) {
-                Text(title)
-                    .font(.title.weight(.bold))
-                    .multilineTextAlignment(.center)
-                Text(subtitle)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
-            }
+        VStack(spacing: 8) {
+            Text(title)
+                .font(.title.weight(.bold))
+                .multilineTextAlignment(.center)
+            Text(subtitle)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
         }
+        .padding(.top, 20)
     }
 }
 
@@ -896,24 +980,26 @@ extension OnboardingFunnelView {
                     subtitle: "Überspringe diesen Schritt, wenn du deine Fächer manuell verwalten möchtest."
                 )
                 
-                if let classId = store.classIds.first {
+                if let classId = currentJoinClassIds.first {
                     // JOINED STATE
                     SettingsCard(
                         title: "Beigetreten",
-                        subtitle: store.classNames[classId] ?? "Deine Klasse",
+                        subtitle: currentJoinClassNames[classId] ?? "Deine Klasse",
                         systemImage: "checkmark.circle.fill",
                         accent: .green
                     ) {
                         VStack(spacing: 16) {
-                            Text("Du bist der Klasse **\(store.classNames[classId] ?? classId)** erfolgreich beigetreten.")
+                            Text("Du bist der Klasse **\(currentJoinClassNames[classId] ?? classId)** erfolgreich beigetreten.")
                                 .multilineTextAlignment(.center)
                                 .foregroundStyle(.secondary)
                             
                             Button {
                                 Task {
-                                    await store.leaveClass(code: classId)
+                                    await store.leaveClass(code: classId, targetSchoolYearId: usesPendingClassContext ? pendingYearId : nil, updateLocalState: !usesPendingClassContext)
                                     await MainActor.run {
                                         mappedClassId = nil
+                                        onboardingClassIds.removeAll { $0 == classId }
+                                        onboardingClassNames.removeValue(forKey: classId)
                                     }
                                 }
                             } label: {
@@ -985,146 +1071,21 @@ extension OnboardingFunnelView {
 
     @ViewBuilder
     func SchoolYearPage() -> some View {
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: 24) {
-                HeaderSection(
-                    icon: "calendar.badge.clock",
-                    title: "Schuljahr wählen",
-                    subtitle: "Wann und wo startest du durch?"
-                )
-                
-                SettingsCard(
-                    title: "Basis-Infos",
-                    subtitle: "Schuljahr & Art",
-                    systemImage: "info.circle.fill",
-                    accent: accentPrimary
-                ) {
-                    VStack(spacing: 20) {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("SCHULJAHR")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(.secondary)
-                            
-                            ScrollViewReader { proxy in
-                                ScrollView(.horizontal, showsIndicators: false) {
-                                    HStack(spacing: 12) {
-                                        ForEach(availableSchoolYears, id: \.self) { year in
-                                            let isSelected = schoolYearInput == year
-                                            let isCurrent = year == SchoolYearService.currentSchoolYearId()
-                                            
-                                            Button {
-                                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                                    schoolYearInput = year
-                                                }
-                                            } label: {
-                                                VStack(spacing: 6) {
-                                                    if isCurrent {
-                                                        Text("Aktuell")
-                                                            .font(.system(size: 8, weight: .black))
-                                                            .padding(.horizontal, 6)
-                                                            .padding(.vertical, 2)
-                                                            .background(Capsule().fill(isSelected ? .white.opacity(0.3) : accentPrimary.opacity(0.2)))
-                                                            .foregroundStyle(isSelected ? .white : accentPrimary)
-                                                    }
-                                                    
-                                                    Text(year)
-                                                        .font(.system(size: 17, weight: .bold, design: .rounded))
-                                                        .foregroundStyle(isSelected ? .white : .primary)
-                                                    
-                                                    Image(systemName: isSelected ? "checkmark.circle.fill" : "calendar")
-                                                        .font(.system(size: 14))
-                                                        .foregroundStyle(isSelected ? .white : .secondary)
-                                                }
-                                                .frame(width: 100, height: 80)
-                                                .background(
-                                                    ZStack {
-                                                        if isSelected {
-                                                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                                                .fill(accentPrimary)
-                                                                .shadow(color: accentPrimary.opacity(0.3), radius: 6, y: 3)
-                                                        } else {
-                                                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                                                .fill(Color.formInputBackground)
-                                                        }
-                                                    }
-                                                )
-                                            }
-                                            .buttonStyle(.plain)
-                                            .id(year)
-                                        }
-                                    }
-                                    .padding(.horizontal, 4)
-                                }
-                                .mask(
-                                    HStack(spacing: 0) {
-                                        LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing)
-                                            .frame(width: 20)
-                                        Rectangle()
-                                        LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
-                                            .frame(width: 20)
-                                    }
-                                )
-                                .onAppear {
-                                    if !schoolYearInput.isEmpty {
-                                        proxy.scrollTo(schoolYearInput, anchor: .center)
-                                    } else {
-                                        proxy.scrollTo(SchoolYearService.currentSchoolYearId(), anchor: .center)
-                                    }
-                                }
-                            }
-                        }
-                        
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("SCHULART")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(.secondary)
-                            
-                            SegmentedPicker(selection: $selectedSchoolType, options: [
-                                SegmentedPickerOption(title: "FOS", value: .fos),
-                                SegmentedPickerOption(title: "BOS", value: .bos)
-                            ])
-                        }
-                    }
-                    .padding(.top, 4)
-                }
-                .padding(.horizontal, 20)
-                
-                SettingsCard(
-                    title: "Jahrgangsstufe",
-                    subtitle: "Wähle deine aktuelle Klasse",
-                    systemImage: "graduationcap.fill",
-                    accent: .orange
-                ) {
-                    HStack(spacing: 12) {
-                        ForEach(gradeOptionsForSchoolType, id: \.self) { grade in
-                            let isSelected = gradeSelection == grade
-                            Button {
-                                gradeSelection = grade
-                            } label: {
-                                Text("\(grade).")
-                                    .font(.headline)
-                                    .foregroundStyle(isSelected ? .white : .primary)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 14)
-                                    .background(isSelected ? Color.orange : Color.formInputBackground)
-                                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.top, 4)
-                }
-                .padding(.horizontal, 20)
-
-                if let err = schoolYearError {
-                    Text(err)
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                        .padding(.horizontal, 40)
-                }
-                
-                Spacer(minLength: 120) // Extra space for fixed button
-            }
+        SchoolYearSetupView(
+            schoolYearInput: $schoolYearInput,
+            selectedSchoolType: $selectedSchoolType,
+            gradeSelection: $gradeSelection,
+            availableSchoolYears: availableSchoolYears,
+            gradeOptions: gradeOptionsForSchoolType,
+            accentColor: accentPrimary,
+            currentSchoolYearId: SchoolYearService.currentSchoolYearId(),
+            error: schoolYearError
+        ) {
+            HeaderSection(
+                icon: "calendar.badge.clock",
+                title: "Schuljahr wählen",
+                subtitle: "Wann und wo startest du durch?"
+            )
         }
     }
 
@@ -1278,108 +1239,31 @@ extension OnboardingFunnelView {
                 HeaderSection(
                     icon: "text.book.closed.fill",
                     title: "Deine Fächer",
-                    subtitle: "Wähle deine Fachrichtung für ein schnelles Setup."
+                    subtitle: "Wähle eine Fachrichtung oder füge Fächer manuell hinzu."
                 )
                 
-                // Existing Subjects (from Class Join)
-                if !store.subjects.isEmpty {
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text("BEREITS EINGERICHTET (\(store.subjects.count))")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.secondary)
-                            .padding(.leading, 28)
-                        
-                        VStack(spacing: 12) {
-                            ForEach(store.subjects) { subject in
-                                HStack {
-                                    ZStack {
-                                        Circle()
-                                            .fill(Color.green.opacity(0.15))
-                                            .frame(width: 32, height: 32)
-                                        Image(systemName: "checkmark")
-                                            .font(.caption.weight(.bold))
-                                            .foregroundStyle(.green)
-                                    }
-                                    
-                                    Text(subject.name)
-                                        .font(.subheadline.weight(.semibold))
-                                    
-                                    Spacer()
-                                    
-                                    Image(systemName: "lock.fill")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary.opacity(0.5))
-                                }
-                                .padding(12)
-                                .background(Color.formCardBackground)
-                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            }
-                        }
-                        .padding(.horizontal, 20)
-                    }
-                }
-                
-                SettingsCard(
-                    title: "Fachrichtung",
-                    subtitle: "Smarte Vorauswahl",
-                    systemImage: "wand.and.stars",
-                    accent: .purple
-                ) {
-                    VStack(alignment: .leading, spacing: 16) {
-                        if !prevYearSubjects.isEmpty {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text("Vom Vorjahr (\(previousSchoolYearId ?? "unbekannt"))")
-                                    .font(.caption.weight(.bold))
-                                    .foregroundStyle(.secondary)
-                                
-                                FlowLayout(spacing: 8) {
-                                    ForEach(prevYearSubjects, id: \.self) { name in
-                                        let isImported = pendingManualSubjects.contains { $0.name == name }
-                                        Button {
-                                            if isImported {
-                                                pendingManualSubjects.removeAll { $0.name == name }
-                                            } else {
-                                                pendingManualSubjects.append(PendingSubject(name: name, type: 1, isElective: false, gradingMode: .withSchulaufgaben))
-                                            }
-                                        } label: {
-                                            HStack(spacing: 4) {
-                                                Text(name)
-                                                if isImported { Image(systemName: "checkmark") }
-                                            }
-                                            .font(.caption.weight(.bold))
-                                            .padding(.horizontal, 12)
-                                            .padding(.vertical, 8)
-                                            .background(isImported ? Color.green : Color.formInputBackground)
-                                            .foregroundStyle(isImported ? .white : .primary)
-                                            .clipShape(Capsule())
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                }
-                            }
-                            .padding(.bottom, 8)
-                        }
-                            Divider()
-
-                        Text("Presets (Bayerische FOS/BOS)")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.secondary)
-                        
-                        FlowLayout(spacing: 8) {
+                // Branch Presets
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("SCHNELL-SETUP")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 28)
+                    
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
                             ForEach(BranchStream.allCases) { stream in
                                 let isSelected = selectedStream == stream
                                 Button {
                                     selectedStream = stream
-                                    // Defer the array replacement to avoid animation crash
                                     DispatchQueue.main.async {
                                         pendingManualSubjects = stream.defaultSubjects
                                     }
                                 } label: {
                                     Text(stream.rawValue)
-                                        .font(.caption.weight(.bold))
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 8)
-                                        .background(isSelected ? .purple : Color.formInputBackground)
+                                        .font(.subheadline.weight(.semibold))
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 10)
+                                        .background(isSelected ? accentPrimary : Color.formInputBackground)
                                         .foregroundStyle(isSelected ? .white : .primary)
                                         .clipShape(Capsule())
                                         .overlay(Capsule().stroke(isSelected ? .clear : .primary.opacity(0.1), lineWidth: 1))
@@ -1387,20 +1271,20 @@ extension OnboardingFunnelView {
                                 .buttonStyle(.plain)
                             }
                         }
+                        .padding(.horizontal, 24)
                     }
-                    .padding(.top, 4)
                 }
-                .padding(.horizontal, 20)
-
+                
+                // Manual Add
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("MANUELL HINZUFÜGEN")
+                    Text("FACH HINZUFÜGEN")
                         .font(.caption.weight(.bold))
                         .foregroundStyle(.secondary)
                         .padding(.leading, 28)
                     
                     HStack(spacing: 12) {
-                        TextField("Fachname", text: $manualNameInput)
-                            .padding(12)
+                        TextField("Fachname eingeben...", text: $manualNameInput)
+                            .padding(14)
                             .background(Color.formInputBackground)
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                             .onSubmit { addPendingManualSubject() }
@@ -1410,40 +1294,62 @@ extension OnboardingFunnelView {
                             addPendingManualSubject()
                         } label: {
                             Image(systemName: "plus.circle.fill")
-                                .font(.title2)
-                                .foregroundStyle(accentPrimary)
+                                .font(.title)
+                                .foregroundStyle(manualNameInput.isEmpty ? .secondary : accentPrimary)
                         }
                         .disabled(manualNameInput.isEmpty)
                     }
                     .padding(.horizontal, 24)
-
                 }
-
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("AKTIVE FÄCHER (\(pendingManualSubjects.count))")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.secondary)
-                        .padding(.leading, 28)
+                
+                // Unified Subject List
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("DEINE FÄCHER")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.secondary)
+                        
+                        Spacer()
+                        
+                        Text("\(pendingManualSubjects.count)")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(accentPrimary)
+                            .clipShape(Capsule())
+                    }
+                    .padding(.horizontal, 28)
                     
                     if pendingManualSubjects.isEmpty {
-                        Text("Noch keine Fächer gewählt.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .padding(.vertical, 32)
-                            .glassCard()
-                            .padding(.horizontal, 20)
+                        VStack(spacing: 8) {
+                            Image(systemName: "tray")
+                                .font(.largeTitle)
+                                .foregroundStyle(.secondary.opacity(0.5))
+                            Text("Noch keine Fächer")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 40)
+                        .background(Color.formInputBackground.opacity(0.5))
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .padding(.horizontal, 20)
                     } else {
                         VStack(spacing: 8) {
                             ForEach($pendingManualSubjects) { $subj in
-                                SubjectCreationRow(
+                                UnifiedSubjectRow(
                                     name: subj.name,
+                                    isFromPrevYear: prevYearSubjects.contains(subj.name),
                                     hasSA: Binding(
                                         get: { subj.gradingMode == .withSchulaufgaben },
                                         set: { subj.gradingMode = $0 ? .withSchulaufgaben : .withoutSchulaufgaben }
                                     ),
+                                    accent: accentPrimary,
                                     onDelete: {
-                                        pendingManualSubjects.removeAll { $0.id == subj.id }
+                                        withAnimation(.spring(response: 0.3)) {
+                                            pendingManualSubjects.removeAll { $0.id == subj.id }
+                                        }
                                     }
                                 )
                             }
@@ -1452,7 +1358,7 @@ extension OnboardingFunnelView {
                     }
                 }
 
-                Spacer(minLength: 120) // Extra space for fixed button
+                Spacer(minLength: 120)
             }
         }
     }
@@ -1483,7 +1389,7 @@ extension OnboardingFunnelView {
                         
                         HStack(spacing: 12) {
                             Button {
-                                withAnimation { wantsPrevYear = true }
+                                wantsPrevYear = true
                             } label: {
                                 HStack {
                                     Text("Ja, anlegen")
@@ -1493,7 +1399,7 @@ extension OnboardingFunnelView {
                                 }
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 14)
-                                .background(wantsPrevYear ? Color.orange : Color.formInputBackground)
+                                .background(wantsPrevYear ? Color.orange : prevYearOptionBackground)
                                 .foregroundStyle(wantsPrevYear ? .white : .primary)
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                                 .overlay(
@@ -1504,17 +1410,17 @@ extension OnboardingFunnelView {
                             .buttonStyle(.plain)
                             
                             Button {
-                                withAnimation { wantsPrevYear = false }
+                                wantsPrevYear = false
                             } label: {
                                 HStack {
-                                    Text("Nein, überspringen")
+                                    Text("Nein")
                                     if !wantsPrevYear {
                                         Image(systemName: "checkmark.circle.fill")
                                     }
                                 }
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 14)
-                                .background(!wantsPrevYear ? Color.secondary.opacity(0.2) : Color.formInputBackground)
+                                .background(!wantsPrevYear ? Color.secondary.opacity(0.2) : prevYearOptionBackground)
                                 .foregroundStyle(!wantsPrevYear ? .primary : .primary)
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                                 .overlay(
@@ -1546,9 +1452,19 @@ extension OnboardingFunnelView {
             VStack(spacing: 16) {
                 SummaryStatCard(icon: "calendar", title: "Schuljahr", value: schoolYearInput, accent: accentPrimary)
                 SummaryStatCard(icon: "graduationcap", title: "Klasse", value: "\(gradeSelection). Klasse", accent: .orange)
-                SummaryStatCard(icon: "text.book.closed", title: "Fächer", value: "\(pendingManualSubjects.count) Fächer", accent: .green)
+                
+                let totalSubjects = usesPendingClassContext 
+                    ? joinedClassSubjectCount + pendingManualSubjects.count 
+                    : store.subjects.count + pendingManualSubjects.count
+                
+                SummaryStatCard(icon: "text.book.closed", title: "Fächer", value: "\(totalSubjects) Fächer", accent: .green)
             }
             .padding(.horizontal, 24)
+            .task {
+                if usesPendingClassContext {
+                    await calculateJoinedSubjectCount()
+                }
+            }
             
             Spacer(minLength: 120)
         }
@@ -1639,6 +1555,37 @@ extension OnboardingFunnelView {
                 dismiss()
             }
         }
+    }
+
+    private func calculateJoinedSubjectCount() async {
+        guard !onboardingClassIds.isEmpty else {
+            joinedClassSubjectCount = 0
+            return
+        }
+        var total = 0
+        for classId in onboardingClassIds {
+            do {
+                let snapshot = try await Firestore.firestore()
+                    .collection("classes")
+                    .document(classId)
+                    .collection("courses")
+                    .count
+                    .getAggregation(source: .server)
+                total += Int(truncating: snapshot.count)
+            } catch {
+                print("Error counting courses for class \(classId): \(error)")
+            }
+        }
+        await MainActor.run {
+            self.joinedClassSubjectCount = total
+        }
+    }
+
+    private var prevYearOptionBackground: Color {
+        if store.darkMode {
+            return Color(red: 0.16, green: 0.16, blue: 0.18)
+        }
+        return Color(uiColor: .systemGray6)
     }
 }
 
@@ -1789,6 +1736,7 @@ struct FeatureBriefingSheet: View {
         }
     }
     
+
     private func featureRow(icon: String, title: String, text: String, accent: Color) -> some View {
         HStack(alignment: .top, spacing: 16) {
             ZStack {
@@ -1811,5 +1759,131 @@ struct FeatureBriefingSheet: View {
             }
             Spacer()
         }
+    }
+}
+
+// MARK: - Helper Views
+struct SubjectCandidateRow: View {
+    let name: String
+    let onAdd: () -> Void
+    var color: Color = .indigo
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(name)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.primary)
+            
+            Spacer()
+            
+            Button(action: onAdd) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(color)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(12)
+        .background(Color.formInputBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(color.opacity(0.1), lineWidth: 1)
+        )
+    }
+}
+
+struct SubjectToggleRow: View {
+    let name: String
+    let isSelected: Bool
+    var color: Color = .indigo
+    let onToggle: () -> Void
+    
+    var body: some View {
+        Button(action: onToggle) {
+            HStack(spacing: 12) {
+                Text(name)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.primary)
+                
+                Spacer()
+                
+                ZStack {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(isSelected ? color : Color.secondary.opacity(0.3))
+                        .frame(width: 50, height: 30)
+                    
+                    Circle()
+                        .fill(.white)
+                        .frame(width: 24, height: 24)
+                        .shadow(color: .black.opacity(0.1), radius: 2, y: 1)
+                        .offset(x: isSelected ? 10 : -10)
+                }
+                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSelected)
+            }
+            .padding(12)
+            .background(Color.formInputBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(isSelected ? color.opacity(0.3) : color.opacity(0.1), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct UnifiedSubjectRow: View {
+    let name: String
+    let isFromPrevYear: Bool
+    @Binding var hasSA: Bool
+    var accent: Color = .indigo
+    let onDelete: () -> Void
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(name)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.primary)
+                
+                if isFromPrevYear {
+                    Text("Vom Vorjahr")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.orange)
+                }
+            }
+            
+            Spacer()
+            
+            // SA Toggle
+            Button {
+                hasSA.toggle()
+            } label: {
+                Text(hasSA ? "SA" : "Keine SA")
+                    .font(.caption.weight(.bold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(hasSA ? accent.opacity(0.15) : Color.secondary.opacity(0.1))
+                    .foregroundStyle(hasSA ? accent : .secondary)
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            
+            // Delete
+            Button(action: onDelete) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.secondary.opacity(0.5))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(12)
+        .background(Color.formInputBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(accent.opacity(0.1), lineWidth: 1)
+        )
     }
 }

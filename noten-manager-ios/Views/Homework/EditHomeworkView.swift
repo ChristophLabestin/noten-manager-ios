@@ -434,18 +434,28 @@ struct EditHomeworkView: View {
         do {
             let due: Date? = hasDueDate ? dueDate : nil
             let reminder: Date? = hasReminder ? reminderDate : nil
-            if homework.isShared, let gid = homework.groupId {
-                try await store.updateSharedHomeworkInGroup(
-                    groupId: gid,
-                    id: homework.id,
-                    subjectName: subjectName,
-                    title: trimmedTitle,
-                    dueDate: due
-                )
-                if hasReminder {
-                    try await store.setUserReminderForSharedHomework(homeworkId: homework.id, reminderAt: reminder, groupId: gid)
+            if homework.isShared {
+                if let gid = homework.groupId {
+                    try await store.updateSharedHomeworkInGroup(
+                        groupId: gid,
+                        id: homework.id,
+                        subjectName: subjectName,
+                        title: trimmedTitle,
+                        dueDate: due
+                    )
+                } else if let courseId = homework.courseId {
+                    try await store.updateSharedHomeworkInCourse(
+                        courseId: courseId,
+                        id: homework.id,
+                        subjectName: subjectName,
+                        title: trimmedTitle,
+                        dueDate: due
+                    )
+                } else {
+                    throw NSError(domain: "EditHomeworkView", code: -3, userInfo: [NSLocalizedDescriptionKey: "Geteilte Hausaufgabe konnte keinem Kurs/Gruppe zugeordnet werden."])
                 }
-                await store.setUserNoteForSharedHomework(homeworkId: homework.id, note: personalNote, groupId: gid)
+                try await store.setUserReminderForSharedHomework(homeworkId: homework.id, reminderAt: reminder, groupId: homework.groupId)
+                await store.setUserNoteForSharedHomework(homeworkId: homework.id, note: personalNote, groupId: homework.groupId)
             } else {
                 try await store.updateHomeworkInFirestore(
                     id: homework.id,
@@ -519,11 +529,7 @@ struct EditHomeworkView: View {
         guard !isDeleting else { return }
         isDeleting = true
         do {
-            if homework.isShared, let gid = homework.groupId {
-                await store.deleteSharedHomeworkFromGroup(groupId: gid, id: homework.id)
-            } else {
-                await store.deleteHomeworkFromFirestore(id: homework.id)
-            }
+            await store.deleteHomework(homework)
             await MainActor.run {
                 showDeleteConfirm = false
                 dismiss()

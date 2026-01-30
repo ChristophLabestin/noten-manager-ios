@@ -36,28 +36,85 @@ enum ExamLiveActivityManager {
     static func syncLiveActivities(for exams: [Exam]) async {
         guard #available(iOS 16.2, *) else { return }
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        
+        // Critical: If exams are not yet loaded (empty array), don't sync.
+        // Otherwise we might accidentally end activities that were started via push
+        // during a background launch or before Firestore has finished re-fetching.
+        guard !exams.isEmpty else { 
+            os_log("[syncLiveActivities] Exams array is empty, skipping sync to avoid accidental cancellation.",
+                   log: OSLog(subsystem: "de.christophlabestin.noten-manager-ios", category: "LiveActivity"),
+                   type: .default)
+            return 
+        }
+
+        if #available(iOS 17.2, *) {
+            startMonitoringPushToStartToken()
+        }
+
         let now = Date()
         let relevant = exams.filter { $0.hasTime && !$0.isCompleted }
         let activities = Activity<ExamCountdownAttributes>.activities
-        var activityMap = Dictionary(uniqueKeysWithValues: activities.map { ($0.attributes.examId, $0) })
+        var activityMap = Dictionary(activities.map { ($0.attributes.examId, $0) }, uniquingKeysWith: { _, latest in latest })
 
         for activity in activities {
-            guard let exam = relevant.first(where: { $0.id == activity.attributes.examId }) else {
-                cancelAutoEnd(for: activity.id)
-                cancelPushTokenTask(for: activity.id)
-                await end(activity)
-                activityMap[activity.attributes.examId] = nil
-                continue
+            os_log("[syncLiveActivities] Found activity for examId=%{public}@, examDate=%{public}@, now=%{public}@",
+                   log: OSLog(subsystem: "de.christophlabestin.noten-manager-ios", category: "LiveActivity"),
+                   type: .info,
+                   activity.attributes.examId,
+                   activity.content.state.examDate.description,
+                   now.description)
+            
+            // Check if we have the exam in our local data
+            if let exam = relevant.first(where: { $0.id == activity.attributes.examId }) {
+                os_log("[syncLiveActivities] Exam found in local data",
+                       log: OSLog(subsystem: "de.christophlabestin.noten-manager-ios", category: "LiveActivity"),
+                       type: .info)
+                // Exam found - check if it's still valid for Live Activity
+                if exam.date <= now || exam.date.timeIntervalSince(now) > leadTime {
+                    os_log("[syncLiveActivities] Ending activity: exam.date=%{public}@, timeUntil=%f",
+                           log: OSLog(subsystem: "de.christophlabestin.noten-manager-ios", category: "LiveActivity"),
+                           type: .info,
+                           exam.date.description,
+                           exam.date.timeIntervalSince(now))
+                    cancelAutoEnd(for: activity.id)
+                    cancelPushTokenTask(for: activity.id)
+                    await end(activity)
+                    activityMap[activity.attributes.examId] = nil
+                    continue
+                }
+                // Update the activity with latest content
+                let (content, _) = activityContent(for: exam, existing: activity.content.state, includeAlert: false)
+                await activity.update(content)
+            } else {
+                os_log("[syncLiveActivities] Exam NOT in local data, checking activityExamDate",
+                       log: OSLog(subsystem: "de.christophlabestin.noten-manager-ios", category: "LiveActivity"),
+                       type: .info)
+                // Exam not in local data - but activity might be from a push
+                // Only end if the activity's exam date has passed
+                let activityExamDate = activity.content.state.examDate
+                os_log("[syncLiveActivities] activityExamDate=%{public}@, now=%{public}@, isPast=%d",
+                       log: OSLog(subsystem: "de.christophlabestin.noten-manager-ios", category: "LiveActivity"),
+                       type: .info,
+                       activityExamDate.description,
+                       now.description,
+                       activityExamDate <= now ? 1 : 0)
+                if activityExamDate <= now {
+                    // Exam date has passed, safe to end
+                    os_log("[syncLiveActivities] Ending activity - exam date passed",
+                           log: OSLog(subsystem: "de.christophlabestin.noten-manager-ios", category: "LiveActivity"),
+                           type: .info)
+                    cancelAutoEnd(for: activity.id)
+                    cancelPushTokenTask(for: activity.id)
+                    await end(activity)
+                    activityMap[activity.attributes.examId] = nil
+                } else {
+                    os_log("[syncLiveActivities] Keeping activity running",
+                           log: OSLog(subsystem: "de.christophlabestin.noten-manager-ios", category: "LiveActivity"),
+                           type: .info)
+                }
+                // Otherwise, keep the activity running (it might be a push-started activity
+                // for a shared exam that hasn't loaded yet)
             }
-            if exam.date <= now || exam.date.timeIntervalSince(now) > leadTime {
-                cancelAutoEnd(for: activity.id)
-                cancelPushTokenTask(for: activity.id)
-                await end(activity)
-                activityMap[activity.attributes.examId] = nil
-                continue
-            }
-            let (content, _) = activityContent(for: exam, existing: activity.content.state, includeAlert: false)
-            await activity.update(content)
         }
 
         for exam in relevant where exam.date > now && exam.date.timeIntervalSince(now) <= leadTime {
@@ -68,52 +125,80 @@ enum ExamLiveActivityManager {
 
     @available(iOS 16.2, *)
     @MainActor
-    private static func start(for exam: Exam) async {
+    static func start(examId: String, title: String, subject: String?, date: Date, showAlert: Bool = true) async {
+        // Check if an activity for this examId already exists
+        let existingActivities = Activity<ExamCountdownAttributes>.activities
+        if existingActivities.contains(where: { $0.attributes.examId == examId }) {
+            // Activity already exists, don't start a duplicate
+            return
+        }
+        
         let attributes = ExamCountdownAttributes(
-            examId: exam.id,
-            title: exam.title,
-            subject: subjectLabel(for: exam),
+            examId: examId,
+            title: title,
+            subject: subject,
             accent: currentAccentTheme()
         )
-        let (content, alert) = activityContent(for: exam, existing: nil, includeAlert: true)
+        // Helper to construct "fake" exam for content calculation logic
+        // We reuse contentState logic but need to be careful with leadTime check if we want to force start
+        let now = Date()
+        let timeTilExam = date.timeIntervalSince(now)
+        let actualLeadTime = max(leadTime, timeTilExam)
+        let startDate = date.addingTimeInterval(-actualLeadTime)
+        let duration = actualLeadTime
+        
+        let state = ExamCountdownAttributes.ContentState(
+            examDate: date,
+            title: title,
+            subject: subject,
+            startDate: startDate,
+            duration: duration
+        )
+        
+        let content = ActivityContent(state: state, staleDate: date, relevanceScore: 50)
+        
+        var alert: AlertConfiguration? = nil
+        if showAlert {
+            let alertTitle: LocalizedStringResource = "Klausur in 90 Minuten"
+            let alertBody: LocalizedStringResource
+            if let s = subject, !s.isEmpty {
+                alertBody = "\(title) in \(s)"
+            } else {
+                alertBody = "\(title)"
+            }
+            
+            if #available(iOS 17.0, *) {
+                alert = AlertConfiguration(title: alertTitle, body: alertBody, sound: .default)
+            }
+        }
+
         do {
             let activity = try Activity.request(attributes: attributes, content: content, pushType: .token)
             if let alert, #available(iOS 17.0, *) {
                 await activity.update(content, alertConfiguration: alert)
             }
-            await registerPushToken(for: activity, exam: exam)
-            scheduleAutoEnd(for: activity, at: exam.date)
-            await notifyStartIfNeeded(for: exam)
-            await triggerHaptic()
-            return
+            // We assume a full Exam object is needed for token registration, 
+            // but for remote start, we might skip re-registering the token immediately 
+            // or fetch the full exam asynchronously if needed.
+            // For now, we skip registerPushToken since the activity is already started remotely.
+            
+            scheduleAutoEnd(for: activity, at: date)
+            // Note: Removed triggerHaptic() here since AlertConfiguration already provides feedback
         } catch {
             os_log(
-                "Failed to start Live Activity (push): id=%{public}@ error=%{public}@",
+                "Failed to start Live Activity (remote data): id=%{public}@ error=%{public}@",
                 log: OSLog(subsystem: "de.christophlabestin.noten-manager-ios", category: "LiveActivity"),
                 type: .error,
-                exam.id,
+                examId,
                 String(describing: error)
             )
         }
+    }
 
-        // Fallback: falls Push-Token-Flow scheitert (kein APNs-Key/Entitlement), trotzdem lokal starten.
-        do {
-            let activity = try Activity.request(attributes: attributes, content: content, pushType: nil)
-            if let alert, #available(iOS 17.0, *) {
-                await activity.update(content, alertConfiguration: alert)
-            }
-            scheduleAutoEnd(for: activity, at: exam.date)
-            await notifyStartIfNeeded(for: exam)
-            await triggerHaptic()
-        } catch {
-            os_log(
-                "Failed to start Live Activity (local fallback): id=%{public}@ error=%{public}@",
-                log: OSLog(subsystem: "de.christophlabestin.noten-manager-ios", category: "LiveActivity"),
-                type: .error,
-                exam.id,
-                String(describing: error)
-            )
-        }
+    @available(iOS 16.2, *)
+    @MainActor
+    private static func start(for exam: Exam) async {
+        await start(examId: exam.id, title: exam.title, subject: subjectLabel(for: exam), date: exam.date)
     }
 
     @available(iOS 16.2, *)
@@ -220,6 +305,7 @@ enum ExamLiveActivityManager {
 
     @available(iOS 16.2, *)
     private static func savePushRegistration(token: String, uid: String, activity: Activity<ExamCountdownAttributes>, exam: Exam) async {
+        if OfflineModeManager.shared.isOfflineModeActive { return }
         let db = Firestore.firestore()
         let now = Date()
         let timeTilExam = exam.date.timeIntervalSince(now)
@@ -244,6 +330,7 @@ enum ExamLiveActivityManager {
 
     @available(iOS 16.2, *)
     private static func removePushRegistration(for activityId: String) async {
+        if OfflineModeManager.shared.isOfflineModeActive { return }
         guard let uid = Auth.auth().currentUser?.uid else { return }
         let db = Firestore.firestore()
         let doc = db.collection("users").document(uid).collection("liveActivities").document(activityId)
@@ -280,6 +367,44 @@ enum ExamLiveActivityManager {
                 trigger: nil
             )
             UNUserNotificationCenter.current().add(request)
+        }
+    }
+
+    // MARK: - Push-to-Start (iOS 17.2+)
+    
+    @available(iOS 17.2, *)
+    private static var pushToStartTask: Task<Void, Never>?
+
+    @MainActor
+    static func startMonitoringPushToStartToken() {
+        guard #available(iOS 17.2, *) else { return }
+        guard pushToStartTask == nil else { return }
+
+        pushToStartTask = Task {
+            for await tokenData in Activity<ExamCountdownAttributes>.pushToStartTokenUpdates {
+                let token = tokenData.map { String(format: "%02x", $0) }.joined()
+                await uploadPushToStartToken(token)
+            }
+        }
+    }
+
+    @available(iOS 17.2, *)
+    private static func uploadPushToStartToken(_ token: String) async {
+        if OfflineModeManager.shared.isOfflineModeActive { return }
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        let db = Firestore.firestore()
+        let doc = db.collection("users").document(uid).collection("liveActivityTokens").document("examCountdown")
+        
+        let payload: [String: Any] = [
+            "token": token,
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+        
+        do {
+            try await doc.setData(payload, merge: true)
+            os_log("Uploaded Push-to-Start token", log: OSLog(subsystem: "de.christophlabestin.noten-manager-ios", category: "LiveActivity"), type: .info)
+        } catch {
+            os_log("Failed to upload Push-to-Start token: %{public}@", log: OSLog(subsystem: "de.christophlabestin.noten-manager-ios", category: "LiveActivity"), type: .error, String(describing: error))
         }
     }
 }

@@ -135,6 +135,14 @@ struct SubjectDetailView: View {
     private var sortedGrades: [GradeWithId] {
         filteredGrades.sorted { $0.date > $1.date }
     }
+
+    private var schulaufgabeGrades: [GradeWithId] {
+        sortedGrades.filter { isSchulaufgabe($0) }
+    }
+
+    private var otherGrades: [GradeWithId] {
+        sortedGrades.filter { !isSchulaufgabe($0) }
+    }
     
     private func weightOptions() -> [(title: String, value: Double, type: AssessmentType)] {
         switch currentGradingMode {
@@ -481,13 +489,15 @@ struct SubjectDetailView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else {
-                VStack(spacing: 10) {
-                    ForEach(Array(sortedGrades.enumerated()), id: \.element.id) { entry in
-                        let g = entry.element
-                        let delay = 0.26 + Double(entry.offset) * 0.04
-                        gradeCard(g)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .softFadeIn(enabled: animationsOn, delay: delay, offset: 12)
+                VStack(spacing: 14) {
+                    if !schulaufgabeGrades.isEmpty {
+                        gradeGroupHeader(title: "Schulaufgaben", count: schulaufgabeGrades.count, accent: .orange)
+                        gradeList(schulaufgabeGrades, baseDelay: 0.26)
+                    }
+                    if !otherGrades.isEmpty {
+                        gradeGroupHeader(title: "Sonstige Leistungen", count: otherGrades.count, accent: .indigo)
+                        let baseDelay = 0.26 + Double(schulaufgabeGrades.count) * 0.04
+                        gradeList(otherGrades, baseDelay: baseDelay)
                     }
                 }
             }
@@ -1540,6 +1550,39 @@ struct SubjectDetailView: View {
                 return match.title
             }
             return "Sonstige Leistung (\(formatWeight(effective))x)"
+        }
+
+        private func isSchulaufgabe(_ grade: GradeWithId) -> Bool {
+            grade.assessmentType == .schulaufgabe
+        }
+
+        @ViewBuilder
+        private func gradeGroupHeader(title: String, count: Int, accent: Color) -> some View {
+            HStack {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                PillBadge(
+                    text: "\(count)",
+                    systemImage: "number.circle",
+                    foreground: accent,
+                    background: accent.opacity(0.12)
+                )
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+
+        @ViewBuilder
+        private func gradeList(_ grades: [GradeWithId], baseDelay: Double) -> some View {
+            VStack(spacing: 10) {
+                ForEach(Array(grades.enumerated()), id: \.element.id) { entry in
+                    let g = entry.element
+                    let delay = baseDelay + Double(entry.offset) * 0.04
+                    gradeCard(g)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .softFadeIn(enabled: animationsOn, delay: delay, offset: 12)
+                }
+            }
         }
         
         private func halfYearLabel(_ value: Int?) -> String? {

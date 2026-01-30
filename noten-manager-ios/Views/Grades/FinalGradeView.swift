@@ -973,7 +973,7 @@ struct FinalGradeView: View {
                         }
                         
                         if let sub = seminarSubmissionDate {
-                            Text("Abgabe: \(formatDateShort(sub)) (Dienstag der 2. Unterrichtswoche).")
+                            Text("Abgabe: \(formatDateShort(sub)) (Dienstag der 2. Unterrichtswoche im Januar).")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -2951,4 +2951,3 @@ extension FinalGradeView {
         }
     }
 }
-

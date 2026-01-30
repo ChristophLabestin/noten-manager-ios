@@ -138,7 +138,10 @@ struct SupportHistoryView: View {
     }
     
     private func loadItems() async {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = Auth.auth().currentUser?.uid else {
+            isLoading = false
+            return
+        }
         do {
             async let ticketsTask = FirestoreService.shared.getUserSupportTickets(userId: uid)
             async let requestsTask = FirestoreService.shared.getUserSupportAccessRequests(userId: uid)

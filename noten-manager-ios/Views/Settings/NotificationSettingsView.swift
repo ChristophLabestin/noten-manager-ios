@@ -72,7 +72,7 @@ struct NotificationSettingsView: View {
                                 .labelsHidden()
                             }
                             
-                            Text("Du erhältst jeden Abend eine Übersicht über anstehende Hausaufgaben und Klausuren für den nächsten Tag.")
+                            Text("Du erhältst zu Deiner gewähllten Uhrzeit eine Übersicht über anstehende Hausaufgaben und Klausuren für den nächsten Tag falls welche anstehen.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -117,6 +117,48 @@ struct NotificationSettingsView: View {
                         .tint(.orange)
                         
                         Text("Benachrichtigung, wenn ein Admin temporären Zugriff auf deinen Account anfordert oder nutzt.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal)
+
+                // 3. Allgemeine Mitteilungen
+                SettingsSectionBox {
+                    VStack(alignment: .leading, spacing: 16) {
+                        HStack {
+                            Image(systemName: "megaphone.fill")
+                                .foregroundStyle(.blue)
+                                .font(.title2)
+                            Text("Mitteilungen")
+                                .font(.headline)
+                        }
+
+                        Toggle("Allgemeine Hinweise", isOn: Binding(
+                            get: { store.broadcastNotificationsEnabled },
+                            set: { newVal in
+                                store.broadcastNotificationsEnabled = newVal
+                                Task { await store.updatePreferences(broadcastNotificationsEnabled: newVal) }
+                            }
+                        ))
+                        .tint(.blue)
+
+                        Text("Wichtige Hinweise, Änderungen oder Ankündigungen.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Divider()
+
+                        Toggle("Individuelle Nachrichten", isOn: Binding(
+                            get: { store.customNotificationsEnabled },
+                            set: { newVal in
+                                store.customNotificationsEnabled = newVal
+                                Task { await store.updatePreferences(customNotificationsEnabled: newVal) }
+                            }
+                        ))
+                        .tint(.blue)
+
+                        Text("Direkte Nachrichten speziell für deinen Account.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

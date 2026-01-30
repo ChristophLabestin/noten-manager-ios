@@ -55,6 +55,10 @@ struct HomeView: View {
         store.fachreferat != nil
     }
 
+    private var hasSeminar: Bool {
+        store.seminarPerformance != nil
+    }
+
     private var hasPracticalPerformance: Bool {
         guard let perf = store.practicalPerformance else { return false }
         return !perf.grades.isEmpty
@@ -155,6 +159,9 @@ struct HomeView: View {
         var base = subjectsWithoutFachreferat
         if hasFachreferat {
             base.append(Subject(name: "Fachreferat", type: 0, date: Date()))
+        }
+        if hasSeminar {
+            base.append(Subject(name: "Seminar", type: 0, date: Date()))
         }
         if hasPracticalPerformance {
             base.append(Subject(name: "Praktikum", type: 0, date: Date()))
@@ -535,7 +542,7 @@ struct HomeView: View {
     // MARK: - Header & Overview
 
     private var homeHeader: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 12) {
             Text(dateString)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -611,6 +618,23 @@ struct HomeView: View {
         )
         .onTapGesture {
             showDebugSheet = true
+        }
+    }
+
+    private var overallGradeCardWithHint: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            overallGradeCard
+            HStack(spacing: 6) {
+                Image(systemName: "info.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("Tippe auf die Gesamtschnitt-Karte für Details.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 8)
         }
     }
     
@@ -910,16 +934,16 @@ struct HomeView: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
 
-            overallGradeCard
+            overallGradeCardWithHint
                 .softFadeIn(enabled: animationsOn, delay: 0.04, offset: 12)
-                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 6, trailing: 16))
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
 
             if store.showNextExamCard {
                 nextAppointmentView
                     .softFadeIn(enabled: animationsOn, delay: 0.07, offset: 10)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }
@@ -1152,7 +1176,7 @@ struct HomeView: View {
             WhatsNewSheet()
                 .environmentObject(store)
         }
-        .onChange(of: store.initialSyncSettled) { settled in
+        .onChange(of: store.initialSyncSettled) { _, settled in
              if settled {
                  let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
                  let versionMismatch = !currentVersion.isEmpty && store.lastSeenVersion != currentVersion
@@ -1164,7 +1188,6 @@ struct HomeView: View {
                  // If store.registeredInVersion is nil, it might be a fresh install.
                  // Usually What's New is for updates.
                  // Preserving existing logic:
-                 let isLegacyOrOlder = store.registeredInVersion == nil || store.registeredInVersion != "1.3" // This seems specific to a past migration?
                  // Let's rely on version mismatch primarily.
                  
                  
@@ -1455,9 +1478,22 @@ struct LaunchMessageSheetView: View {
         .offerCodeRedemption(isPresented: $showOfferCodeSheet) { result in
             switch result {
             case .success:
-                onPurchaseSuccess()
+                Task {
+                    let activated = await storeKit.refreshAllStatus()
+                    await MainActor.run {
+                        if activated {
+                            onPurchaseSuccess()
+                            dismiss()
+                        } else {
+                            purchaseStatusMessage = "Code eingelöst. Wir prüfen den Kauf und schalten Pro frei, sobald er bestätigt ist."
+                            purchaseStatusIsError = false
+                        }
+                    }
+                }
             case .failure(let error):
                 print("Offer code redemption failed: \(error)")
+                purchaseStatusMessage = "Code konnte nicht eingelöst werden."
+                purchaseStatusIsError = true
             }
         }
     }
@@ -2003,11 +2039,23 @@ struct SubscriptionOfferSheetView: View {
         .offerCodeRedemption(isPresented: $showOfferCodeSheet) { result in
             switch result {
             case .success:
-                onPurchaseSuccess()
-                dismiss()
+                Task {
+                    let activated = await storeKit.refreshAllStatus()
+                    await MainActor.run {
+                        if activated {
+                            onPurchaseSuccess()
+                            dismiss()
+                        } else {
+                            purchaseStatusMessage = "Code eingelöst. Wir prüfen den Kauf und schalten Pro frei, sobald er bestätigt ist."
+                            purchaseStatusIsError = false
+                        }
+                    }
+                }
             case .failure(let error):
                 // StoreKit handles UI for failure usually, but we can log
                 print("Offer code redemption failed: \(error)")
+                purchaseStatusMessage = "Code konnte nicht eingelöst werden."
+                purchaseStatusIsError = true
             }
         }
     }
@@ -2160,6 +2208,20 @@ struct SubscriptionOfferSheetView: View {
             .buttonStyle(.plain)
             .disabled(storeKit.isProcessingSubscriptionPurchase || !selectedSubscriptionAvailable)
 
+            Button {
+                showOfferCodeSheet = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "tag.fill")
+                        .font(.caption.weight(.semibold))
+                    Text("Rabattcode Einlösen")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(.secondary)
+
             if let message = purchaseStatusMessage, !message.isEmpty {
                 Text(message)
                     .font(.footnote)
@@ -2188,16 +2250,6 @@ struct SubscriptionOfferSheetView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
             Button {
-                showOfferCodeSheet = true
-            } label: {
-                Text("Code einlösen")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(ctaAccent)
-                    .underline()
-            }
-            .buttonStyle(.plain)
-
-            Button {
                 handleRestore()
             } label: {
                 Text("Käufe wiederherstellen")
@@ -2207,6 +2259,17 @@ struct SubscriptionOfferSheetView: View {
             }
             .buttonStyle(.plain)
             .disabled(storeKit.isRestoring)
+#if DEBUG
+            Button {
+                NotificationCenter.default.post(name: .toggleSubscriptionOfferSheet, object: nil)
+            } label: {
+                Text("Debug: Abo-Sheet toggeln")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .underline()
+            }
+            .buttonStyle(.plain)
+#endif
         }
         .padding(.top, 2)
     }
@@ -2422,9 +2485,12 @@ struct SubjectRowView: View {
         return .red
     }
 
-    private func descriptor(for average: Double?, gradesCount: Int, isFachreferat: Bool, isPraktikum: Bool) -> String {
+    private func descriptor(for average: Double?, gradesCount: Int, isFachreferat: Bool, isPraktikum: Bool, isSeminar: Bool) -> String {
         if isFachreferat {
             return gradesCount == 0 ? "Fachreferat noch nicht hinterlegt" : "Einmalige Bewertung gespeichert"
+        }
+        if isSeminar {
+            return average == nil ? "Seminar noch nicht bewertet" : "Seminarfach-Leistung"
         }
         if gradesCount == 0 {
             return isPraktikum ? "Noch keine Noten erfasst" : "Noch keine Noten erfasst"
@@ -2455,6 +2521,13 @@ struct SubjectRowView: View {
             return SubjectAccent(
                 primary: feminine ? Color(hex: "#d946ef") : Color(hex: "#8b5cf6"),
                 secondary: feminine ? Color(hex: "#f472b6") : Color(hex: "#60a5fa")
+            )
+        }
+
+        if subject.name == "Seminar" {
+            return SubjectAccent(
+                primary: Color(hex: "#4f46e5"),
+                secondary: Color(hex: "#6366f1")
             )
         }
 
@@ -2541,6 +2614,24 @@ struct SubjectRowView: View {
     }
 
     private func currentDisplay() -> (average: Double?, displayValue: String) {
+        // Special handling for Fachreferat: grade is stored in store.fachreferat, not gradesBySubject
+        if subject.name == "Fachreferat" {
+            if let fr = store.fachreferat {
+                // Use fixed grade override if available, otherwise use calculated grade
+                let grade = fr.fixedGrade ?? fr.grade
+                return (grade, String(format: "%.0f", grade))
+            }
+            return (nil, "–")
+        }
+        
+        // Special handling for Seminar
+        if subject.name == "Seminar" {
+             if let sem = store.seminarPerformance, let points = GradeCalculationService.calculateSeminarFinalPoints(sem) {
+                 return (points, String(format: "%.0f", points))
+             }
+             return (nil, "–")
+        }
+        
         let droppedHalf = subject.droppedHalfYear
         switch halfYearFilter {
         case .one:
@@ -2588,6 +2679,7 @@ struct SubjectRowView: View {
         let isDropped = (subject.droppedHalfYear != nil && !grades.isEmpty && average == nil)
 
         let isFachreferat = subject.name == "Fachreferat"
+        let isSeminar = subject.name == "Seminar"
         let isPraktikum = subject.name == "Praktikum"
         let isSport = subject.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "sport"
         let accent = accent(for: subject)
@@ -2605,6 +2697,8 @@ struct SubjectRowView: View {
         let tag: Tag? = {
             if isFachreferat {
                 return nil
+            } else if isSeminar {
+                return Tag(text: "Seminar", style: .main)
             } else if isPraktikum {
                 return Tag(text: "Praktikum", style: .minor)
             } else if isSport {
@@ -2633,7 +2727,7 @@ struct SubjectRowView: View {
                     }
                 }
 
-                Text(descriptor(for: average, gradesCount: gradesCount, isFachreferat: isFachreferat, isPraktikum: isPraktikum))
+                Text(descriptor(for: average, gradesCount: gradesCount, isFachreferat: isFachreferat, isPraktikum: isPraktikum, isSeminar: isSeminar))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -2830,6 +2924,14 @@ struct SubjectGridItemView: View {
     let fachreferatSubjectName: String?
 
     private func avg(_ subject: Subject) -> Double? {
+        if subject.name == "Fachreferat" {
+             if let fr = store.fachreferat { return fr.fixedGrade ?? fr.grade }
+             return nil
+        }
+        if subject.name == "Seminar" {
+             if let sem = store.seminarPerformance { return GradeCalculationService.calculateSeminarFinalPoints(sem) }
+             return nil
+        }
         if let fixed = subject.fixedAverageYearly { return fixed }
         let droppedHalf = subject.droppedHalfYear
         let v1 = droppedHalf == 1 ? nil : store.bestAvailableHalfYearValue(subject: subject, halfYear: 1)
@@ -2870,6 +2972,13 @@ struct SubjectGridItemView: View {
     }
 
     private func accent(for subject: Subject) -> SubjectAccent {
+        if subject.name == "Seminar" {
+            return SubjectAccent(
+                primary: Color(hex: "#4f46e5"),
+                secondary: Color(hex: "#6366f1")
+            )
+        }
+        
         let feminine = store.theme == "feminine"
         let mainPrimary = feminine ? Color(hex: "#ec4899") : Color(hex: "#2563eb")
         let mainSecondary = feminine ? Color(hex: "#c084fc") : Color(hex: "#38bdf8")

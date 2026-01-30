@@ -81,7 +81,9 @@ struct ExamListView: View {
                store.subjects.contains(where: { $0.name == resolved }) {
                 return true
             }
-            return store.subjects.contains(where: { $0.name == exam.subjectName })
+            // Fix: Allow unshared/orphaned exams to appear even if subject not found
+            // return store.subjects.contains(where: { $0.name == exam.subjectName })
+            return true
         }
     }
 
@@ -645,6 +647,7 @@ struct ExamDetailSheet: View {
     @State private var showReschedulePicker: Bool = false
     @State private var rescheduleDate: Date = Date()
     @State private var showDeleteAlert: Bool = false
+    @State private var showAddGradeSheet: Bool = false
 
     init(exam: Exam, onEdit: ((Exam) -> Void)? = nil) {
         self.exam = exam
@@ -658,7 +661,7 @@ struct ExamDetailSheet: View {
 
     private var sharingInfo: String? {
         let name = store.resolveContextName(groupId: exam.groupId, courseId: exam.courseId, classId: exam.classId)
-        return name.isEmpty ? nil : "Diese Prüfung ist geteilt mit \(name)"
+        return name.isEmpty ? nil : name
     }
 
     private var potentialDuplicate: Exam? {
@@ -734,6 +737,21 @@ struct ExamDetailSheet: View {
                         }
                     }
 
+                    // Add Grade Button (only if not completed, not general event, and requires grade)
+                    if !exam.isCompleted && !isGeneralEvent && exam.requiresGrade != false && linkedGrade == nil {
+                        Button {
+                            showAddGradeSheet = true
+                        } label: {
+                            SettingsButtonLabel(
+                                title: "Note eintragen",
+                                subtitle: "Ergebnis für diese Prüfung",
+                                icon: "graduationcap.fill",
+                                accent: .blue
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+
                     SettingsCard(
                         title: "Details",
                         subtitle: "Art, Status & Erinnerung",
@@ -756,14 +774,6 @@ struct ExamDetailSheet: View {
                                     icon: exam.isCompleted ? "checkmark.circle.fill" : "circle",
                                     tint: exam.isCompleted ? .green : .secondary
                                 )
-                                if !isGeneralEvent {
-                                    detailRow(
-                                        title: "Note erforderlich",
-                                        value: exam.requiresGrade == false ? "Nein" : "Ja",
-                                        icon: "graduationcap.fill",
-                                        tint: .purple
-                                    )
-                                }
                                 detailRow(
                                     title: "Erinnerung",
                                     value: reminderLabel,
@@ -964,6 +974,18 @@ struct ExamDetailSheet: View {
                     .presentationDetents([.medium])
                 }
             }
+            .sheet(isPresented: $showAddGradeSheet) {
+                let note = noteForNewGrade()
+                AddGradeView(
+                    preselectedSubjectName: exam.subjectName,
+                    preselectedWeight: exam.weight,
+                    preselectedCustomWeight: exam.customWeight,
+                    prefilledNote: note,
+                    linkedExamId: exam.id,
+                    markLinkedExamCompletedByDefault: true
+                )
+                .environmentObject(store)
+            }
             .alert("Prüfung löschen?", isPresented: $showDeleteAlert) {
                 Button("Löschen", role: .destructive) {
                     Task { await deleteExamConfirmed() }
@@ -972,7 +994,7 @@ struct ExamDetailSheet: View {
             } message: {
                 Text("Bist du sicher? Dies kann nicht widerrufen werden.")
             }
-            .presentationDetents([.fraction(0.85), .large])
+            .presentationDetents([.large])
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button {
@@ -1002,6 +1024,14 @@ struct ExamDetailSheet: View {
     private func deleteExamConfirmed() async {
         await store.deleteExam(exam)
         dismiss()
+    }
+
+    private func noteForNewGrade() -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = exam.hasTime ? .short : .none
+        let dateString = formatter.string(from: exam.date)
+        return "Geschrieben am \(dateString)"
     }
 
     private func formattedDateTime(_ date: Date) -> String {

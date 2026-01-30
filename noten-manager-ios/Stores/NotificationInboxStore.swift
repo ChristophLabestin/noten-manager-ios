@@ -106,6 +106,7 @@ final class NotificationInboxStore: ObservableObject {
 
     @Published private(set) var items: [NotificationInboxItem] = []
     @Published private(set) var broadcasts: [BroadcastNotification] = []
+    @Published private(set) var pendingOpenItem: NotificationInboxItem? = nil
 
     private let storageKey = "notification_inbox_items_v1"
 
@@ -141,10 +142,24 @@ final class NotificationInboxStore: ObservableObject {
         }
     }
 
+    func queueOpen(_ item: NotificationInboxItem) {
+        pendingOpenItem = item
+    }
+
+    func clearPendingOpen() {
+        pendingOpenItem = nil
+    }
+
     func clearAll() {
         items.removeAll()
         persist()
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+    }
+
+    func remove(_ item: NotificationInboxItem) {
+        items.removeAll { $0.id == item.id }
+        persist()
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [item.id])
     }
 
     private func removeBroadcastDuplicates(using broadcasts: [BroadcastNotification]) {
@@ -234,14 +249,14 @@ extension NotificationInboxItem {
         let userInfo = content.userInfo
 
         let kind = Kind.from(identifier: identifier, userInfo: userInfo)
-        let explicitExamId = (userInfo["examId"] as? String) ?? extractExamId(from: identifier)
+        let explicitExamId = stringValue(from: userInfo, keys: ["examId", "gcm.notification.examId"]) ?? extractExamId(from: identifier)
         let examIds = extractExamIds(from: userInfo, fallback: explicitExamId)
         let examId = explicitExamId ?? (examIds.count == 1 ? examIds.first : nil)
-        let explicitHomeworkId = (userInfo["homeworkId"] as? String) ?? extractHomeworkId(from: identifier)
+        let explicitHomeworkId = stringValue(from: userInfo, keys: ["homeworkId", "gcm.notification.homeworkId"]) ?? extractHomeworkId(from: identifier)
         let homeworkIds = extractHomeworkIds(from: userInfo, fallback: explicitHomeworkId)
         let homeworkId = explicitHomeworkId ?? (homeworkIds.count == 1 ? homeworkIds.first : nil)
-        let ticketId = userInfo["ticketId"] as? String
-        let groupId = userInfo["groupId"] as? String
+        let ticketId = stringValue(from: userInfo, keys: ["ticketId", "gcm.notification.ticketId"])
+        let groupId = stringValue(from: userInfo, keys: ["groupId", "gcm.notification.groupId"])
 
         let title = content.title.isEmpty ? "Benachrichtigung" : content.title
         let body = content.body
@@ -289,6 +304,19 @@ extension NotificationInboxItem {
                 return strings
             }
         }
+        if let ids = userInfo["gcm.notification.examIds"] as? [String] {
+            return ids
+        }
+        if let ids = userInfo["gcm.notification.examIds"] as? [Any] {
+            let strings = ids.compactMap { $0 as? String }
+            if !strings.isEmpty {
+                return strings
+            }
+        }
+        if let encoded = stringValue(from: userInfo, keys: ["examIds", "gcm.notification.examIds"]) {
+            let parsed = parseIdList(encoded)
+            if !parsed.isEmpty { return parsed }
+        }
         if let fallback, !fallback.isEmpty {
             return [fallback]
         }
@@ -304,6 +332,19 @@ extension NotificationInboxItem {
             if !strings.isEmpty {
                 return strings
             }
+        }
+        if let ids = userInfo["gcm.notification.homeworkIds"] as? [String] {
+            return ids
+        }
+        if let ids = userInfo["gcm.notification.homeworkIds"] as? [Any] {
+            let strings = ids.compactMap { $0 as? String }
+            if !strings.isEmpty {
+                return strings
+            }
+        }
+        if let encoded = stringValue(from: userInfo, keys: ["homeworkIds", "gcm.notification.homeworkIds"]) {
+            let parsed = parseIdList(encoded)
+            if !parsed.isEmpty { return parsed }
         }
         if let fallback, !fallback.isEmpty {
             return [fallback]
@@ -324,6 +365,37 @@ extension NotificationInboxItem {
         guard components.count >= 3 else { return nil }
         return String(components[2])
     }
+
+    private static func stringValue(from userInfo: [AnyHashable: Any], keys: [String]) -> String? {
+        for key in keys {
+            if let value = userInfo[key] as? String, !value.isEmpty {
+                return value
+            }
+            if let value = userInfo[key] {
+                let stringified = String(describing: value)
+                if !stringified.isEmpty, stringified != "null", stringified != "nil" {
+                    return stringified
+                }
+            }
+        }
+        return nil
+    }
+
+    private static func parseIdList(_ raw: String) -> [String] {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("[") {
+            if let data = trimmed.data(using: .utf8),
+               let decoded = try? JSONSerialization.jsonObject(with: data) as? [Any] {
+                let strings = decoded.compactMap { $0 as? String }
+                if !strings.isEmpty { return strings }
+            }
+        }
+        if trimmed.contains(",") {
+            let parts = trimmed.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            return parts.filter { !$0.isEmpty }
+        }
+        return trimmed.isEmpty ? [] : [trimmed]
+    }
 }
 
 extension NotificationInboxItem.Kind {
@@ -331,9 +403,18 @@ extension NotificationInboxItem.Kind {
         if identifier.hasPrefix("exam_") { return .exam }
         if identifier.hasPrefix("homework_") { return .homework }
         if identifier.hasPrefix("daily_reminder_") { return .daily }
-        if userInfo["examId"] != nil { return .exam }
-        if userInfo["homeworkId"] != nil { return .homework }
-        if userInfo["ticketId"] != nil { return .support }
+        let action = NotificationInboxItem.stringValue(from: userInfo, keys: ["action", "gcm.notification.action"])?.uppercased()
+        let sheetType = NotificationInboxItem.stringValue(
+            from: userInfo,
+            keys: ["sheetType", "sheet_type", "gcm.notification.sheetType", "gcm.notification.sheet_type"]
+        )
+        if (action == "OPEN_SHEET" || action == nil),
+           sheetType == "daily_summary" {
+            return .daily
+        }
+        if NotificationInboxItem.stringValue(from: userInfo, keys: ["examId", "gcm.notification.examId"]) != nil { return .exam }
+        if NotificationInboxItem.stringValue(from: userInfo, keys: ["homeworkId", "gcm.notification.homeworkId"]) != nil { return .homework }
+        if NotificationInboxItem.stringValue(from: userInfo, keys: ["ticketId", "gcm.notification.ticketId"]) != nil { return .support }
         return .unknown
     }
 }

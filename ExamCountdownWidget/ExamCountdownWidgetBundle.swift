@@ -18,8 +18,8 @@ struct ExamCountdownWidgetBundle: WidgetBundle {
         if #available(iOS 17.0, *) {
             ExamCountdownWidget()
         }
-        if #available(iOS 16.2, *) {
-            ExamCountdownWidgetLiveActivity()
-        }
+//        if #available(iOS 16.2, *) {
+//            ExamCountdownWidgetLiveActivity()
+//        }
     }
 }

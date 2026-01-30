@@ -44,7 +44,7 @@ extension GradesStore {
         
         // Notes
         if let note = localExam.notes, !note.isEmpty {
-             try await setUserNoteForSharedExam(examId: sharedExam.id, note: note, groupId: sharedExam.groupId)
+             await setUserNoteForSharedExam(examId: sharedExam.id, note: note, groupId: sharedExam.groupId)
         }
         
         // Reminder

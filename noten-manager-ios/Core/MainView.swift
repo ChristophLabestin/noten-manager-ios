@@ -60,6 +60,7 @@ struct MainView: View {
     let onLogout: () -> Void
     @Binding var incomingHomeworkShare: HomeworkShareLinkPayload?
     @Binding var incomingExamId: String?
+    @Binding var incomingHomeworkId: String?
     @Binding var deeplinkDestination: DeeplinkDestination?
     @EnvironmentObject private var gradesStore: GradesStore
     @StateObject private var notificationInbox = NotificationInboxStore.shared
@@ -105,6 +106,7 @@ struct MainView: View {
     @State private var navigateToAbiturExam: Bool = false
     @State private var deeplinkExamId: String? = nil
     @State private var deeplinkExam: Exam? = nil
+    @State private var deeplinkHomeworkId: String? = nil
     @State private var deeplinkHomework: Homework? = nil
     
     @AppStorage("showSpeedometerOnLaunch") private var showSpeedometerOnLaunch: Bool = false
@@ -176,12 +178,18 @@ struct MainView: View {
             .onChange(of: launchOfferPurchased) { _, purchased in
                 scheduleLaunchOfferNotifications(purchased: purchased)
                 enforceSubscriptionGateIfNeeded()
+                if purchased, activeSheet == .subscriptionOffer || activeSheet == .launchMessage {
+                    activeSheet = nil
+                }
             }
             .onChange(of: storeKit.product?.displayPrice) { _, _ in
                 scheduleLaunchOfferNotifications(purchased: launchOfferPurchased)
             }
-            .onChange(of: storeKit.isSubscriptionActive) { _, _ in
+            .onChange(of: storeKit.isSubscriptionActive) { _, active in
                 enforceSubscriptionGateIfNeeded()
+                if active, activeSheet == .subscriptionOffer {
+                    activeSheet = nil
+                }
             }
             .preferredColorScheme(gradesStore.preferredColorScheme)
             .environmentObject(gradesStore) // Inject explicitly for overlay if needed
@@ -226,20 +234,30 @@ struct MainView: View {
                 }
                 self.handleDeeplinkExam()
             }
+            .onChange(of: incomingHomeworkId) { _, newId in
+                self.deeplinkHomeworkId = newId
+                if newId != nil {
+                    self.currentTab = .home
+                }
+                self.handleDeeplinkHomework()
+            }
             .onChange(of: deeplinkDestination) { _, destination in
                 handleDeeplinkDestination(destination)
             }
             .onChange(of: gradesStore.allExams) { _, _ in
                 self.handleDeeplinkExam()
-                Task {
-                    await ExamLiveActivityManager.syncLiveActivities(for: gradesStore.allExams)
-                    BackgroundRefreshManager.schedule(for: gradesStore.allExams)
-                }
+            }
+            .onChange(of: gradesStore.homeworks) { _, _ in
+                self.handleDeeplinkHomework()
             }
 
         let lifecycle = deeplinkTracking
             .task {
-                await handleDataLoading()
+                if gradesStore.initialSyncSettled && offlineManager.isOnline && !offlineManager.isOfflineModeActive {
+                    isInitialLaunch = false
+                } else {
+                    await handleDataLoading()
+                }
                 await refreshEmailVerification()
             }
             .onChange(of: offlineManager.isOfflineModeActive) { _, active in
@@ -283,8 +301,14 @@ struct MainView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .openNotificationItem)) { notification in
                 if let item = notification.object as? NotificationInboxItem {
+                    notificationInbox.clearPendingOpen()
                     openInboxNotification(item)
                 }
+            }
+            .onChange(of: notificationInbox.pendingOpenItem) { _, item in
+                guard let item else { return }
+                notificationInbox.clearPendingOpen()
+                openInboxNotification(item)
             }
             .onChange(of: gradesStore.legacyMigrationSummary) { _, summary in
                 // Legacy migration handled via ContentView or Alert in future
@@ -393,6 +417,13 @@ struct MainView: View {
                     gradesStore.showSupportHistory = true
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleSubscriptionOfferSheet)) { _ in
+                if activeSheet == .subscriptionOffer {
+                    activeSheet = nil
+                } else {
+                    activeSheet = .subscriptionOffer
+                }
+            }
     }
 
     private func handleNotificationsSheetDismiss() {
@@ -423,7 +454,7 @@ struct MainView: View {
         let snapshot = await offlineManager.loadSnapshotAsync()
         
         if let snapshot {
-            gradesStore.loadOfflineSnapshot(snapshot)
+            gradesStore.loadOfflineSnapshot(snapshot, activateOfflineMode: offlineManager.isOfflineModeActive)
             // Fix: Force loading state to true again, because loadOfflineSnapshot sets it to false.
             // We want the loading screen to remain visible while we check for online updates.
             gradesStore.isLoading = true
@@ -443,7 +474,7 @@ struct MainView: View {
         // 2. Determine if we should stay in Offline Mode
         //    Either explicitly manual, or no internet + allowed offline login
         //    IMPORTANT: We check isManualOfflinePinned instead of isOfflineModeActive,
-        //    because step 1 (loadOfflineSnapshot) sets isOfflineModeActive = true as a side effect.
+        //    because loadOfflineSnapshot can prefill UI without activating offline mode.
         if !offlineManager.isManualOfflinePinned && !offlineManager.isOnline {
             try? await Task.sleep(nanoseconds: 600_000_000)
         }
@@ -458,6 +489,9 @@ struct MainView: View {
         if shouldStayOffline {
             // Fix: Explicitly activate offline mode state so UI indicators (badge/toolbar) update.
             // We previously assumed loadOfflineSnapshot did this, but it implies local usage, not mode activation.
+            if let snapshot {
+                gradesStore.loadOfflineSnapshot(snapshot, activateOfflineMode: true)
+            }
             offlineManager.activateOfflineMode(manual: offlineManager.isManualOfflinePinned)
             
             showOfflineBannerTemporarily()
@@ -488,7 +522,7 @@ struct MainView: View {
     private func handleOfflineToggle(active: Bool) async {
         if active {
             if let snapshot = offlineManager.cachedSnapshot ?? offlineManager.availableSnapshot() {
-                gradesStore.loadOfflineSnapshot(snapshot)
+                gradesStore.loadOfflineSnapshot(snapshot, activateOfflineMode: true)
             }
             showOfflineBannerTemporarily()
         } else {
@@ -822,6 +856,17 @@ struct MainView: View {
             activeSheet = .addHomework
         case "add_exam":
             activeSheet = .addExam
+        case "daily_summary":
+            let cal = Calendar.current
+            let tomorrow = cal.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+            let tomorrowExams = gradesStore.allExams.filter { exam in
+                !exam.isCompleted && cal.isDate(exam.date, inSameDayAs: tomorrow)
+            }
+            let tomorrowHomeworks = gradesStore.allHomeworks.filter { hw in
+                guard !hw.isCompleted, let due = hw.dueDate else { return false }
+                return cal.isDate(due, inSameDayAs: tomorrow)
+            }
+            dailySummaryData = DailySummaryData(exams: tomorrowExams, homeworks: tomorrowHomeworks, date: tomorrow)
         default:
             break
         }
@@ -833,6 +878,10 @@ struct MainView: View {
 
 
     private func openInboxNotification(_ item: NotificationInboxItem) {
+        if activeSheet == .notifications {
+            notificationInbox.queueOpen(item)
+            return
+        }
         currentTab = .home
         switch item.kind {
         case .exam:
@@ -864,8 +913,18 @@ struct MainView: View {
             let homeworkIds = item.homeworkIds ?? (item.homeworkId.map { [$0] } ?? [])
             
             let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
-            let tomorrowExams = gradesStore.allExams.filter { examIds.contains($0.id) }
-            let tomorrowHomeworks = gradesStore.allHomeworks.filter { homeworkIds.contains($0.id) }
+            let hasExplicitIds = !examIds.isEmpty || !homeworkIds.isEmpty
+            let tomorrowExams = hasExplicitIds
+                ? gradesStore.allExams.filter { examIds.contains($0.id) }
+                : gradesStore.allExams.filter { exam in
+                    !exam.isCompleted && Calendar.current.isDate(exam.date, inSameDayAs: tomorrow)
+                }
+            let tomorrowHomeworks = hasExplicitIds
+                ? gradesStore.allHomeworks.filter { homeworkIds.contains($0.id) }
+                : gradesStore.allHomeworks.filter { hw in
+                    guard !hw.isCompleted, let due = hw.dueDate else { return false }
+                    return Calendar.current.isDate(due, inSameDayAs: tomorrow)
+                }
             
             self.dailySummaryData = DailySummaryData(exams: tomorrowExams, homeworks: tomorrowHomeworks, date: tomorrow)
             return
@@ -1247,7 +1306,7 @@ struct MainView: View {
             }
             // Timeout -> im Offline-Modus bleiben
             if let snapshot = offlineManager.cachedSnapshot ?? offlineManager.availableSnapshot() {
-                gradesStore.loadOfflineSnapshot(snapshot)
+                gradesStore.loadOfflineSnapshot(snapshot, activateOfflineMode: true)
                 showOfflineBannerTemporarily()
             }
             gradesStore.isLoading = false
@@ -1386,6 +1445,14 @@ struct MainView: View {
         if let exam = self.gradesStore.allExams.first(where: { $0.id == id }) {
             self.deeplinkExam = exam
             self.deeplinkExamId = nil
+        }
+    }
+
+    private func handleDeeplinkHomework() {
+        guard let id = self.deeplinkHomeworkId else { return }
+        if let homework = self.gradesStore.homeworks.first(where: { $0.id == id }) {
+            self.deeplinkHomework = homework
+            self.deeplinkHomeworkId = nil
         }
     }
 

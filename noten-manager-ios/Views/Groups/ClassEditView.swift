@@ -616,7 +616,7 @@ struct ClassEditView: View {
             isSaving = true
             defer { isSaving = false }
             do {
-                try await store.addSubjectToWahlpflichtfachGroup(
+                _ = try await store.addSubjectToWahlpflichtfachGroup(
                     classId: classId,
                     groupId: gid,
                     subject: .init(name: trimmed, hasSchulaufgabe: true)

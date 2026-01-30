@@ -62,12 +62,12 @@ struct SpeedometerView: View {
                 updateScore(to: score)
             }
         }
-        .onChange(of: score) { newScore in
+        .onChange(of: score) { _, newScore in
             if !isPrivacyMode {
                 updateScore(to: newScore)
             }
         }
-        .onChange(of: isPrivacyMode) { isPrivate in
+        .onChange(of: isPrivacyMode) { _, isPrivate in
             if !isPrivate {
                 // If turning privacy OFF, animate up to current score
                 updateScore(to: score)

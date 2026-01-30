@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased] - 2026-01-30
+
+### Added
+- **School Year Setup**: Added a dedicated onboarding step to select school year, school type, and grade level in a focused setup UI.
+
+### Changed
+- **Daily Summary Sheet**: Redesigned the daily summary with interactive exam/homework rows and direct access to detail sheets.
+- **Seminarfach Preset Date**: Default submission now targets the second school week in January (holiday-aware) to match FOBOSO rules.
+- **Subject Detail Grades**: Schulaufgaben are now grouped separately from other grades for clearer review.
+
+### Fixed
+- **iOS 17 Compatibility**: Updated deprecated `onChange` usage and tightened main-actor access to resolve concurrency warnings in QR scanning and FCM token handling.
+
 ## [Unreleased] - 2026-01-28
 
 ### Added
@@ -14,7 +27,8 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - **Exam Deletion**: Deleting exams now correctly targets class/course/group paths from both the calendar and exam list/detail views.
 - **Shared Labels**: Shared exam labels no longer append class names for branch and wahlpflicht subjects.
-- **Offline Startup**: Improved offline detection to avoid incorrect offline mode on launch and resume online when connectivity is confirmed.
+- **Offline Startup**: Prevented offline mode from activating when preloading cached snapshots and improved resume-to-online behavior when connectivity is confirmed.
+- **Support History**: Added fallback fetching and sorting to ensure support tickets load even if composite indexes are missing or legacy storage is used.
 
 ## [Unreleased] - 2026-01-26
 
@@ -38,7 +52,6 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - **State Leak**: Resolved issues where onboarding flags were not correctly reset on logout.
 - **Navigation Errors**: Fixed compilation and logic errors in `CourseJoinView` related to branch selection.
-- **Redundancy Cleanup**: Removed legacy views like `AddPraktikumGradeView` and `SeminarPerformanceView` to streamline the codebase.
 
 ## [Unreleased] - 2026-01-19
 

@@ -56,14 +56,6 @@
     - Comment: Statt direktem Mapping wird jetzt die Kursauswahl (CourseJoinView) angezeigt; Subscriptions werden erst nach Auswahl gesetzt.
 
 ##Feature Ideas and Tentative Upgrades for next Version
-- [ ] a weekly summary that shows the grade development of the week and summarizes what happend this week. 
-    - [ ] should be logged in firebase to keep robust historic data so that the user can relly see/track the development.
-    - [ ] they should not appear when there is ferien active.
-    - [ ] it should also react appropriately and intelligently
-- [ ] integration/link of the noten manager account to the HolaOida AI Listening Exercising App so when a user is paying for the notenmanager he has a specific amounts of ai tokens to use in that app.
-- [ ] class pinboard where usful informations can be posted by anyone in the class
-    - [ ] pins depending on branches/courses
-- [ ] class messaging where someone in the class can create a notification to everyone in the class or depending to which branch/course the pin got added
 - [ ] [ ] Onboarding Rework for better usability and a better UX
 
 ##Completed

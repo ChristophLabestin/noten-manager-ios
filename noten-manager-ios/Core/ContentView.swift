@@ -36,6 +36,7 @@ struct ContentView: View {
     @State private var pendingBiometricAfterUnlock: Bool = false
     @State private var incomingHomeworkShare: HomeworkShareLinkPayload?
     @State private var incomingExamId: String?
+    @State private var incomingHomeworkId: String?
     @State private var deeplinkDestination: DeeplinkDestination?
 
     private var shouldShowPreAuth: Bool {
@@ -73,7 +74,7 @@ struct ContentView: View {
                         MainView(onLogout: {
                             gradesStore.stopListening()
                             authManager.signOut()
-                        }, incomingHomeworkShare: $incomingHomeworkShare, incomingExamId: $incomingExamId, deeplinkDestination: $deeplinkDestination)
+                        }, incomingHomeworkShare: $incomingHomeworkShare, incomingExamId: $incomingExamId, incomingHomeworkId: $incomingHomeworkId, deeplinkDestination: $deeplinkDestination)
                         .environmentObject(authManager)
                         .environmentObject(offlineManager)
                         .environmentObject(biometricManager)
@@ -105,8 +106,8 @@ struct ContentView: View {
         .onAppear {
             offlineManager.startMonitoring()
             authManager.startListeningAuthState()
-            if authManager.isAuthenticated && !offlineManager.isOfflineModeActive {
-                Task { await gradesStore.startListening() }
+            if authManager.isAuthenticated {
+                startOnlineListeningIfNeeded()
             }
             refreshBiometricState(triggerUnlock: true)
             Task {
@@ -124,9 +125,7 @@ struct ContentView: View {
         .onChange(of: authManager.isAuthenticated) { _, isAuth in
             if isAuth {
                 preAuthOnboardingCompleted = true
-                if !offlineManager.isOfflineModeActive {
-                    Task { await gradesStore.startListening() }
-                }
+                startOnlineListeningIfNeeded()
             } else {
                 // Ensure store is reset on any logout
                 gradesStore.stopListening()
@@ -143,12 +142,9 @@ struct ContentView: View {
             if phase == .background {
                 biometricUnlocked = false
                 pendingBiometricAfterUnlock = biometricRequired
-                let snapshot = offlineManager.cachedSnapshot ?? offlineManager.availableSnapshot()
-                let exams = snapshot.map { $0.exams + $0.sharedExams }
-                BackgroundRefreshManager.schedule(for: exams)
             } else if phase == .active {
                 requestBiometricUnlockIfNeeded(force: false)
-                Task { await BackgroundRefreshManager.refreshLiveActivitiesFromSnapshot() }
+                Task { _ = await storeKitManager.refreshAllStatus() }
             }
         }
         .onChange(of: biometricManager.isEnabledForActiveUser) { _, _ in
@@ -171,6 +167,11 @@ struct ContentView: View {
         }
         .onOpenURL { url in
             handleIncomingURL(url)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openHomeworkDetail)) { notification in
+            if let id = notification.object as? String {
+                self.incomingHomeworkId = id
+            }
         }
         .hideKeyboardOnTap()
     }
@@ -241,6 +242,14 @@ struct ContentView: View {
             OfflineModeManager.shared.enableFirestoreNetworkIfNeeded()
             await gradesStore.syncOfflinePendingChanges(forceLocalOverride: true)
             gradesStore.leaveOfflineModePreservingState()
+            await gradesStore.startListening()
+        }
+    }
+
+    private func startOnlineListeningIfNeeded() {
+        guard !offlineManager.isOfflineModeActive else { return }
+        Task {
+            await gradesStore.syncOfflinePendingChanges(forceLocalOverride: true)
             await gradesStore.startListening()
         }
     }
@@ -453,7 +462,9 @@ extension Notification.Name {
     static let openExamDetail = Notification.Name("openExamDetail")
     static let openLaunchOffer = Notification.Name("openLaunchOffer")
     static let openGroupJoin = Notification.Name("openGroupJoin")
+    static let openHomeworkDetail = Notification.Name("openHomeworkDetail")
     static let openNotificationItem = Notification.Name("openNotificationItem")
+    static let toggleSubscriptionOfferSheet = Notification.Name("toggleSubscriptionOfferSheet")
 }
 
 private struct PreAuthOnboardingView: View {

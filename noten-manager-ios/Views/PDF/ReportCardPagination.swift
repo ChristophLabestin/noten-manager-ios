@@ -204,9 +204,8 @@ class ReportCardPaginator {
         // Update total pages
         let total = pages.count
         for i in 0..<total {
-            var p = pages[i]
-            // We can't modify 'let', need to reconstruct or make it a var. 
-            // Reconstruct:
+            let p = pages[i]
+            // Reconstruct to update totalPages.
             pages[i] = ReportCardPage(
                 pageIndex: p.pageIndex,
                 totalPages: total,

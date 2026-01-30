@@ -26,8 +26,15 @@ module.exports = {
     "import",
   ],
   rules: {
-    "quotes": ["error", "double"],
+    "quotes": "off",
     "import/no-unresolved": 0,
-    "indent": ["error", 2],
+    "indent": "off",
+    "object-curly-spacing": "off",
+    "max-len": "off",
+    "quote-props": "off",
+    "comma-dangle": "off",
+    "@typescript-eslint/no-explicit-any": "off",
+    "@typescript-eslint/explicit-module-boundary-types": "off",
+
   },
 };

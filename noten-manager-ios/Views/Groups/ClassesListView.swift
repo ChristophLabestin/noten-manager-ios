@@ -890,15 +890,6 @@ private struct ClassCardView: View {
             guard courseCount > 0 else { return }
             openClassDetail = true
         }
-        .background(
-            NavigationLink(isActive: $openClassDetail) {
-                ClassDetailView(classId: classId)
-                    .environmentObject(store)
-            } label: {
-                EmptyView()
-            }
-            .opacity(0)
-        )
         .contextMenu {
             if isOwner {
                 Button(role: .destructive) {
@@ -913,6 +904,10 @@ private struct ClassCardView: View {
                     Label("Verlassen", systemImage: "rectangle.portrait.and.arrow.right")
                 }
             }
+        }
+        .navigationDestination(isPresented: $openClassDetail) {
+            ClassDetailView(classId: classId)
+                .environmentObject(store)
         }
         .sheet(isPresented: $showShareSheet) {
             ShareCodeSheet(

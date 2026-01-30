@@ -61,7 +61,8 @@ final class HolidaysService {
     func fetchHolidays(year: Int) async -> [HolidayPeriod] {
         if let cached = holidaysCache[year] { return cached }
         
-        if await MainActor.run(body: { OfflineModeManager.shared.isOfflineModeActive }) {
+        let isOffline = await MainActor.run { OfflineModeManager.shared.isOfflineModeActive || !OfflineModeManager.shared.isOnline }
+        if isOffline {
             return []
         }
         
@@ -77,7 +78,10 @@ final class HolidaysService {
             holidaysCache[year] = holidays
             return holidays
         } catch {
-            print("Error fetching school holidays for year \(year): \(error)")
+            let isOffline = await MainActor.run { OfflineModeManager.shared.isOfflineModeActive || !OfflineModeManager.shared.isOnline }
+            if !isOffline {
+                print("Error fetching school holidays for year \(year): \(error)")
+            }
             return []
         }
     }
@@ -95,10 +99,11 @@ final class HolidaysService {
 
     func pfingstferienEndDate(forYear year: Int) async -> Date? {
         if let cached = pfingstferienCache[year] { return cached }
-        guard let holidays = await fetchHolidays(year: year).first(where: { _ in true }) != nil ? holidaysCache[year] : nil else { return nil }
+        _ = await fetchHolidays(year: year)
+        guard let holidays = holidaysCache[year] else { return nil }
         
         // Use cached directly since fetchHolidays returns [HolidayPeriod] and populates cache
-        let list = holidaysCache[year] ?? []
+        let list = holidays
         let endDate = list
             .filter { $0.name.lowercased().contains("pfingstferien") }
             .map { $0.end }
@@ -191,7 +196,8 @@ final class HolidaysService {
     func fetchPublicHolidays(year: Int) async -> [HolidayPeriod] {
         if let cached = feiertageCache[year] { return cached }
         
-        if await MainActor.run(body: { OfflineModeManager.shared.isOfflineModeActive }) {
+        let isOffline = await MainActor.run { OfflineModeManager.shared.isOfflineModeActive || !OfflineModeManager.shared.isOnline }
+        if isOffline {
             return []
         }
         
@@ -235,7 +241,10 @@ final class HolidaysService {
             feiertageCache[year] = sortedPeriods
             return sortedPeriods
         } catch {
-            print("Error fetching public holidays for year \(year): \(error)")
+            let isOffline = await MainActor.run { OfflineModeManager.shared.isOfflineModeActive || !OfflineModeManager.shared.isOnline }
+            if !isOffline {
+                print("Error fetching public holidays for year \(year): \(error)")
+            }
             return []
         }
     }

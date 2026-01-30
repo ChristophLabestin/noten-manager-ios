@@ -589,6 +589,7 @@ struct AbiturExamView: View {
                 }
                 return s
             }
+            store.examPoints[subject.name] = combined
         } catch {
             ErrorLoggingService.logErrorIfEnabled(error)
             // optional: Fehlerbehandlung

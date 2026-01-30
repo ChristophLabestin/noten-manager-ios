@@ -9,7 +9,6 @@ struct AddFachreferatView: View {
     let preselectedSubjectName: String?
 
     @State private var subjectName: String = ""
-    @State private var gradeText: String = ""
     @State private var date: Date = Date()
     @State private var note: String = ""
     @State private var isSaving: Bool = false
@@ -17,7 +16,6 @@ struct AddFachreferatView: View {
     @State private var showDeleteAlert: Bool = false
     @State private var presentationGradeText: String = ""
     @State private var paperGradeText: String = ""
-    @State private var useSubGrades: Bool = false
     @State private var presentationWeight: Double = 0.5 // Default 50:50
     
     @FocusState private var focusedField: Field?
@@ -29,12 +27,8 @@ struct AddFachreferatView: View {
     private var canSave: Bool {
         guard let _ = store.encryptionKey else { return false }
         guard !subjectName.isEmpty else { return false }
-        if useSubGrades {
-            guard Double(presentationGradeText) != nil else { return false }
-            guard Double(paperGradeText) != nil else { return false }
-        } else {
-            guard Double(gradeText) != nil else { return false }
-        }
+        guard Double(presentationGradeText) != nil else { return false }
+        guard Double(paperGradeText) != nil else { return false }
         return true
     }
 
@@ -43,7 +37,7 @@ struct AddFachreferatView: View {
     }
 
     private enum Field: Hashable {
-        case grade, note, presentationGrade, paperGrade
+        case note, presentationGrade, paperGrade
     }
 
     private var sheetTitle: String {
@@ -56,7 +50,7 @@ struct AddFachreferatView: View {
                 VStack(spacing: 16) {
                     SettingsCard(
                         title: store.fachreferat == nil ? "Fachreferat" : "Fachreferat bearbeiten",
-                        subtitle: "Fach, Note und Datum",
+                        subtitle: "Fach, Einzelnoten und Datum",
                         systemImage: "doc.text.fill",
                         accent: .pink
                     ) {
@@ -81,85 +75,64 @@ struct AddFachreferatView: View {
 
                             SettingsSectionBox {
                                 VStack(alignment: .leading, spacing: 12) {
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        Toggle("Einzelnoten eingeben", isOn: $useSubGrades.animation())
-                                            .tint(.pink)
-                                    }
-                                    .padding(.vertical, 4)
-
-                                    if useSubGrades {
-                                        VStack(alignment: .leading, spacing: 12) {
-                                            // Presentation
-                                            VStack(alignment: .leading, spacing: 6) {
-                                                Text("Vortrag / Präsentation")
-                                                    .font(.subheadline)
-                                                TextField("z. B. 12.0", text: $presentationGradeText)
-                                                    .keyboardType(.decimalPad)
-                                                    .submitLabel(.next)
-                                                    .focused($focusedField, equals: .presentationGrade)
-                                                    .onSubmit { focusedField = .paperGrade }
-                                                    .padding(12)
-                                                    .background(Color.formInputBackground)
-                                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                            }
-                                            
-                                            // Paper
-                                            VStack(alignment: .leading, spacing: 6) {
-                                                Text("Schriftliche Ausarbeitung")
-                                                    .font(.subheadline)
-                                                TextField("z. B. 10.0", text: $paperGradeText)
-                                                    .keyboardType(.decimalPad)
-                                                    .submitLabel(.next)
-                                                    .focused($focusedField, equals: .paperGrade)
-                                                    .onSubmit { focusedField = .note }
-                                                    .padding(12)
-                                                    .background(Color.formInputBackground)
-                                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                            }
-                                            
-                                            // Weighting Slider
-                                            VStack(alignment: .leading, spacing: 4) {
-                                                HStack {
-                                                    Text("Gewichtung")
-                                                        .font(.subheadline)
-                                                    Spacer()
-                                                    Text("\(Int(presentationWeight * 100))% Vortrag : \(Int((1 - presentationWeight) * 100))% Schriftlich")
-                                                        .font(.caption)
-                                                        .foregroundStyle(.secondary)
-                                                }
-                                                Slider(value: $presentationWeight, in: 0...1, step: 0.05)
-                                                    .tint(.pink)
-                                            }
-                                            
-                                            HStack {
-                                                Text("Berechnete Note:")
-                                                    .font(.subheadline.bold())
-                                                Spacer()
-                                                if let p = Double(presentationGradeText), let s = Double(paperGradeText) {
-                                                    let avg = p * presentationWeight + s * (1 - presentationWeight)
-                                                    Text(String(format: "%.2f", avg))
-                                                        .font(.headline)
-                                                        .foregroundStyle(.pink)
-                                                } else {
-                                                    Text("–")
-                                                        .foregroundStyle(.secondary)
-                                                }
-                                            }
-                                            .padding(.top, 4)
-                                        }
-                                    } else {
+                                    VStack(alignment: .leading, spacing: 12) {
+                                        // Presentation
                                         VStack(alignment: .leading, spacing: 6) {
-                                            Text("Note")
-                                                .font(.headline)
-                                            TextField("z. B. 10.0", text: $gradeText)
+                                            Text("Vortrag / Präsentation")
+                                                .font(.subheadline)
+                                            TextField("z. B. 12.0", text: $presentationGradeText)
                                                 .keyboardType(.decimalPad)
                                                 .submitLabel(.next)
-                                                .focused($focusedField, equals: .grade)
+                                                .focused($focusedField, equals: .presentationGrade)
+                                                .onSubmit { focusedField = .paperGrade }
+                                                .padding(12)
+                                                .background(Color.formInputBackground)
+                                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                        }
+                                        
+                                        // Paper
+                                        VStack(alignment: .leading, spacing: 6) {
+                                            Text("Schriftliche Ausarbeitung")
+                                                .font(.subheadline)
+                                            TextField("z. B. 10.0", text: $paperGradeText)
+                                                .keyboardType(.decimalPad)
+                                                .submitLabel(.next)
+                                                .focused($focusedField, equals: .paperGrade)
                                                 .onSubmit { focusedField = .note }
                                                 .padding(12)
                                                 .background(Color.formInputBackground)
                                                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                         }
+                                        
+                                        // Weighting Slider
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            HStack {
+                                                Text("Gewichtung")
+                                                    .font(.subheadline)
+                                                Spacer()
+                                                Text("\(Int(presentationWeight * 100))% Vortrag : \(Int((1 - presentationWeight) * 100))% Schriftlich")
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                            Slider(value: $presentationWeight, in: 0...1, step: 0.01)
+                                                .tint(.pink)
+                                        }
+                                        
+                                        HStack {
+                                            Text("Berechnete Note:")
+                                                .font(.subheadline.bold())
+                                            Spacer()
+                                            if let p = Double(presentationGradeText), let s = Double(paperGradeText) {
+                                                let avg = p * presentationWeight + s * (1 - presentationWeight)
+                                                Text(String(format: "%.2f", avg))
+                                                    .font(.headline)
+                                                    .foregroundStyle(.pink)
+                                            } else {
+                                                Text("–")
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                        }
+                                        .padding(.top, 4)
                                     }
 
                                     DatePicker("Datum", selection: $date, displayedComponents: .date)
@@ -243,19 +216,22 @@ struct AddFachreferatView: View {
                         }
                     }
                 if let fr = store.fachreferat {
-                    gradeText = String(fr.grade)
                     date = fr.date
                     note = fr.note ?? ""
                     
                     if let pg = fr.presentationGrade {
                         presentationGradeText = String(pg)
-                        useSubGrades = true
                     }
                     if let sg = fr.paperGrade {
                         paperGradeText = String(sg)
                     }
                     if let w = fr.presentationWeight {
                         presentationWeight = w
+                    }
+                    if fr.presentationGrade == nil, fr.paperGrade == nil {
+                        let fallback = String(fr.grade)
+                        presentationGradeText = fallback
+                        paperGradeText = fallback
                     }
                 }
             }
@@ -275,30 +251,18 @@ struct AddFachreferatView: View {
         isSaving = true
         error = nil
         do {
-            var grade: Double = 0
-            var pGrade: Double? = nil
-            var sGrade: Double? = nil
-            var pWeight: Double? = nil
-            
-            if useSubGrades {
-                let p = Double(presentationGradeText) ?? 0
-                let s = Double(paperGradeText) ?? 0
-                grade = p * presentationWeight + s * (1 - presentationWeight)
-                pGrade = p
-                sGrade = s
-                pWeight = presentationWeight
-            } else {
-                grade = Double(gradeText) ?? 0
-            }
+            let p = Double(presentationGradeText) ?? 0
+            let s = Double(paperGradeText) ?? 0
+            let grade = p * presentationWeight + s * (1 - presentationWeight)
             
             try await store.setFachreferatToFirestore(
                 subjectName: subjectName,
                 grade: grade,
                 date: date,
                 note: note.isEmpty ? nil : note,
-                presentationGrade: pGrade,
-                paperGrade: sGrade,
-                presentationWeight: pWeight,
+                presentationGrade: p,
+                paperGrade: s,
+                presentationWeight: presentationWeight,
                 using: key
             )
             dismiss()

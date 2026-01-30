@@ -13,6 +13,7 @@ struct HomeworkDetailSheet: View {
     let onEdit: ((Homework) -> Void)?
     @State private var titleCopied: Bool = false
     @State private var noteCopied: Bool = false
+    @State private var isTogglingCompletion: Bool = false
 
     init(homework: Homework, onEdit: ((Homework) -> Void)? = nil) {
         self.homework = homework
@@ -48,6 +49,10 @@ struct HomeworkDetailSheet: View {
             return ("Erledigt", .green, "checkmark.circle.fill")
         }
         return ("Offen", .orange, "circle")
+    }
+
+    private var completionButtonLabel: String {
+        homework.isCompleted ? "Als offen markieren" : "Als erledigt markieren"
     }
 
     private var personalNote: String? {
@@ -177,19 +182,45 @@ struct HomeworkDetailSheet: View {
                     }
                     .accessibilityLabel("Schließen")
                 }
-                if let onEdit {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button {
-                            onEdit(homework)
-                            dismiss()
-                        } label: {
-                            ToolbarIcon(symbol: "pencil", showDot: false)
+                ToolbarItem(placement: .confirmationAction) {
+                    HStack(spacing: 8) {
+                        if let onEdit {
+                            Button {
+                                onEdit(homework)
+                                dismiss()
+                            } label: {
+                                ToolbarIcon(symbol: "pencil", showDot: false)
+                            }
+                            .accessibilityLabel("Bearbeiten")
                         }
-                        .accessibilityLabel("Bearbeiten")
+                        Button {
+                            Task {
+                                await toggleCompletion()
+                            }
+                        } label: {
+                            ToolbarIcon(
+                                symbol: homework.isCompleted ? "arrow.uturn.backward.circle.fill" : "checkmark.circle.fill",
+                                showDot: false,
+                                color: .green
+                            )
+                        }
+                        .disabled(isTogglingCompletion)
+                        .accessibilityLabel(completionButtonLabel)
                     }
                 }
             }
         }
+    }
+
+    private func toggleCompletion() async {
+        guard !isTogglingCompletion else { return }
+        isTogglingCompletion = true
+        if homework.isShared {
+            await store.setUserCompletedForSharedHomework(homeworkId: homework.id, completed: !homework.isCompleted, groupId: homework.groupId)
+        } else {
+            await store.setHomeworkCompleted(id: homework.id, completed: !homework.isCompleted)
+        }
+        isTogglingCompletion = false
     }
 
     private func detailRow(title: String, value: String, icon: String, tint: Color) -> some View {

@@ -12,31 +12,18 @@ struct ClassesFeatureOnboardingSheet: View {
         ScrollView {
             VStack(spacing: 24) {
                 // Hero Header
-                VStack(spacing: 16) {
-                    ZStack {
-                        Circle()
-                            .fill(accentColor.opacity(0.12))
-                            .frame(width: 80, height: 80)
-                        
-                        Image(systemName: "rectangle.stack.person.crop.fill")
-                            .font(.system(size: 36, weight: .bold))
-                            .foregroundStyle(accentColor)
-                    }
-                    .softFadeIn(enabled: animationsOn, delay: 0.1, offset: 20)
+                VStack(spacing: 8) {
+                    Text("Willkommen bei den Klassen")
+                        .font(.title.weight(.bold))
+                        .multilineTextAlignment(.center)
                     
-                    VStack(spacing: 8) {
-                        Text("Willkommen bei den Klassen")
-                            .font(.title.weight(.bold))
-                            .multilineTextAlignment(.center)
-                        
-                        Text("Ein neues Level an Organisation für deinen Schulalltag.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 32)
-                    }
-                    .softFadeIn(enabled: animationsOn, delay: 0.2, offset: 15)
+                    Text("Ein neues Level an Organisation für deinen Schulalltag.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
                 }
+                .softFadeIn(enabled: animationsOn, delay: 0.1, offset: 15)
                 .padding(.top, 40)
                 
                 // Feature Cards

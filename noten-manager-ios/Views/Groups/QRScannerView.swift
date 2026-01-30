@@ -2,12 +2,8 @@ import SwiftUI
 @preconcurrency import AVFoundation
 import Combine
 
-private final class UncheckedSendable<T>: @unchecked Sendable {
-    let value: T
-    init(value: T) {
-        self.value = value
-    }
-}
+extension AVCaptureSession: @unchecked @retroactive Sendable {}
+extension AVCaptureMetadataOutput: @unchecked @retroactive Sendable {}
 
 @MainActor
 class QRScannerController: NSObject, ObservableObject, AVCaptureMetadataOutputObjectsDelegate {
@@ -46,15 +42,12 @@ class QRScannerController: NSObject, ObservableObject, AVCaptureMetadataOutputOb
     }
     
     func setupCamera() {
-        // Wrap for background access
-        let sessionContainer = UncheckedSendable(value: session)
-        let outputContainer = UncheckedSendable(value: output)
-        
+        let session = session
+        let output = output
+
         // Run configuration on a background queue to avoid blocking main thread
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        DispatchQueue.global(qos: .userInitiated).async { [weak self, session, output] in
             guard let self = self else { return }
-            let session = sessionContainer.value
-            let output = outputContainer.value
             
             guard let device = AVCaptureDevice.default(for: .video) else {
                 Task { @MainActor in self.errorMessage = "Keine Kamera gefunden." }
@@ -93,9 +86,9 @@ class QRScannerController: NSObject, ObservableObject, AVCaptureMetadataOutputOb
     }
     
     func stopSession() {
-        let sessionContainer = UncheckedSendable(value: session)
+        let session = session
         DispatchQueue.global(qos: .userInitiated).async {
-            sessionContainer.value.stopRunning()
+            session.stopRunning()
         }
     }
     

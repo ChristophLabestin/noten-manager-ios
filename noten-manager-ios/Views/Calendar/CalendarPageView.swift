@@ -21,7 +21,9 @@ struct CalendarPageView: View {
     @State private var showLegend = false
     @State private var examToDelete: Exam?
     @State private var editingExam: Exam?
+    @State private var homeworkToDelete: Homework?
     @State private var editingHomework: Homework?
+    @State private var reminderHomework: Homework?
     @State private var holidays: [HolidayPeriod] = []
     // showNextExamCard is now managed by GradesStore
 
@@ -262,6 +264,10 @@ struct CalendarPageView: View {
             EditHomeworkView(homework: homework)
                 .environmentObject(store)
         }
+        .sheet(item: $reminderHomework) { homework in
+            HomeworkReminderView(homework: homework)
+                .environmentObject(store)
+        }
         .sheet(item: $examForNewGrade) { exam in
             let note = noteForExam(exam)
             AddGradeView(
@@ -312,10 +318,23 @@ struct CalendarPageView: View {
         } message: {
             Text("Bist du sicher? Dies kann nicht widerrufen werden.")
         }
+        .alert("Hausaufgabe löschen?", isPresented: Binding(
+            get: { homeworkToDelete != nil },
+            set: { if !$0 { homeworkToDelete = nil } }
+        )) {
+            Button("Löschen", role: .destructive) {
+                if let homework = homeworkToDelete {
+                    Task { await store.deleteHomework(homework) }
+                }
+            }
+            Button("Abbrechen", role: .cancel) {}
+        } message: {
+            Text("Bist du sicher? Dies kann nicht widerrufen werden.")
+        }
         .task {
             await loadHolidays()
         }
-        .onChange(of: currentMonth) { _ in
+        .onChange(of: currentMonth) { _, _ in
             Task { await loadHolidays() }
         }
     }
@@ -336,17 +355,35 @@ struct CalendarPageView: View {
                 contextMenuContent(for: exam)
             }
         case .homework(let homework):
-            // Placeholder for Homework Row - reusing ExamRow style or custom
-            SettingsCard(
-                title: homework.title,
-                subtitle: store.resolveLocalSubjectNameForHomework(homework) ?? homework.subjectName,
-                systemImage: "doc.text",
-                accent: .green
-            ) {
-                EmptyView()
-            }
-            .onTapGesture {
+            HomeworkRowView(homework: homework, onToggleReminder: {
+                reminderHomework = homework
+            }, onToggleCompletion: {
+                Task {
+                    if homework.isCompleted {
+                        await markHomeworkNotCompleted(homework)
+                    } else {
+                        await markHomeworkCompleted(homework)
+                    }
+                }
+            }, onTap: {
                 detailHomework = homework
+            }) {
+                // Actions for Calendar View
+                Button { editingHomework = homework } label: { Label("Bearbeiten", systemImage: "pencil") }
+                Button {
+                    Task {
+                        if homework.isCompleted {
+                            await markHomeworkNotCompleted(homework)
+                        } else {
+                            await markHomeworkCompleted(homework)
+                        }
+                    }
+                } label: {
+                    Label(homework.isCompleted ? "Als offen markieren" : "Erledigen", systemImage: homework.isCompleted ? "arrow.uturn.backward" : "checkmark")
+                }
+                Button { reminderHomework = homework } label: { Label("Erinnerung", systemImage: "bell") }
+                Divider()
+                Button(role: .destructive) { homeworkToDelete = homework } label: { Label("Löschen", systemImage: "trash") }
             }
         case .holiday(let name, _):
             SettingsCard(
@@ -409,7 +446,7 @@ struct CalendarPageView: View {
         
         for holiday in matchingHolidays {
             // Use nameCp (capitalized/pretty name) if available, otherwise name
-            var displayName = holiday.nameCp ?? holiday.name
+            let displayName = holiday.nameCp ?? holiday.name
             
             // Renaming logic removed as we now fetch "Buß- und Bettag" correctly from the API.
             // If "Herbstferien" (school) and "Buß- und Bettag" (public) overlap, both will be shown.
@@ -448,24 +485,20 @@ struct CalendarPageView: View {
     
     private func loadHolidays() async {
         let year = Calendar.current.component(.year, from: currentMonth)
-        do {
-            async let currentSchool = HolidaysService.shared.fetchHolidays(year: year)
-            async let nextSchool = HolidaysService.shared.fetchHolidays(year: year + 1)
-            async let prevSchool = HolidaysService.shared.fetchHolidays(year: year - 1)
-            
-            async let currentPublic = HolidaysService.shared.fetchPublicHolidays(year: year)
-            async let nextPublic = HolidaysService.shared.fetchPublicHolidays(year: year + 1)
-            async let prevPublic = HolidaysService.shared.fetchPublicHolidays(year: year - 1)
-            
-            let allSchool = await (prevSchool + currentSchool + nextSchool)
-            let allPublic = await (prevPublic + currentPublic + nextPublic)
-            
-            await MainActor.run {
-                // Prioritize public holidays so their specific names appear first
-                self.holidays = allPublic + allSchool
-            }
-        } catch {
-            print("Failed to load holidays: \(error)")
+        async let currentSchool = HolidaysService.shared.fetchHolidays(year: year)
+        async let nextSchool = HolidaysService.shared.fetchHolidays(year: year + 1)
+        async let prevSchool = HolidaysService.shared.fetchHolidays(year: year - 1)
+        
+        async let currentPublic = HolidaysService.shared.fetchPublicHolidays(year: year)
+        async let nextPublic = HolidaysService.shared.fetchPublicHolidays(year: year + 1)
+        async let prevPublic = HolidaysService.shared.fetchPublicHolidays(year: year - 1)
+        
+        let allSchool = await (prevSchool + currentSchool + nextSchool)
+        let allPublic = await (prevPublic + currentPublic + nextPublic)
+        
+        await MainActor.run {
+            // Prioritize public holidays so their specific names appear first
+            self.holidays = allPublic + allSchool
         }
     }
 
@@ -554,6 +587,12 @@ struct CalendarPageView: View {
     
     @ViewBuilder
     private func contextMenuContent(for exam: Exam) -> some View {
+        Button {
+            editingExam = exam
+        } label: {
+            Label("Bearbeiten", systemImage: "pencil")
+        }
+        
         if !exam.isCompleted {
             Button {
                 if isFachreferatExam(exam) { fachreferatExam = exam } else { examForNewGrade = exam }
@@ -646,6 +685,22 @@ struct CalendarPageView: View {
     
     private func reminderIconName(_ exam: Exam) -> String {
         return exam.reminderAt == nil ? "bell" : "bell.fill"
+    }
+    
+    private func markHomeworkCompleted(_ hw: Homework) async {
+        if hw.isShared {
+            await store.setUserCompletedForSharedHomework(homeworkId: hw.id, completed: true, groupId: hw.groupId)
+        } else {
+            await store.setHomeworkCompleted(id: hw.id, completed: true)
+        }
+    }
+    
+    private func markHomeworkNotCompleted(_ hw: Homework) async {
+        if hw.isShared {
+            await store.setUserCompletedForSharedHomework(homeworkId: hw.id, completed: false, groupId: hw.groupId)
+        } else {
+            await store.setHomeworkCompleted(id: hw.id, completed: false)
+        }
     }
 }
 

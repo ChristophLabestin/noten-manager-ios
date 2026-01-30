@@ -338,6 +338,7 @@ final class GradesStore: ObservableObject {
     @Published var alwaysEnablePrivacyOnStart: Bool = false
     @Published var mssDecimalPrecision: Int = 2 // 0, 1, or 2 decimal places for MSS display
     @Published var showSubjectsAsGrid: Bool = false
+    @Published var isAdmin: Bool = false
     
     var maxDroppableHalfYears: Int {
         GradeCalculationService.calculateMaxDroppableHalfYears(
@@ -384,6 +385,8 @@ final class GradesStore: ObservableObject {
     @Published var supportAccessRequests: [SupportAccessRequest] = []
     @Published var supportNotificationUpdates: Bool = true
     @Published var supportNotificationAccess: Bool = true
+    @Published var customNotificationsEnabled: Bool = true
+    @Published var broadcastNotificationsEnabled: Bool = true
     
     // Support Deep Linking
     @Published var showSupportHistory: Bool = false
@@ -488,6 +491,12 @@ final class GradesStore: ObservableObject {
     private var offlinePendingGrades: [PendingGrade] = []
     private var offlinePendingFachreferat: PendingFachreferat? = nil
     private var offlinePendingSeminar: PendingSeminarPerformance? = nil
+    private var offlinePendingGradeChanges: [PendingGradeChange] = []
+    private var offlinePendingSubjectChanges: [PendingSubjectChange] = []
+    private var offlinePendingExamChanges: [PendingExamChange] = []
+    private var offlinePendingHomeworkChanges: [PendingHomeworkChange] = []
+    private var offlinePendingSharedExamUserChanges: [PendingSharedExamUserChange] = []
+    private var offlinePendingSharedHomeworkUserChanges: [PendingSharedHomeworkUserChange] = []
     private var pfingstferienPromptedYearIds: Set<String> = []
     private let legacyGradeMigrationKey = "legacyGradeMigration_v1"
     private let legacySubjectMigrationKey = "legacySubjectMigration_v1"
@@ -525,7 +534,8 @@ final class GradesStore: ObservableObject {
                 note: pendingFr.note,
                 presentationGrade: pendingFr.presentationGrade,
                 paperGrade: pendingFr.paperGrade,
-                presentationWeight: pendingFr.presentationWeight
+                presentationWeight: pendingFr.presentationWeight,
+                fixedGrade: nil
             )
         }
 
@@ -742,6 +752,12 @@ final class GradesStore: ObservableObject {
         offlinePendingGrades = []
         offlinePendingFachreferat = nil
         offlinePendingSeminar = nil
+        offlinePendingGradeChanges = []
+        offlinePendingSubjectChanges = []
+        offlinePendingExamChanges = []
+        offlinePendingHomeworkChanges = []
+        offlinePendingSharedExamUserChanges = []
+        offlinePendingSharedHomeworkUserChanges = []
         legacyMigrationSummary = nil
         legacyMigrationCheckDone = false
         pendingLegacyUserData = nil
@@ -1264,6 +1280,9 @@ final class GradesStore: ObservableObject {
     }
 
     func resetEntireAccount(password: String?) async throws {
+        if OfflineModeManager.shared.isOfflineModeActive {
+            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Konto-Reset im Offline-Modus nicht möglich."])
+        }
         guard let uid = Auth.auth().currentUser?.uid else { throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"]) }
         try await reauthenticateIfNeeded(password: password)
 
@@ -1301,6 +1320,9 @@ final class GradesStore: ObservableObject {
     }
 
     func deleteAccountCompletely(password: String?) async throws {
+        if OfflineModeManager.shared.isOfflineModeActive {
+            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Konto-Löschung im Offline-Modus nicht möglich."])
+        }
         guard let user = Auth.auth().currentUser else {
             throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
         }
@@ -1520,6 +1542,13 @@ final class GradesStore: ObservableObject {
                                     }
                                 }
                                 let presentationWeight = data["presentationWeight"] as? Double
+                                
+                                var fixedGrade: Double? = nil
+                                if let fgStr = data["fixedGrade"] as? String {
+                                    if let val = try? CryptoService.decryptString(fgStr, key: key) {
+                                        fixedGrade = Double(val)
+                                    }
+                                }
 
                                 if let num = Double(numStr), num.isFinite {
                                     self.fachreferat = Fachreferat(
@@ -1530,7 +1559,8 @@ final class GradesStore: ObservableObject {
                                         note: note,
                                         presentationGrade: presentationGrade,
                                         paperGrade: paperGrade,
-                                        presentationWeight: presentationWeight
+                                        presentationWeight: presentationWeight,
+                                        fixedGrade: fixedGrade
                                     )
                                 } else {
                                     self.fachreferat = nil
@@ -2426,19 +2456,41 @@ final class GradesStore: ObservableObject {
             guard let serverTs = map[pending.id] else { return true }
             return serverTs <= pending.createdAt ? false : true
         }
-        if offlinePendingGrades.isEmpty, offlinePendingFachreferat == nil, offlinePendingSeminar == nil {
+        if offlinePendingGrades.isEmpty,
+           offlinePendingFachreferat == nil,
+           offlinePendingSeminar == nil,
+           offlinePendingGradeChanges.isEmpty,
+           offlinePendingSubjectChanges.isEmpty,
+           offlinePendingExamChanges.isEmpty,
+           offlinePendingHomeworkChanges.isEmpty,
+           offlinePendingSharedExamUserChanges.isEmpty,
+           offlinePendingSharedHomeworkUserChanges.isEmpty {
             persistOfflineSnapshotIfPossible()
         }
     }
 
     var hasPendingOfflineChanges: Bool {
-        !(offlinePendingGrades.isEmpty && offlinePendingFachreferat == nil && offlinePendingSeminar == nil)
+        !(offlinePendingGrades.isEmpty
+          && offlinePendingFachreferat == nil
+          && offlinePendingSeminar == nil
+          && offlinePendingGradeChanges.isEmpty
+          && offlinePendingSubjectChanges.isEmpty
+          && offlinePendingExamChanges.isEmpty
+          && offlinePendingHomeworkChanges.isEmpty
+          && offlinePendingSharedExamUserChanges.isEmpty
+          && offlinePendingSharedHomeworkUserChanges.isEmpty)
     }
 
     func discardPendingOfflineChanges() {
         offlinePendingGrades = []
         offlinePendingFachreferat = nil
         offlinePendingSeminar = nil
+        offlinePendingGradeChanges = []
+        offlinePendingSubjectChanges = []
+        offlinePendingExamChanges = []
+        offlinePendingHomeworkChanges = []
+        offlinePendingSharedExamUserChanges = []
+        offlinePendingSharedHomeworkUserChanges = []
         persistOfflineSnapshotIfPossible()
     }
 
@@ -2915,6 +2967,9 @@ final class GradesStore: ObservableObject {
     }
 
     func cleanupLegacyTopLevelCourses(deleteLegacy: Bool = false) async -> LegacyCourseCleanupSummary {
+        if OfflineModeManager.shared.isOfflineModeActive {
+            return LegacyCourseCleanupSummary(scanned: 0, migrated: 0, deleted: 0, skippedMissingClassId: 0, errors: 1)
+        }
         var summary = LegacyCourseCleanupSummary()
         guard let uid = Auth.auth().currentUser?.uid else { return summary }
         do {
@@ -3472,8 +3527,24 @@ final class GradesStore: ObservableObject {
         if let notifyAccess = data["supportNotificationAccess"] as? Bool {
             supportNotificationAccess = notifyAccess
         }
+        if let customEnabled = data["customNotificationsEnabled"] as? Bool {
+            customNotificationsEnabled = customEnabled
+        } else if UserDefaults.standard.object(forKey: "grades_customNotificationsEnabled") != nil {
+            customNotificationsEnabled = UserDefaults.standard.bool(forKey: "grades_customNotificationsEnabled")
+        } else {
+            customNotificationsEnabled = true
+        }
+        if let broadcastEnabled = data["broadcastNotificationsEnabled"] as? Bool {
+            broadcastNotificationsEnabled = broadcastEnabled
+        } else if UserDefaults.standard.object(forKey: "grades_broadcastNotificationsEnabled") != nil {
+            broadcastNotificationsEnabled = UserDefaults.standard.bool(forKey: "grades_broadcastNotificationsEnabled")
+        } else {
+            broadcastNotificationsEnabled = true
+        }
 
         UserDefaults.standard.set(standardRemindersEnabled, forKey: "grades_standardRemindersEnabled")
+        UserDefaults.standard.set(customNotificationsEnabled, forKey: "grades_customNotificationsEnabled")
+        UserDefaults.standard.set(broadcastNotificationsEnabled, forKey: "grades_broadcastNotificationsEnabled")
         if let mode = data["darkModeMode"] as? String, ["system","light","dark"].contains(mode) {
             darkModeMode = mode
         } else if let dm = data["darkMode"] as? Bool {
@@ -3481,6 +3552,7 @@ final class GradesStore: ObservableObject {
         } else {
             darkModeMode = "system"
         }
+        isAdmin = data["isAdmin"] as? Bool ?? false
         darkMode = effectiveDarkMode(for: darkModeMode)
         // gradeYear wird pro Schuljahr verwaltet (siehe applySchoolYearSettings)
 
@@ -3863,6 +3935,12 @@ final class GradesStore: ObservableObject {
         if defaults.object(forKey: "grades_standardRemindersEnabled") != nil {
             standardRemindersEnabled = defaults.bool(forKey: "grades_standardRemindersEnabled")
         }
+        if defaults.object(forKey: "grades_customNotificationsEnabled") != nil {
+            customNotificationsEnabled = defaults.bool(forKey: "grades_customNotificationsEnabled")
+        }
+        if defaults.object(forKey: "grades_broadcastNotificationsEnabled") != nil {
+            broadcastNotificationsEnabled = defaults.bool(forKey: "grades_broadcastNotificationsEnabled")
+        }
         if defaults.object(forKey: "grades_compactView") != nil {
             compactView = defaults.bool(forKey: "grades_compactView")
         }
@@ -4032,6 +4110,160 @@ final class GradesStore: ObservableObject {
         OfflineModeManager.shared.scheduleSnapshotSave(from: self, userId: uid)
     }
 
+    private func enqueueSubjectChange(_ change: PendingSubjectChange) {
+        if change.action == .delete {
+            if offlinePendingSubjectChanges.contains(where: { $0.subjectName == change.subjectName && $0.action == .add }) {
+                offlinePendingSubjectChanges.removeAll { $0.subjectName == change.subjectName }
+                return
+            }
+            offlinePendingSubjectChanges.removeAll { $0.subjectName == change.subjectName && $0.action == .update }
+            offlinePendingSubjectChanges.append(change)
+            return
+        }
+
+        if let idx = offlinePendingSubjectChanges.firstIndex(where: { $0.subjectName == change.subjectName && $0.action == .add }) {
+            let existing = offlinePendingSubjectChanges[idx]
+            offlinePendingSubjectChanges[idx] = PendingSubjectChange(
+                id: existing.id,
+                action: .add,
+                subjectName: change.subjectName,
+                type: change.type ?? existing.type,
+                date: change.date ?? existing.date,
+                isElective: change.isElective ?? existing.isElective,
+                gradingModeRaw: change.gradingModeRaw ?? existing.gradingModeRaw,
+                expectedSchulaufgabenPerTerm: change.expectedSchulaufgabenPerTerm ?? existing.expectedSchulaufgabenPerTerm,
+                teacher: change.teacher ?? existing.teacher,
+                room: change.room ?? existing.room,
+                email: change.email ?? existing.email,
+                alias: change.alias ?? existing.alias,
+                order: change.order ?? existing.order,
+                examSubject: change.examSubject ?? existing.examSubject,
+                examTypeRaw: change.examTypeRaw ?? existing.examTypeRaw,
+                droppedHalfYear: change.droppedHalfYear ?? existing.droppedHalfYear,
+                clearDroppedHalfYear: change.clearDroppedHalfYear || existing.clearDroppedHalfYear,
+                fixedAverageHalfYear1: change.fixedAverageHalfYear1 ?? existing.fixedAverageHalfYear1,
+                clearFixedAverageHalfYear1: change.clearFixedAverageHalfYear1 || existing.clearFixedAverageHalfYear1,
+                fixedAverageHalfYear2: change.fixedAverageHalfYear2 ?? existing.fixedAverageHalfYear2,
+                clearFixedAverageHalfYear2: change.clearFixedAverageHalfYear2 || existing.clearFixedAverageHalfYear2,
+                fixedAverageYearly: change.fixedAverageYearly ?? existing.fixedAverageYearly,
+                clearFixedAverageYearly: change.clearFixedAverageYearly || existing.clearFixedAverageYearly,
+                updatedAt: change.updatedAt
+            )
+            return
+        }
+
+        if let idx = offlinePendingSubjectChanges.firstIndex(where: { $0.subjectName == change.subjectName && $0.action == change.action }) {
+            offlinePendingSubjectChanges[idx] = change
+        } else {
+            offlinePendingSubjectChanges.append(change)
+        }
+    }
+
+    private func enqueueGradeChange(_ change: PendingGradeChange) {
+        if change.action == .delete {
+            offlinePendingGradeChanges.removeAll { $0.id == change.id && $0.subjectId == change.subjectId }
+            offlinePendingGradeChanges.append(change)
+            return
+        }
+        if let idx = offlinePendingGradeChanges.firstIndex(where: { $0.id == change.id && $0.subjectId == change.subjectId && $0.action == .update }) {
+            offlinePendingGradeChanges[idx] = change
+        } else {
+            offlinePendingGradeChanges.append(change)
+        }
+    }
+
+    private func enqueueExamChange(_ change: PendingExamChange) {
+        if change.action == .delete {
+            if offlinePendingExamChanges.contains(where: { $0.id == change.id && $0.action == .add }) {
+                offlinePendingExamChanges.removeAll { $0.id == change.id }
+                return
+            }
+            offlinePendingExamChanges.removeAll { $0.id == change.id }
+            offlinePendingExamChanges.append(change)
+            return
+        }
+
+        if let idx = offlinePendingExamChanges.firstIndex(where: { $0.id == change.id && $0.action == .add }) {
+            let existing = offlinePendingExamChanges[idx]
+            offlinePendingExamChanges[idx] = PendingExamChange(
+                id: existing.id,
+                action: .add,
+                subjectName: change.subjectName ?? existing.subjectName,
+                subjectKey: change.subjectKey ?? existing.subjectKey,
+                title: change.title ?? existing.title,
+                notes: change.notes ?? existing.notes,
+                date: change.date ?? existing.date,
+                hasTime: change.hasTime ?? existing.hasTime,
+                weight: change.weight ?? existing.weight,
+                customWeight: change.customWeight ?? existing.customWeight,
+                reminderAt: change.reminderAt ?? existing.reminderAt,
+                isCompleted: change.isCompleted ?? existing.isCompleted,
+                createdAt: existing.createdAt ?? change.createdAt,
+                requiresGrade: change.requiresGrade ?? existing.requiresGrade,
+                assessmentType: change.assessmentType ?? existing.assessmentType,
+                updatedAt: change.updatedAt
+            )
+            return
+        }
+
+        if let idx = offlinePendingExamChanges.firstIndex(where: { $0.id == change.id && $0.action == change.action }) {
+            offlinePendingExamChanges[idx] = change
+        } else {
+            offlinePendingExamChanges.append(change)
+        }
+    }
+
+    private func enqueueHomeworkChange(_ change: PendingHomeworkChange) {
+        if change.action == .delete {
+            if offlinePendingHomeworkChanges.contains(where: { $0.id == change.id && $0.action == .add }) {
+                offlinePendingHomeworkChanges.removeAll { $0.id == change.id }
+                return
+            }
+            offlinePendingHomeworkChanges.removeAll { $0.id == change.id }
+            offlinePendingHomeworkChanges.append(change)
+            return
+        }
+
+        if let idx = offlinePendingHomeworkChanges.firstIndex(where: { $0.id == change.id && $0.action == .add }) {
+            let existing = offlinePendingHomeworkChanges[idx]
+            offlinePendingHomeworkChanges[idx] = PendingHomeworkChange(
+                id: existing.id,
+                action: .add,
+                subjectName: change.subjectName ?? existing.subjectName,
+                subjectKey: change.subjectKey ?? existing.subjectKey,
+                title: change.title ?? existing.title,
+                dueDate: change.dueDate ?? existing.dueDate,
+                reminderAt: change.reminderAt ?? existing.reminderAt,
+                isCompleted: change.isCompleted ?? existing.isCompleted,
+                createdAt: existing.createdAt ?? change.createdAt,
+                updatedAt: change.updatedAt
+            )
+            return
+        }
+
+        if let idx = offlinePendingHomeworkChanges.firstIndex(where: { $0.id == change.id && $0.action == change.action }) {
+            offlinePendingHomeworkChanges[idx] = change
+        } else {
+            offlinePendingHomeworkChanges.append(change)
+        }
+    }
+
+    private func enqueueSharedExamUserChange(_ change: PendingSharedExamUserChange) {
+        if let idx = offlinePendingSharedExamUserChanges.firstIndex(where: { $0.action == change.action && $0.examId == change.examId && $0.groupId == change.groupId }) {
+            offlinePendingSharedExamUserChanges[idx] = change
+        } else {
+            offlinePendingSharedExamUserChanges.append(change)
+        }
+    }
+
+    private func enqueueSharedHomeworkUserChange(_ change: PendingSharedHomeworkUserChange) {
+        if let idx = offlinePendingSharedHomeworkUserChanges.firstIndex(where: { $0.action == change.action && $0.homeworkId == change.homeworkId && $0.groupId == change.groupId }) {
+            offlinePendingSharedHomeworkUserChanges[idx] = change
+        } else {
+            offlinePendingSharedHomeworkUserChanges.append(change)
+        }
+    }
+
     func makeOfflineSnapshot(userId: String) -> OfflineSnapshot {
         OfflineSnapshot(
             userId: userId,
@@ -4070,9 +4302,19 @@ final class GradesStore: ObservableObject {
             homeworkReminderHour: homeworkReminderHour,
             homeworkReminderMinute: homeworkReminderMinute,
             standardRemindersEnabled: standardRemindersEnabled,
+            supportNotificationUpdates: supportNotificationUpdates,
+            supportNotificationAccess: supportNotificationAccess,
+            customNotificationsEnabled: customNotificationsEnabled,
+            broadcastNotificationsEnabled: broadcastNotificationsEnabled,
             pendingGrades: offlinePendingGrades,
             pendingFachreferat: offlinePendingFachreferat,
             pendingSeminar: offlinePendingSeminar,
+            pendingGradeChanges: offlinePendingGradeChanges,
+            pendingSubjectChanges: offlinePendingSubjectChanges,
+            pendingExamChanges: offlinePendingExamChanges,
+            pendingHomeworkChanges: offlinePendingHomeworkChanges,
+            pendingSharedExamUserChanges: offlinePendingSharedExamUserChanges,
+            pendingSharedHomeworkUserChanges: offlinePendingSharedHomeworkUserChanges,
             subscribedCourseIds: subscribedCourseIds,
             courses: courses,
             classIds: classIds,
@@ -4128,9 +4370,11 @@ final class GradesStore: ObservableObject {
         )
     }
 
-    func loadOfflineSnapshot(_ snapshot: OfflineSnapshot) {
+    func loadOfflineSnapshot(_ snapshot: OfflineSnapshot, activateOfflineMode: Bool = true) {
         stopListening()
-        isOfflineMode = true
+        if activateOfflineMode {
+            isOfflineMode = true
+        }
 
         activeSchoolYearId = snapshot.activeSchoolYearId
         subjects = snapshot.subjects
@@ -4150,7 +4394,14 @@ final class GradesStore: ObservableObject {
         groupSubjectMappings = snapshot.groupSubjectMappings
         groupExamsByGroup = snapshot.groupExamsByGroup
         groupHomeworksByGroup = snapshot.groupHomeworksByGroup
-        schoolYears = snapshot.schoolYears
+        var uniqueYears: [String] = []
+        var seenYears = Set<String>()
+        for year in snapshot.schoolYears where !year.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if seenYears.insert(year).inserted {
+                uniqueYears.append(year)
+            }
+        }
+        schoolYears = uniqueYears
         gradeYear = snapshot.gradeYear
         schoolType = snapshot.schoolType
         subjectSortMode = snapshot.subjectSortMode
@@ -4169,10 +4420,20 @@ final class GradesStore: ObservableObject {
         homeworkReminderHour = snapshot.homeworkReminderHour
         homeworkReminderMinute = snapshot.homeworkReminderMinute
         standardRemindersEnabled = snapshot.standardRemindersEnabled ?? true
+        supportNotificationUpdates = snapshot.supportNotificationUpdates ?? true
+        supportNotificationAccess = snapshot.supportNotificationAccess ?? true
+        customNotificationsEnabled = snapshot.customNotificationsEnabled ?? true
+        broadcastNotificationsEnabled = snapshot.broadcastNotificationsEnabled ?? true
         encryptionSalt = snapshot.encryptionSalt
         offlinePendingGrades = snapshot.pendingGrades
         offlinePendingFachreferat = snapshot.pendingFachreferat
         offlinePendingSeminar = snapshot.pendingSeminar
+        offlinePendingGradeChanges = snapshot.pendingGradeChanges
+        offlinePendingSubjectChanges = snapshot.pendingSubjectChanges
+        offlinePendingExamChanges = snapshot.pendingExamChanges
+        offlinePendingHomeworkChanges = snapshot.pendingHomeworkChanges
+        offlinePendingSharedExamUserChanges = snapshot.pendingSharedExamUserChanges
+        offlinePendingSharedHomeworkUserChanges = snapshot.pendingSharedHomeworkUserChanges
         
         subscribedCourseIds = snapshot.subscribedCourseIds
         courses = snapshot.courses
@@ -4251,7 +4512,9 @@ final class GradesStore: ObservableObject {
 
         Task { await self.applyAppIconSelectionIfNeeded() }
 
-        OfflineModeManager.shared.activateOfflineMode()
+        if activateOfflineMode {
+            OfflineModeManager.shared.activateOfflineMode()
+        }
     }
 
     func exitOfflineModeIfNeeded() {
@@ -4311,10 +4574,25 @@ final class GradesStore: ObservableObject {
             snapshot = OfflineModeManager.shared.availableSnapshot()
         }
 
-        if offlinePendingGrades.isEmpty && offlinePendingFachreferat == nil && offlinePendingSeminar == nil, let snap = snapshot {
+        let pendingEmpty = offlinePendingGrades.isEmpty
+            && offlinePendingFachreferat == nil
+            && offlinePendingSeminar == nil
+            && offlinePendingGradeChanges.isEmpty
+            && offlinePendingSubjectChanges.isEmpty
+            && offlinePendingExamChanges.isEmpty
+            && offlinePendingHomeworkChanges.isEmpty
+            && offlinePendingSharedExamUserChanges.isEmpty
+            && offlinePendingSharedHomeworkUserChanges.isEmpty
+        if pendingEmpty, let snap = snapshot {
             offlinePendingGrades = snap.pendingGrades
             offlinePendingFachreferat = snap.pendingFachreferat
             offlinePendingSeminar = snap.pendingSeminar
+            offlinePendingGradeChanges = snap.pendingGradeChanges
+            offlinePendingSubjectChanges = snap.pendingSubjectChanges
+            offlinePendingExamChanges = snap.pendingExamChanges
+            offlinePendingHomeworkChanges = snap.pendingHomeworkChanges
+            offlinePendingSharedExamUserChanges = snap.pendingSharedExamUserChanges
+            offlinePendingSharedHomeworkUserChanges = snap.pendingSharedHomeworkUserChanges
             if encryptionSalt == nil {
                 encryptionSalt = snap.encryptionSalt
             }
@@ -4324,51 +4602,172 @@ final class GradesStore: ObservableObject {
         if waitingForLegacyDecision { return }
         if onboardingRequired && activeSchoolYearId == nil { return }
 
-        guard !offlinePendingGrades.isEmpty || offlinePendingFachreferat != nil || offlinePendingSeminar != nil else { return }
+        guard !offlinePendingGrades.isEmpty
+            || offlinePendingFachreferat != nil
+            || offlinePendingSeminar != nil
+            || !offlinePendingGradeChanges.isEmpty
+            || !offlinePendingSubjectChanges.isEmpty
+            || !offlinePendingExamChanges.isEmpty
+            || !offlinePendingHomeworkChanges.isEmpty
+            || !offlinePendingSharedExamUserChanges.isEmpty
+            || !offlinePendingSharedHomeworkUserChanges.isEmpty else { return }
         guard let uid = Auth.auth().currentUser?.uid else { return }
 
         OfflineModeManager.shared.enableFirestoreNetworkIfNeeded()
 
-        let saltForKey = encryptionSalt ?? snapshot?.encryptionSalt
-        if encryptionKey == nil, let salt = saltForKey {
-            if let key = try? CryptoService.deriveKeyFromPassword(password: uid, saltBase64: salt, iterations: 150_000) {
-                encryptionKey = key
+        let needsEncryption = !offlinePendingGrades.isEmpty
+            || !offlinePendingGradeChanges.isEmpty
+            || offlinePendingFachreferat != nil
+            || offlinePendingSeminar != nil
+        if needsEncryption {
+            let saltForKey = encryptionSalt ?? snapshot?.encryptionSalt
+            if encryptionKey == nil, let salt = saltForKey {
+                if let key = try? CryptoService.deriveKeyFromPassword(password: uid, saltBase64: salt, iterations: 150_000) {
+                    encryptionKey = key
+                }
             }
+            guard let _ = encryptionKey else { return }
         }
-        guard let key = encryptionKey else { return }
         guard let yearRef = try? await requireYearRef(uid: uid) else { return }
 
-        var remainingGrades: [PendingGrade] = []
-        for pending in offlinePendingGrades {
+        var remainingSubjectChanges: [PendingSubjectChange] = []
+        for change in offlinePendingSubjectChanges {
             do {
-                let ref = yearRef.collection("subjects").document(pending.subjectId).collection("grades").document(pending.id)
-                let existing = try await ref.getDocument()
-                if !forceLocalOverride,
-                   let existingData = existing.data(),
-                   let ts = existingData["updatedAt"] as? Timestamp,
-                   ts.dateValue() >= pending.createdAt {
-                    continue // Server ist aktueller oder gleich
+                let ref = yearRef.collection("subjects").document(change.subjectName)
+                switch change.action {
+                case .add:
+                    var payload: [String: Any] = [:]
+                    payload["type"] = change.type ?? 0
+                    payload["date"] = change.date ?? change.updatedAt
+                    if let isElective = change.isElective { payload["isElective"] = isElective }
+                    if let gradingModeRaw = change.gradingModeRaw { payload["gradingMode"] = gradingModeRaw }
+                    if let expected = change.expectedSchulaufgabenPerTerm { payload["expectedSchulaufgabenPerTerm"] = expected }
+                    if let examSubject = change.examSubject { payload["examSubject"] = examSubject }
+                    if let examTypeRaw = change.examTypeRaw { payload["examType"] = examTypeRaw }
+                    if let dropped = change.droppedHalfYear { payload["droppedHalfYear"] = dropped }
+                    if change.clearDroppedHalfYear { payload["droppedHalfYear"] = FieldValue.delete() }
+                    if let v1 = change.fixedAverageHalfYear1 { payload["fixedAverageHalfYear1"] = v1 }
+                    if change.clearFixedAverageHalfYear1 { payload["fixedAverageHalfYear1"] = FieldValue.delete() }
+                    if let v2 = change.fixedAverageHalfYear2 { payload["fixedAverageHalfYear2"] = v2 }
+                    if change.clearFixedAverageHalfYear2 { payload["fixedAverageHalfYear2"] = FieldValue.delete() }
+                    if let vy = change.fixedAverageYearly { payload["fixedAverageYearly"] = vy }
+                    if change.clearFixedAverageYearly { payload["fixedAverageYearly"] = FieldValue.delete() }
+                    try await ref.setData(payload, merge: true)
+                case .update:
+                    var payload: [String: Any] = [:]
+                    if let type = change.type { payload["type"] = type }
+                    if let date = change.date { payload["date"] = date }
+                    if let isElective = change.isElective { payload["isElective"] = isElective }
+                    if let gradingModeRaw = change.gradingModeRaw { payload["gradingMode"] = gradingModeRaw }
+                    if let expected = change.expectedSchulaufgabenPerTerm { payload["expectedSchulaufgabenPerTerm"] = expected }
+                    if let examSubject = change.examSubject { payload["examSubject"] = examSubject }
+                    if let examTypeRaw = change.examTypeRaw { payload["examType"] = examTypeRaw }
+                    if let dropped = change.droppedHalfYear { payload["droppedHalfYear"] = dropped }
+                    if change.clearDroppedHalfYear { payload["droppedHalfYear"] = FieldValue.delete() }
+                    if let v1 = change.fixedAverageHalfYear1 { payload["fixedAverageHalfYear1"] = v1 }
+                    if change.clearFixedAverageHalfYear1 { payload["fixedAverageHalfYear1"] = FieldValue.delete() }
+                    if let v2 = change.fixedAverageHalfYear2 { payload["fixedAverageHalfYear2"] = v2 }
+                    if change.clearFixedAverageHalfYear2 { payload["fixedAverageHalfYear2"] = FieldValue.delete() }
+                    if let vy = change.fixedAverageYearly { payload["fixedAverageYearly"] = vy }
+                    if change.clearFixedAverageYearly { payload["fixedAverageYearly"] = FieldValue.delete() }
+                    if !payload.isEmpty {
+                        try await ref.updateData(payload)
+                    }
+                case .delete:
+                    let gradesSnap = try await ref.collection("grades").getDocuments()
+                    for gdoc in gradesSnap.documents {
+                        try? await gdoc.reference.delete()
+                    }
+                    try await ref.delete()
                 }
-                let encrypted = try CryptoService.encryptString(String(pending.grade), key: key)
-                var payload: [String: Any] = [
-                    "grade": encrypted,
-                    "weight": pending.weight,
-                    "date": pending.date,
-                    "note": pending.note as Any,
-                    "halfYear": pending.halfYear as Any,
-                    "updatedAt": pending.createdAt
-                ]
-                if let linked = pending.linkedExamId { payload["linkedExamId"] = linked }
-                try await ref.setData(payload, merge: true)
-                remainingGrades.append(pending) // bis Listener updatedAt bestätigt
             } catch {
                 ErrorLoggingService.logErrorIfEnabled(error)
-                remainingGrades.append(pending)
+                remainingSubjectChanges.append(change)
             }
         }
-        offlinePendingGrades = remainingGrades
+        offlinePendingSubjectChanges = remainingSubjectChanges
 
-        if let pendingFr = offlinePendingFachreferat {
+        let needsKey = !offlinePendingGrades.isEmpty || offlinePendingFachreferat != nil || offlinePendingSeminar != nil
+        if needsKey && encryptionKey == nil {
+            return
+        }
+
+        if let key = encryptionKey {
+            var remainingGrades: [PendingGrade] = []
+            for pending in offlinePendingGrades {
+                do {
+                    let ref = yearRef.collection("subjects").document(pending.subjectId).collection("grades").document(pending.id)
+                    let existing = try await ref.getDocument()
+                    if !forceLocalOverride,
+                       let existingData = existing.data(),
+                       let ts = existingData["updatedAt"] as? Timestamp,
+                       ts.dateValue() >= pending.createdAt {
+                        continue // Server ist aktueller oder gleich
+                    }
+                    let encrypted = try CryptoService.encryptString(String(pending.grade), key: key)
+                    var payload: [String: Any] = [
+                        "grade": encrypted,
+                        "weight": pending.weight,
+                        "date": pending.date,
+                        "note": pending.note as Any,
+                        "halfYear": pending.halfYear as Any,
+                        "updatedAt": pending.createdAt
+                    ]
+                    if let linked = pending.linkedExamId { payload["linkedExamId"] = linked }
+                    try await ref.setData(payload, merge: true)
+                    remainingGrades.append(pending) // bis Listener updatedAt bestätigt
+                } catch {
+                    ErrorLoggingService.logErrorIfEnabled(error)
+                    remainingGrades.append(pending)
+                }
+            }
+            offlinePendingGrades = remainingGrades
+        }
+
+        var remainingGradeChanges: [PendingGradeChange] = []
+        if let key = encryptionKey, !offlinePendingGradeChanges.isEmpty {
+            for change in offlinePendingGradeChanges {
+                do {
+                    let ref = yearRef.collection("subjects").document(change.subjectId).collection("grades").document(change.id)
+                    switch change.action {
+                    case .update:
+                        var payload: [String: Any] = [:]
+                        if let grade = change.grade {
+                            payload["grade"] = try CryptoService.encryptString(String(grade), key: key)
+                        }
+                        if let weight = change.weight { payload["weight"] = weight }
+                        if let date = change.date { payload["date"] = date }
+                        payload["note"] = change.note as Any
+                        payload["halfYear"] = change.halfYear as Any
+                        if let linked = change.linkedExamId {
+                            payload["linkedExamId"] = linked
+                        } else {
+                            payload["linkedExamId"] = FieldValue.delete()
+                        }
+                        if let assessmentType = change.assessmentType {
+                            payload["assessmentType"] = assessmentType.rawValue
+                        }
+                        payload["updatedAt"] = change.updatedAt
+                        try await ref.updateData(payload)
+                    case .delete:
+                        try await ref.delete()
+                        if let linkedExamId = change.linkedExamId {
+                            await resetExamAfterLinkedGradeDeletion(examId: linkedExamId)
+                        }
+                    case .add:
+                        break
+                    }
+                } catch {
+                    ErrorLoggingService.logErrorIfEnabled(error)
+                    remainingGradeChanges.append(change)
+                }
+            }
+        } else if !offlinePendingGradeChanges.isEmpty {
+            remainingGradeChanges = offlinePendingGradeChanges
+        }
+        offlinePendingGradeChanges = remainingGradeChanges
+
+        if let pendingFr = offlinePendingFachreferat, let key = encryptionKey {
             do {
                 let ref = yearRef.collection("fachreferat").document("current")
                 let existing = try await ref.getDocument()
@@ -4393,7 +4792,7 @@ final class GradesStore: ObservableObject {
             }
         }
 
-        if let pendingSem = offlinePendingSeminar {
+        if let pendingSem = offlinePendingSeminar, let key = encryptionKey {
             do {
                 let ref = yearRef.collection("seminar").document("current")
                 let existing = try await ref.getDocument()
@@ -4436,6 +4835,232 @@ final class GradesStore: ObservableObject {
                 // bleibt pending
             }
         }
+
+        var remainingExamChanges: [PendingExamChange] = []
+        for change in offlinePendingExamChanges {
+            do {
+                let ref = yearRef.collection("exams").document(change.id)
+                switch change.action {
+                case .add:
+                    guard let subjectName = change.subjectName,
+                          let title = change.title,
+                          let date = change.date,
+                          let hasTime = change.hasTime
+                    else {
+                        remainingExamChanges.append(change)
+                        continue
+                    }
+                    var payload: [String: Any] = [
+                        "subjectName": subjectName,
+                        "title": title,
+                        "date": date,
+                        "hasTime": hasTime,
+                        "isCompleted": change.isCompleted ?? false,
+                        "createdAt": change.createdAt ?? change.updatedAt,
+                        "creatorId": uid
+                    ]
+                    payload["subjectKey"] = change.subjectKey ?? slugifySubjectName(subjectName)
+                    if let notes = change.notes { payload["notes"] = notes }
+                    if let weight = change.weight { payload["weight"] = weight }
+                    if let customWeight = change.customWeight { payload["customWeight"] = customWeight }
+                    if let reminderAt = change.reminderAt { payload["reminderAt"] = reminderAt }
+                    if let assessmentType = change.assessmentType { payload["assessmentType"] = assessmentType.rawValue }
+                    if let requiresGrade = change.requiresGrade { payload["requiresGrade"] = requiresGrade }
+                    try await ref.setData(payload, merge: true)
+                case .update:
+                    var payload: [String: Any] = [:]
+                    if let subjectName = change.subjectName { payload["subjectName"] = subjectName }
+                    if let title = change.title { payload["title"] = title }
+                    if let date = change.date { payload["date"] = date }
+                    if let hasTime = change.hasTime { payload["hasTime"] = hasTime }
+                    if let isCompleted = change.isCompleted { payload["isCompleted"] = isCompleted }
+                    if let subjectKey = change.subjectKey {
+                        payload["subjectKey"] = subjectKey
+                    } else if change.subjectName != nil {
+                        payload["subjectKey"] = FieldValue.delete()
+                    }
+                    if let notes = change.notes {
+                        payload["notes"] = notes
+                    } else if change.notes == nil {
+                        payload["notes"] = FieldValue.delete()
+                    }
+                    if let weight = change.weight {
+                        payload["weight"] = weight
+                    } else if change.weight == nil {
+                        payload["weight"] = NSNull()
+                    }
+                    if let customWeight = change.customWeight {
+                        payload["customWeight"] = customWeight
+                    } else if change.customWeight == nil {
+                        payload["customWeight"] = NSNull()
+                    }
+                    if let reminderAt = change.reminderAt {
+                        payload["reminderAt"] = reminderAt
+                    } else if change.reminderAt == nil {
+                        payload["reminderAt"] = NSNull()
+                    }
+                    if let assessmentType = change.assessmentType {
+                        payload["assessmentType"] = assessmentType.rawValue
+                    } else if change.assessmentType == nil {
+                        payload["assessmentType"] = NSNull()
+                    }
+                    if let requiresGrade = change.requiresGrade {
+                        payload["requiresGrade"] = requiresGrade
+                    }
+                    if !payload.isEmpty {
+                        try await ref.updateData(payload)
+                    }
+                case .delete:
+                    try await ref.delete()
+                }
+            } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
+                remainingExamChanges.append(change)
+            }
+        }
+        offlinePendingExamChanges = remainingExamChanges
+
+        var remainingHomeworkChanges: [PendingHomeworkChange] = []
+        for change in offlinePendingHomeworkChanges {
+            do {
+                let ref = yearRef.collection("homeworks").document(change.id)
+                switch change.action {
+                case .add:
+                    guard let subjectName = change.subjectName,
+                          let title = change.title
+                    else {
+                        remainingHomeworkChanges.append(change)
+                        continue
+                    }
+                    var payload: [String: Any] = [
+                        "subjectName": subjectName,
+                        "title": title,
+                        "isCompleted": change.isCompleted ?? false,
+                        "createdAt": change.createdAt ?? change.updatedAt
+                    ]
+                    if let dueDate = change.dueDate { payload["dueDate"] = dueDate }
+                    if let reminderAt = change.reminderAt { payload["reminderAt"] = reminderAt }
+                    try await ref.setData(payload, merge: true)
+                case .update:
+                    var payload: [String: Any] = [:]
+                    if let subjectName = change.subjectName { payload["subjectName"] = subjectName }
+                    if let title = change.title { payload["title"] = title }
+                    if let isCompleted = change.isCompleted { payload["isCompleted"] = isCompleted }
+                    if let dueDate = change.dueDate {
+                        payload["dueDate"] = dueDate
+                    } else if change.dueDate == nil {
+                        payload["dueDate"] = NSNull()
+                    }
+                    if let reminderAt = change.reminderAt {
+                        payload["reminderAt"] = reminderAt
+                    } else if change.reminderAt == nil {
+                        payload["reminderAt"] = NSNull()
+                    }
+                    if !payload.isEmpty {
+                        try await ref.updateData(payload)
+                    }
+                case .delete:
+                    try await ref.delete()
+                }
+            } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
+                remainingHomeworkChanges.append(change)
+            }
+        }
+        offlinePendingHomeworkChanges = remainingHomeworkChanges
+
+        var remainingSharedExamUserChanges: [PendingSharedExamUserChange] = []
+        for change in offlinePendingSharedExamUserChanges {
+            do {
+                let gid = change.groupId
+                let key = sharedUserKeyForExamId(change.examId, groupId: gid)
+                switch change.action {
+                case .reminder:
+                    let ref = yearRef.collection("examGroupReminders").document(key)
+                    if let reminderAt = change.reminderAt {
+                        try await ref.setData(["reminderAt": reminderAt])
+                        await cleanupLegacySharedDoc(yearRef: yearRef, collection: "examGroupReminders", legacyId: change.examId, key: key)
+                    } else {
+                        try await ref.delete()
+                        await cleanupLegacySharedDoc(yearRef: yearRef, collection: "examGroupReminders", legacyId: change.examId, key: key)
+                    }
+                case .note:
+                    let ref = yearRef.collection("examGroupNotes").document(key)
+                    if let note = change.note, !note.isEmpty {
+                        try await ref.setData(["note": note])
+                        await cleanupLegacySharedDoc(yearRef: yearRef, collection: "examGroupNotes", legacyId: change.examId, key: key)
+                    } else {
+                        try await ref.delete()
+                        await cleanupLegacySharedDoc(yearRef: yearRef, collection: "examGroupNotes", legacyId: change.examId, key: key)
+                    }
+                case .completed:
+                    let ref = yearRef.collection("examGroupCompleted").document(key)
+                    if change.isCompleted == true {
+                        try await ref.setData(["isCompleted": true])
+                        await cleanupLegacySharedDoc(yearRef: yearRef, collection: "examGroupCompleted", legacyId: change.examId, key: key)
+                    } else {
+                        try await ref.delete()
+                        await cleanupLegacySharedDoc(yearRef: yearRef, collection: "examGroupCompleted", legacyId: change.examId, key: key)
+                    }
+                case .rescheduled:
+                    let ref = yearRef.collection("examGroupRescheduled").document(key)
+                    if let newDate = change.rescheduledDate {
+                        try await ref.setData(["rescheduledDate": newDate])
+                        await cleanupLegacySharedDoc(yearRef: yearRef, collection: "examGroupRescheduled", legacyId: change.examId, key: key)
+                    } else {
+                        try await ref.delete()
+                        await cleanupLegacySharedDoc(yearRef: yearRef, collection: "examGroupRescheduled", legacyId: change.examId, key: key)
+                    }
+                }
+            } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
+                remainingSharedExamUserChanges.append(change)
+            }
+        }
+        offlinePendingSharedExamUserChanges = remainingSharedExamUserChanges
+
+        var remainingSharedHomeworkUserChanges: [PendingSharedHomeworkUserChange] = []
+        for change in offlinePendingSharedHomeworkUserChanges {
+            do {
+                let gid = change.groupId
+                let key = sharedUserKeyForHomeworkId(change.homeworkId, groupId: gid)
+                switch change.action {
+                case .reminder:
+                    let ref = yearRef.collection("homeworkGroupReminders").document(key)
+                    if let reminderAt = change.reminderAt {
+                        try await ref.setData(["reminderAt": reminderAt])
+                        await cleanupLegacySharedDoc(yearRef: yearRef, collection: "homeworkGroupReminders", legacyId: change.homeworkId, key: key)
+                    } else {
+                        try await ref.delete()
+                        await cleanupLegacySharedDoc(yearRef: yearRef, collection: "homeworkGroupReminders", legacyId: change.homeworkId, key: key)
+                    }
+                case .note:
+                    let ref = yearRef.collection("homeworkGroupNotes").document(key)
+                    if let note = change.note, !note.isEmpty {
+                        try await ref.setData(["note": note])
+                        await cleanupLegacySharedDoc(yearRef: yearRef, collection: "homeworkGroupNotes", legacyId: change.homeworkId, key: key)
+                    } else {
+                        try await ref.delete()
+                        await cleanupLegacySharedDoc(yearRef: yearRef, collection: "homeworkGroupNotes", legacyId: change.homeworkId, key: key)
+                    }
+                case .completed:
+                    let ref = yearRef.collection("homeworkGroupCompleted").document(key)
+                    if change.isCompleted == true {
+                        try await ref.setData(["isCompleted": true])
+                        await cleanupLegacySharedDoc(yearRef: yearRef, collection: "homeworkGroupCompleted", legacyId: change.homeworkId, key: key)
+                    } else {
+                        try await ref.delete()
+                        await cleanupLegacySharedDoc(yearRef: yearRef, collection: "homeworkGroupCompleted", legacyId: change.homeworkId, key: key)
+                    }
+                case .rescheduled:
+                    break
+                }
+            } catch {
+                ErrorLoggingService.logErrorIfEnabled(error)
+                remainingSharedHomeworkUserChanges.append(change)
+            }
+        }
+        offlinePendingSharedHomeworkUserChanges = remainingSharedHomeworkUserChanges
 
         persistOfflineSnapshotIfPossible()
     }
@@ -5292,35 +5917,65 @@ final class GradesStore: ObservableObject {
     }
     
     func joinClass(with rawCode: String) async throws {
+        _ = try await joinClass(with: rawCode, targetSchoolYearId: nil, updateLocalState: true)
+    }
+
+    func joinClass(
+        with rawCode: String,
+        targetSchoolYearId: String?,
+        updateLocalState: Bool
+    ) async throws -> (id: String, name: String) {
         // Legacy simple join without branch selection
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = Auth.auth().currentUser?.uid else { return ("", "") }
         let code = normalizedExamGroupCode(rawCode)
-        guard !code.isEmpty else { return }
+        guard !code.isEmpty else { return ("", "") }
         
         let classRef = db.collection("classes").document(code)
         let doc = try await classRef.getDocument()
         guard doc.exists else {
              throw NSError(domain: "GradesStore", code: -3, userInfo: [NSLocalizedDescriptionKey: "Diese Klasse existiert nicht."])
         }
+        let name = doc.data()?["name"] as? String ?? "Unbenannte Klasse"
         
         try await classRef.collection("members").document(uid).setData([
             "joinedAt": Date()
         ])
         
-        let yearRef = try await requireYearRef(uid: uid, gateOnOnboarding: false)
+        let trimmedTarget = targetSchoolYearId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let yearRef = trimmedTarget?.isEmpty == false
+            ? schoolYearRef(uid: uid, id: trimmedTarget!)
+            : try await requireYearRef(uid: uid, gateOnOnboarding: false)
         try await yearRef.setData([
              "classIds": FieldValue.arrayUnion([code])
          ], merge: true)
         
-        await MainActor.run {
-             if !classIds.contains(code) {
-                 classIds.append(code)
-                 classNames[code] = doc.data()?["name"] as? String ?? "Unbenannte Klasse"
-             }
-         }
+        if updateLocalState {
+            await MainActor.run {
+                if !classIds.contains(code) {
+                    classIds.append(code)
+                }
+                classNames[code] = name
+            }
+        }
+        
+        return (code, name)
     }
     
     func joinClassWithBranch(classId: String, selectedCourses: [Course]) async throws {
+        try await joinClassWithBranch(
+            classId: classId,
+            selectedCourses: selectedCourses,
+            targetSchoolYearId: nil,
+            updateLocalState: true
+        )
+    }
+
+    func joinClassWithBranch(
+        classId: String,
+        selectedCourses: [Course],
+        targetSchoolYearId: String?,
+        updateLocalState: Bool
+    ) async throws {
          guard let uid = Auth.auth().currentUser?.uid else { return }
          
          let batch = db.batch()
@@ -5332,7 +5987,10 @@ final class GradesStore: ObservableObject {
          
          // 2. Update User Profile with Class Assignment
          // We store classIds in schoolYear usually, but subscriptions are top-level for now per logic.
-         let yearRef = try await requireYearRef(uid: uid, gateOnOnboarding: false)
+         let trimmedTarget = targetSchoolYearId?.trimmingCharacters(in: .whitespacesAndNewlines)
+         let yearRef = trimmedTarget?.isEmpty == false
+            ? schoolYearRef(uid: uid, id: trimmedTarget!)
+            : try await requireYearRef(uid: uid, gateOnOnboarding: false)
          batch.setData(["classIds": FieldValue.arrayUnion([classId])], forDocument: yearRef, merge: true)
          
          // 2. Update School Year with Class Context
@@ -5350,20 +6008,22 @@ final class GradesStore: ObservableObject {
          try await batch.commit()
          
          // Local update to avoid stale UI while listeners settle
-         await MainActor.run {
-             if !classIds.contains(classId) {
-                 classIds.append(classId)
+         if updateLocalState {
+             await MainActor.run {
+                 if !classIds.contains(classId) {
+                     classIds.append(classId)
+                 }
+                 activeClassId = classId
+                 if !courseIds.isEmpty {
+                     let merged = Array(Set(subscribedCourseIds + courseIds)).sorted()
+                     subscribedCourseIds = merged
+                 }
              }
-             activeClassId = classId
-             if !courseIds.isEmpty {
-                 let merged = Array(Set(subscribedCourseIds + courseIds)).sorted()
-                 subscribedCourseIds = merged
+             Task { [weak self] in self?.startCoursesListener() }
+             Task { [weak self] in
+                 guard let self else { return }
+                 await self.fetchClassDetails(classId: classId)
              }
-         }
-         Task { [weak self] in self?.startCoursesListener() }
-         Task { [weak self] in
-             guard let self else { return }
-             await self.fetchClassDetails(classId: classId)
          }
     }
     
@@ -5529,10 +6189,18 @@ final class GradesStore: ObservableObject {
     }
     
     func leaveClass(code: String) async {
+        await leaveClass(code: code, targetSchoolYearId: nil, updateLocalState: true)
+    }
+
+    func leaveClass(code: String, targetSchoolYearId: String?, updateLocalState: Bool) async {
          guard let uid = Auth.auth().currentUser?.uid else { return }
          
          // 1. Remove from SchoolYear (Legacy/List tracking)
-         if let yearRef = try? await requireYearRef(uid: uid) {
+         let trimmedTarget = targetSchoolYearId?.trimmingCharacters(in: .whitespacesAndNewlines)
+         let isActiveTarget = trimmedTarget == nil || trimmedTarget == activeSchoolYearId
+         if let yearRef = trimmedTarget?.isEmpty == false
+            ? schoolYearRef(uid: uid, id: trimmedTarget!)
+            : (try? await requireYearRef(uid: uid)) {
              try? await yearRef.updateData([
                  "classIds": FieldValue.arrayRemove([code])
              ])
@@ -5554,27 +6222,34 @@ final class GradesStore: ObservableObject {
          }
          if !courseIdsToRemove.isEmpty {
              let ids = Array(courseIdsToRemove)
-             // Remove from User Profile
-             try? await userRef.updateData([
-                 "subscribedCourseIds": FieldValue.arrayRemove(ids)
-             ])
+             if isActiveTarget {
+                 // Remove from User Profile
+                 try? await userRef.updateData([
+                     "subscribedCourseIds": FieldValue.arrayRemove(ids)
+                 ])
+             }
              
              // Remove from SchoolYear (Active Year)
-             if let yearRef = try? await requireYearRef(uid: uid) {
+             if let yearRef = trimmedTarget?.isEmpty == false
+                ? schoolYearRef(uid: uid, id: trimmedTarget!)
+                : (try? await requireYearRef(uid: uid)) {
                  try? await yearRef.updateData([
                      "subscribedCourseIds": FieldValue.arrayRemove(ids)
                  ])
              }
              
              // Local Cleanup
-             await MainActor.run {
-                 self.subscribedCourseIds.removeAll { ids.contains($0) }
+             if updateLocalState {
+                 await MainActor.run {
+                     self.subscribedCourseIds.removeAll { ids.contains($0) }
+                 }
              }
          }
          
          // Unset activeClassId if it matches
          // Unset activeClassId if it matches (Simulated transaction via optimistic fetch)
-         if let userDoc = try? await userRef.getDocument(),
+         if isActiveTarget,
+            let userDoc = try? await userRef.getDocument(),
             let currentActive = userDoc.data()?["activeClassId"] as? String,
             currentActive == code {
              try? await userRef.updateData([
@@ -5582,10 +6257,12 @@ final class GradesStore: ObservableObject {
              ])
          }
 
-         await MainActor.run {
-             classIds.removeAll { $0 == code }
-             classNames.removeValue(forKey: code)
-             classDetails.removeValue(forKey: code)
+         if updateLocalState {
+             await MainActor.run {
+                 classIds.removeAll { $0 == code }
+                 classNames.removeValue(forKey: code)
+                 classDetails.removeValue(forKey: code)
+             }
          }
     }
 
@@ -7282,6 +7959,7 @@ final class GradesStore: ObservableObject {
     }
 
     func leaveSharedGroup(code: String? = nil) async {
+        if OfflineModeManager.shared.isOfflineModeActive { return }
         guard let uid = Auth.auth().currentUser?.uid else { return }
         guard let yearRef = try? await requireYearRef(uid: uid) else { return }
         let target = code ?? examGroupId ?? homeworkGroupId
@@ -7443,7 +8121,49 @@ final class GradesStore: ObservableObject {
         if ["sport", "musik"].contains(lower) && !isElective {
             throw NSError(domain: "GradesStore", code: -2, userInfo: [NSLocalizedDescriptionKey: "Bitte markiere Sport oder Musik als nicht einbringbar."])
         }
-        guard let uid = Auth.auth().currentUser?.uid else { throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"]) }
+        let offline = OfflineModeManager.shared.isOfflineModeActive
+        let currentUid = Auth.auth().currentUser?.uid
+        if offline || currentUid == nil {
+            if let target = targetSchoolYearId, target != activeSchoolYearId {
+                throw NSError(domain: "GradesStore", code: -3, userInfo: [NSLocalizedDescriptionKey: "Offline können nur Fächer im aktiven Schuljahr angelegt werden."])
+            }
+            let subject = Subject(name: name, type: type, gradingMode: gradingMode, expectedSchulaufgabenPerTerm: expectedSchulaufgabenPerTerm, date: date, isElective: isElective)
+            if !subjects.contains(where: { $0.name == name }) {
+                subjects.append(subject)
+            } else {
+                subjects = subjects.map { $0.name == name ? subject : $0 }
+            }
+            let pending = PendingSubjectChange(
+                id: UUID().uuidString,
+                action: .add,
+                subjectName: name,
+                type: type,
+                date: date,
+                isElective: isElective,
+                gradingModeRaw: gradingMode?.rawValue,
+                expectedSchulaufgabenPerTerm: expectedSchulaufgabenPerTerm,
+                teacher: nil,
+                room: nil,
+                email: nil,
+                alias: nil,
+                order: nil,
+                examSubject: nil,
+                examTypeRaw: nil,
+                droppedHalfYear: nil,
+                clearDroppedHalfYear: false,
+                fixedAverageHalfYear1: nil,
+                clearFixedAverageHalfYear1: false,
+                fixedAverageHalfYear2: nil,
+                clearFixedAverageHalfYear2: false,
+                fixedAverageYearly: nil,
+                clearFixedAverageYearly: false,
+                updatedAt: Date()
+            )
+            enqueueSubjectChange(pending)
+            persistOfflineSnapshotIfPossible()
+            return
+        }
+        guard let uid = currentUid else { throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"]) }
         
         // Decide target year ref
         let yearRef: DocumentReference
@@ -7811,8 +8531,58 @@ final class GradesStore: ObservableObject {
     }
 
     func addExamToFirestore(subjectName: String, subjectKey: String? = nil, title: String, notes: String?, date: Date, hasTime: Bool, weight: Int?, customWeight: Double?, assessmentType: AssessmentType?, reminderAt: Date?, requiresGrade: Bool? = true) async throws {
-        guard let uid = Auth.auth().currentUser?.uid else {
-            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
+        let offline = OfflineModeManager.shared.isOfflineModeActive
+        let uid = Auth.auth().currentUser?.uid ?? ""
+        if offline || uid.isEmpty {
+            let newId = UUID().uuidString
+            let createdAt = Date()
+            let finalSubjectKey = subjectKey ?? slugifySubjectName(subjectName)
+            let exam = Exam(
+                id: newId,
+                groupId: nil,
+                courseId: nil,
+                classId: nil,
+                subjectName: subjectName,
+                subjectKey: finalSubjectKey,
+                title: title,
+                notes: notes,
+                date: date,
+                hasTime: hasTime,
+                weight: weight,
+                customWeight: customWeight,
+                reminderAt: reminderAt,
+                isCompleted: false,
+                createdAt: createdAt,
+                isShared: false,
+                creatorId: uid.isEmpty ? nil : uid,
+                requiresGrade: requiresGrade,
+                assessmentType: assessmentType
+            )
+            if !exams.contains(where: { $0.id == newId }) {
+                exams.append(exam)
+            }
+            let pending = PendingExamChange(
+                id: newId,
+                action: .add,
+                subjectName: subjectName,
+                subjectKey: finalSubjectKey,
+                title: title,
+                notes: notes,
+                date: date,
+                hasTime: hasTime,
+                weight: weight,
+                customWeight: customWeight,
+                reminderAt: reminderAt,
+                isCompleted: false,
+                createdAt: createdAt,
+                requiresGrade: requiresGrade,
+                assessmentType: assessmentType,
+                updatedAt: Date()
+            )
+            enqueueExamChange(pending)
+            rescheduleLocalNotifications()
+            persistOfflineSnapshotIfPossible()
+            return
         }
         let yearRef = try await requireYearRef(uid: uid)
         let now = Date()
@@ -8023,8 +8793,46 @@ final class GradesStore: ObservableObject {
     }
 
     func addHomeworkToFirestore(subjectName: String, title: String, dueDate: Date?, reminderAt: Date?, importedFromShare: Bool = false) async throws {
-        guard let uid = Auth.auth().currentUser?.uid else {
-            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
+        let offline = OfflineModeManager.shared.isOfflineModeActive
+        let uid = Auth.auth().currentUser?.uid ?? ""
+        if offline || uid.isEmpty {
+            let newId = UUID().uuidString
+            let createdAt = Date()
+            let subjectKey = slugifySubjectName(subjectName)
+            let hw = Homework(
+                id: newId,
+                groupId: nil,
+                courseId: nil,
+                subjectName: subjectName,
+                subjectKey: subjectKey,
+                title: title,
+                dueDate: dueDate,
+                reminderAt: reminderAt,
+                isCompleted: false,
+                createdAt: createdAt,
+                isShared: false,
+                creatorId: uid.isEmpty ? nil : uid,
+                isImportedFromShare: importedFromShare
+            )
+            if !homeworks.contains(where: { $0.id == newId }) {
+                homeworks.append(hw)
+            }
+            let pending = PendingHomeworkChange(
+                id: newId,
+                action: .add,
+                subjectName: subjectName,
+                subjectKey: subjectKey,
+                title: title,
+                dueDate: dueDate,
+                reminderAt: reminderAt,
+                isCompleted: false,
+                createdAt: createdAt,
+                updatedAt: Date()
+            )
+            enqueueHomeworkChange(pending)
+            rescheduleLocalNotifications()
+            persistOfflineSnapshotIfPossible()
+            return
         }
         let yearRef = try await requireYearRef(uid: uid)
         let now = Date()
@@ -8273,8 +9081,43 @@ final class GradesStore: ObservableObject {
     }
 
     func updateHomeworkInFirestore(id: String, subjectName: String, title: String, dueDate: Date?, reminderAt: Date?, isCompleted: Bool) async throws {
-        guard let uid = Auth.auth().currentUser?.uid else {
-            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
+        let offline = OfflineModeManager.shared.isOfflineModeActive
+        let uid = Auth.auth().currentUser?.uid ?? ""
+        if offline || uid.isEmpty {
+            if let existing = homeworks.first(where: { $0.id == id }) {
+                let updated = Homework(
+                    id: id,
+                    groupId: existing.groupId,
+                    courseId: existing.courseId,
+                    subjectName: subjectName,
+                    subjectKey: existing.subjectKey ?? slugifySubjectName(subjectName),
+                    title: title,
+                    dueDate: dueDate,
+                    reminderAt: reminderAt,
+                    isCompleted: isCompleted,
+                    createdAt: existing.createdAt,
+                    isShared: existing.isShared,
+                    creatorId: existing.creatorId,
+                    isImportedFromShare: existing.isImportedFromShare
+                )
+                homeworks = homeworks.map { $0.id == id ? updated : $0 }
+            }
+            let pending = PendingHomeworkChange(
+                id: id,
+                action: .update,
+                subjectName: subjectName,
+                subjectKey: nil,
+                title: title,
+                dueDate: dueDate,
+                reminderAt: reminderAt,
+                isCompleted: isCompleted,
+                createdAt: nil,
+                updatedAt: Date()
+            )
+            enqueueHomeworkChange(pending)
+            rescheduleLocalNotifications()
+            persistOfflineSnapshotIfPossible()
+            return
         }
         let yearRef = try await requireYearRef(uid: uid)
         let ref = yearRef
@@ -8314,9 +9157,79 @@ final class GradesStore: ObservableObject {
         try await ref.updateData(payload)
     }
 
+    func updateSharedHomeworkInCourse(courseId: String, id: String, subjectName: String, title: String, dueDate: Date?) async throws {
+        let classId = courses.first(where: { $0.id == courseId })?.classId
+        let ref: DocumentReference
+        if let classId {
+            ref = db.collection("classes").document(classId).collection("courses").document(courseId).collection("homeworks").document(id)
+        } else if isTopLevelCoursePath(courseId: courseId) {
+            ref = db.collection("courses").document(courseId).collection("homeworks").document(id)
+        } else {
+            throw NSError(domain: "GradesStore", code: -3, userInfo: [NSLocalizedDescriptionKey: "Kurs konnte nicht zugeordnet werden (Class ID fehlt)"])
+        }
+        var payload: [String: Any] = [
+            "subjectName": subjectName,
+            "subjectKey": slugifySubjectName(subjectName),
+            "title": title
+        ]
+        if let dueDate {
+            payload["dueDate"] = dueDate
+        } else {
+            payload["dueDate"] = NSNull()
+        }
+        try await ref.updateData(payload)
+    }
+
     func updateExamInFirestore(id: String, subjectName: String, subjectKey: String? = nil, title: String, notes: String?, date: Date, hasTime: Bool, weight: Int?, customWeight: Double?, assessmentType: AssessmentType?, reminderAt: Date?, isCompleted: Bool, requiresGrade: Bool? = nil) async throws {
-        guard let uid = Auth.auth().currentUser?.uid else {
-            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
+        let offline = OfflineModeManager.shared.isOfflineModeActive
+        let uid = Auth.auth().currentUser?.uid ?? ""
+        if offline || uid.isEmpty {
+            if let existing = exams.first(where: { $0.id == id }) {
+                let updated = Exam(
+                    id: id,
+                    groupId: existing.groupId,
+                    courseId: existing.courseId,
+                    classId: existing.classId,
+                    subjectName: subjectName,
+                    subjectKey: subjectKey ?? existing.subjectKey,
+                    title: title,
+                    notes: notes,
+                    date: date,
+                    hasTime: hasTime,
+                    weight: weight,
+                    customWeight: customWeight,
+                    reminderAt: reminderAt,
+                    isCompleted: isCompleted,
+                    createdAt: existing.createdAt,
+                    isShared: existing.isShared,
+                    creatorId: existing.creatorId,
+                    requiresGrade: requiresGrade ?? existing.requiresGrade,
+                    assessmentType: assessmentType ?? existing.assessmentType
+                )
+                exams = exams.map { $0.id == id ? updated : $0 }
+            }
+            let pending = PendingExamChange(
+                id: id,
+                action: .update,
+                subjectName: subjectName,
+                subjectKey: subjectKey,
+                title: title,
+                notes: notes,
+                date: date,
+                hasTime: hasTime,
+                weight: weight,
+                customWeight: customWeight,
+                reminderAt: reminderAt,
+                isCompleted: isCompleted,
+                createdAt: nil,
+                requiresGrade: requiresGrade,
+                assessmentType: assessmentType,
+                updatedAt: Date()
+            )
+            enqueueExamChange(pending)
+            rescheduleLocalNotifications()
+            persistOfflineSnapshotIfPossible()
+            return
         }
         let yearRef = try await requireYearRef(uid: uid)
         let ref = yearRef
@@ -8551,12 +9464,34 @@ final class GradesStore: ObservableObject {
     }
 
     func setUserReminderForSharedExam(examId: String, reminderAt: Date?, groupId: String? = nil) async throws {
-        guard let uid = Auth.auth().currentUser?.uid else {
-            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
-        }
-        let yearRef = try await requireYearRef(uid: uid)
+        let offline = OfflineModeManager.shared.isOfflineModeActive
+        let uid = Auth.auth().currentUser?.uid ?? ""
         let gid = groupId ?? sharedExams.first(where: { $0.id == examId && $0.groupId == groupId })?.groupId
         let key = sharedUserKeyForExamId(examId, groupId: gid)
+        if offline || uid.isEmpty {
+            if let reminderAt {
+                sharedExamUserReminders[key] = reminderAt
+            } else {
+                sharedExamUserReminders.removeValue(forKey: key)
+            }
+            applySharedExamUserReminders()
+            let pending = PendingSharedExamUserChange(
+                id: UUID().uuidString,
+                action: .reminder,
+                examId: examId,
+                groupId: gid,
+                reminderAt: reminderAt,
+                note: nil,
+                isCompleted: nil,
+                rescheduledDate: nil,
+                updatedAt: Date()
+            )
+            enqueueSharedExamUserChange(pending)
+            rescheduleLocalNotifications()
+            persistOfflineSnapshotIfPossible()
+            return
+        }
+        let yearRef = try await requireYearRef(uid: uid)
         let ref = yearRef
             .collection("examGroupReminders")
             .document(key)
@@ -8573,12 +9508,36 @@ final class GradesStore: ObservableObject {
     }
     
     func setUserNoteForSharedExam(examId: String, note: String?, groupId: String? = nil) async {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
-        guard let yearRef = try? await requireYearRef(uid: uid) else { return }
+        let offline = OfflineModeManager.shared.isOfflineModeActive
+        let uid = Auth.auth().currentUser?.uid ?? ""
         let gid = groupId ?? sharedExams.first(where: { $0.id == examId && $0.groupId == groupId })?.groupId
         let key = sharedUserKeyForExamId(examId, groupId: gid)
-        let ref = yearRef.collection("examGroupNotes").document(key)
         let trimmed = note?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if offline || uid.isEmpty {
+            if let text = trimmed, !text.isEmpty {
+                sharedExamUserNotes[key] = text
+                if key != examId { sharedExamUserNotes.removeValue(forKey: examId) }
+            } else {
+                sharedExamUserNotes.removeValue(forKey: key)
+                if key != examId { sharedExamUserNotes.removeValue(forKey: examId) }
+            }
+            let pending = PendingSharedExamUserChange(
+                id: UUID().uuidString,
+                action: .note,
+                examId: examId,
+                groupId: gid,
+                reminderAt: nil,
+                note: trimmed,
+                isCompleted: nil,
+                rescheduledDate: nil,
+                updatedAt: Date()
+            )
+            enqueueSharedExamUserChange(pending)
+            persistOfflineSnapshotIfPossible()
+            return
+        }
+        guard let yearRef = try? await requireYearRef(uid: uid) else { return }
+        let ref = yearRef.collection("examGroupNotes").document(key)
         do {
             if let text = trimmed, !text.isEmpty {
                 try await ref.setData(["note": text])
@@ -8598,10 +9557,36 @@ final class GradesStore: ObservableObject {
     }
     
     func setUserCompletedForSharedExam(examId: String, completed: Bool, groupId: String? = nil) async {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
-        guard let yearRef = try? await requireYearRef(uid: uid) else { return }
+        let offline = OfflineModeManager.shared.isOfflineModeActive
+        let uid = Auth.auth().currentUser?.uid ?? ""
         let gid = groupId ?? sharedExams.first(where: { $0.id == examId && $0.groupId == groupId })?.groupId
         let key = sharedUserKeyForExamId(examId, groupId: gid)
+        if offline || uid.isEmpty {
+            if completed {
+                sharedExamUserCompleted.insert(key)
+                if key != examId { sharedExamUserCompleted.remove(examId) }
+            } else {
+                sharedExamUserCompleted.remove(key)
+                if key != examId { sharedExamUserCompleted.remove(examId) }
+            }
+            applySharedExamUserCompletion()
+            let pending = PendingSharedExamUserChange(
+                id: UUID().uuidString,
+                action: .completed,
+                examId: examId,
+                groupId: gid,
+                reminderAt: nil,
+                note: nil,
+                isCompleted: completed,
+                rescheduledDate: nil,
+                updatedAt: Date()
+            )
+            enqueueSharedExamUserChange(pending)
+            rescheduleLocalNotifications()
+            persistOfflineSnapshotIfPossible()
+            return
+        }
+        guard let yearRef = try? await requireYearRef(uid: uid) else { return }
         let ref = yearRef.collection("examGroupCompleted").document(key)
         do {
             if completed {
@@ -8625,10 +9610,36 @@ final class GradesStore: ObservableObject {
     }
     
     func setUserRescheduledDateForSharedExam(examId: String, rescheduledDate: Date?, groupId: String? = nil) async {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
-        guard let yearRef = try? await requireYearRef(uid: uid) else { return }
+        let offline = OfflineModeManager.shared.isOfflineModeActive
+        let uid = Auth.auth().currentUser?.uid ?? ""
         let gid = groupId ?? sharedExams.first(where: { $0.id == examId && $0.groupId == groupId })?.groupId
         let key = sharedUserKeyForExamId(examId, groupId: gid)
+        if offline || uid.isEmpty {
+            if let newDate = rescheduledDate {
+                sharedExamUserRescheduled[key] = newDate
+                if key != examId { sharedExamUserRescheduled.removeValue(forKey: examId) }
+            } else {
+                sharedExamUserRescheduled.removeValue(forKey: key)
+                if key != examId { sharedExamUserRescheduled.removeValue(forKey: examId) }
+            }
+            applySharedExamUserRescheduledDates()
+            let pending = PendingSharedExamUserChange(
+                id: UUID().uuidString,
+                action: .rescheduled,
+                examId: examId,
+                groupId: gid,
+                reminderAt: nil,
+                note: nil,
+                isCompleted: nil,
+                rescheduledDate: rescheduledDate,
+                updatedAt: Date()
+            )
+            enqueueSharedExamUserChange(pending)
+            rescheduleLocalNotifications()
+            persistOfflineSnapshotIfPossible()
+            return
+        }
+        guard let yearRef = try? await requireYearRef(uid: uid) else { return }
         let ref = yearRef.collection("examGroupRescheduled").document(key)
         do {
             if let newDate = rescheduledDate {
@@ -8651,12 +9662,33 @@ final class GradesStore: ObservableObject {
     }
     
     func setUserReminderForSharedHomework(homeworkId: String, reminderAt: Date?, groupId: String? = nil) async throws {
-        guard let uid = Auth.auth().currentUser?.uid else {
-            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"])
-        }
-        let yearRef = try await requireYearRef(uid: uid)
+        let offline = OfflineModeManager.shared.isOfflineModeActive
+        let uid = Auth.auth().currentUser?.uid ?? ""
         let gid = groupId ?? sharedHomeworks.first(where: { $0.id == homeworkId && $0.groupId == groupId })?.groupId
         let key = sharedUserKeyForHomeworkId(homeworkId, groupId: gid)
+        if offline || uid.isEmpty {
+            if let reminderAt {
+                sharedHomeworkUserReminders[key] = reminderAt
+            } else {
+                sharedHomeworkUserReminders.removeValue(forKey: key)
+            }
+            applySharedHomeworkUserReminders()
+            let pending = PendingSharedHomeworkUserChange(
+                id: UUID().uuidString,
+                action: .reminder,
+                homeworkId: homeworkId,
+                groupId: gid,
+                reminderAt: reminderAt,
+                note: nil,
+                isCompleted: nil,
+                updatedAt: Date()
+            )
+            enqueueSharedHomeworkUserChange(pending)
+            rescheduleLocalNotifications()
+            persistOfflineSnapshotIfPossible()
+            return
+        }
+        let yearRef = try await requireYearRef(uid: uid)
         let ref = yearRef.collection("homeworkGroupReminders").document(key)
         if let reminderAt {
             try await ref.setData(["reminderAt": reminderAt])
@@ -8668,7 +9700,44 @@ final class GradesStore: ObservableObject {
     }
 
     func setHomeworkCompleted(id: String, completed: Bool) async {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        let offline = OfflineModeManager.shared.isOfflineModeActive
+        let uid = Auth.auth().currentUser?.uid ?? ""
+        if offline || uid.isEmpty {
+            if let existing = homeworks.first(where: { $0.id == id }) {
+                let updated = Homework(
+                    id: id,
+                    groupId: existing.groupId,
+                    courseId: existing.courseId,
+                    subjectName: existing.subjectName,
+                    subjectKey: existing.subjectKey,
+                    title: existing.title,
+                    dueDate: existing.dueDate,
+                    reminderAt: existing.reminderAt,
+                    isCompleted: completed,
+                    createdAt: existing.createdAt,
+                    isShared: existing.isShared,
+                    creatorId: existing.creatorId,
+                    isImportedFromShare: existing.isImportedFromShare
+                )
+                homeworks = homeworks.map { $0.id == id ? updated : $0 }
+                let pending = PendingHomeworkChange(
+                    id: id,
+                    action: .update,
+                    subjectName: existing.subjectName,
+                    subjectKey: existing.subjectKey,
+                    title: existing.title,
+                    dueDate: existing.dueDate,
+                    reminderAt: existing.reminderAt,
+                    isCompleted: completed,
+                    createdAt: nil,
+                    updatedAt: Date()
+                )
+                enqueueHomeworkChange(pending)
+                rescheduleLocalNotifications()
+                persistOfflineSnapshotIfPossible()
+            }
+            return
+        }
         guard let yearRef = try? await requireYearRef(uid: uid) else { return }
         let docRef = yearRef
             .collection("homeworks")
@@ -8684,12 +9753,35 @@ final class GradesStore: ObservableObject {
     }
 
     func setUserNoteForSharedHomework(homeworkId: String, note: String?, groupId: String? = nil) async {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
-        guard let yearRef = try? await requireYearRef(uid: uid) else { return }
+        let offline = OfflineModeManager.shared.isOfflineModeActive
+        let uid = Auth.auth().currentUser?.uid ?? ""
         let gid = groupId ?? sharedHomeworks.first(where: { $0.id == homeworkId && $0.groupId == groupId })?.groupId
         let key = sharedUserKeyForHomeworkId(homeworkId, groupId: gid)
-        let ref = yearRef.collection("homeworkGroupNotes").document(key)
         let trimmed = note?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if offline || uid.isEmpty {
+            if let text = trimmed, !text.isEmpty {
+                sharedHomeworkUserNotes[key] = text
+                if key != homeworkId { sharedHomeworkUserNotes.removeValue(forKey: homeworkId) }
+            } else {
+                sharedHomeworkUserNotes.removeValue(forKey: key)
+                if key != homeworkId { sharedHomeworkUserNotes.removeValue(forKey: homeworkId) }
+            }
+            let pending = PendingSharedHomeworkUserChange(
+                id: UUID().uuidString,
+                action: .note,
+                homeworkId: homeworkId,
+                groupId: gid,
+                reminderAt: nil,
+                note: trimmed,
+                isCompleted: nil,
+                updatedAt: Date()
+            )
+            enqueueSharedHomeworkUserChange(pending)
+            persistOfflineSnapshotIfPossible()
+            return
+        }
+        guard let yearRef = try? await requireYearRef(uid: uid) else { return }
+        let ref = yearRef.collection("homeworkGroupNotes").document(key)
         do {
             if let text = trimmed, !text.isEmpty {
                 try await ref.setData(["note": text])
@@ -8709,10 +9801,35 @@ final class GradesStore: ObservableObject {
     }
     
     func setUserCompletedForSharedHomework(homeworkId: String, completed: Bool, groupId: String? = nil) async {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
-        guard let yearRef = try? await requireYearRef(uid: uid) else { return }
+        let offline = OfflineModeManager.shared.isOfflineModeActive
+        let uid = Auth.auth().currentUser?.uid ?? ""
         let gid = groupId ?? sharedHomeworks.first(where: { $0.id == homeworkId && $0.groupId == groupId })?.groupId
         let key = sharedUserKeyForHomeworkId(homeworkId, groupId: gid)
+        if offline || uid.isEmpty {
+            if completed {
+                sharedHomeworkUserCompleted.insert(key)
+                if key != homeworkId { sharedHomeworkUserCompleted.remove(homeworkId) }
+            } else {
+                sharedHomeworkUserCompleted.remove(key)
+                if key != homeworkId { sharedHomeworkUserCompleted.remove(homeworkId) }
+            }
+            applySharedHomeworkUserCompletion()
+            let pending = PendingSharedHomeworkUserChange(
+                id: UUID().uuidString,
+                action: .completed,
+                homeworkId: homeworkId,
+                groupId: gid,
+                reminderAt: nil,
+                note: nil,
+                isCompleted: completed,
+                updatedAt: Date()
+            )
+            enqueueSharedHomeworkUserChange(pending)
+            rescheduleLocalNotifications()
+            persistOfflineSnapshotIfPossible()
+            return
+        }
+        guard let yearRef = try? await requireYearRef(uid: uid) else { return }
         let ref = yearRef.collection("homeworkGroupCompleted").document(key)
         do {
             if completed {
@@ -8736,7 +9853,56 @@ final class GradesStore: ObservableObject {
     }
 
     func setExamCompleted(id: String, completed: Bool) async {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        let offline = OfflineModeManager.shared.isOfflineModeActive
+        let uid = Auth.auth().currentUser?.uid ?? ""
+        if offline || uid.isEmpty {
+            if let existing = exams.first(where: { $0.id == id }) {
+                let updated = Exam(
+                    id: id,
+                    groupId: existing.groupId,
+                    courseId: existing.courseId,
+                    classId: existing.classId,
+                    subjectName: existing.subjectName,
+                    subjectKey: existing.subjectKey,
+                    title: existing.title,
+                    notes: existing.notes,
+                    date: existing.date,
+                    hasTime: existing.hasTime,
+                    weight: existing.weight,
+                    customWeight: existing.customWeight,
+                    reminderAt: existing.reminderAt,
+                    isCompleted: completed,
+                    createdAt: existing.createdAt,
+                    isShared: existing.isShared,
+                    creatorId: existing.creatorId,
+                    requiresGrade: existing.requiresGrade,
+                    assessmentType: existing.assessmentType
+                )
+                exams = exams.map { $0.id == id ? updated : $0 }
+                let pending = PendingExamChange(
+                    id: id,
+                    action: .update,
+                    subjectName: existing.subjectName,
+                    subjectKey: existing.subjectKey,
+                    title: existing.title,
+                    notes: existing.notes,
+                    date: existing.date,
+                    hasTime: existing.hasTime,
+                    weight: existing.weight,
+                    customWeight: existing.customWeight,
+                    reminderAt: existing.reminderAt,
+                    isCompleted: completed,
+                    createdAt: nil,
+                    requiresGrade: existing.requiresGrade,
+                    assessmentType: existing.assessmentType,
+                    updatedAt: Date()
+                )
+                enqueueExamChange(pending)
+                rescheduleLocalNotifications()
+                persistOfflineSnapshotIfPossible()
+            }
+            return
+        }
         guard let yearRef = try? await requireYearRef(uid: uid) else { return }
         let docRef = yearRef
             .collection("exams")
@@ -8783,6 +9949,7 @@ final class GradesStore: ObservableObject {
         presentationGrade: Double? = nil,
         paperGrade: Double? = nil,
         presentationWeight: Double? = nil,
+        fixedGrade: Double? = nil,
         using key: SymmetricKey
     ) async throws {
         let offline = OfflineModeManager.shared.isOfflineModeActive
@@ -8807,7 +9974,8 @@ final class GradesStore: ObservableObject {
                 note: note,
                 presentationGrade: presentationGrade,
                 paperGrade: paperGrade,
-                presentationWeight: presentationWeight
+                presentationWeight: presentationWeight,
+                fixedGrade: fixedGrade
             )
             persistOfflineSnapshotIfPossible()
             return
@@ -8840,6 +10008,12 @@ final class GradesStore: ObservableObject {
         } else {
             payload["paperGrade"] = FieldValue.delete()
         }
+        
+        if let fixed = fixedGrade {
+            payload["fixedGrade"] = try CryptoService.encryptString(String(fixed), key: key)
+        } else {
+            payload["fixedGrade"] = FieldValue.delete()
+        }
 
         let docRef = yearRef.collection("fachreferat").document("current")
         try await docRef.setData(payload, merge: true)
@@ -8853,7 +10027,8 @@ final class GradesStore: ObservableObject {
             note: note,
             presentationGrade: presentationGrade,
             paperGrade: paperGrade,
-            presentationWeight: presentationWeight
+            presentationWeight: presentationWeight,
+            fixedGrade: fixedGrade
         )
         persistOfflineSnapshotIfPossible()
     }
@@ -9061,7 +10236,7 @@ final class GradesStore: ObservableObject {
         persistOfflineSnapshotIfPossible()
     }
 
-    private func persistPracticalGrades(_ grades: [PracticalGradeEntry], using key: SymmetricKey, docRef: DocumentReference? = nil) async throws {
+    private func persistPracticalGrades(_ grades: [PracticalGradeEntry], fixedAverage: Double? = nil, using key: SymmetricKey, docRef: DocumentReference? = nil) async throws {
         guard let uid = Auth.auth().currentUser?.uid else { throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"]) }
         let yearRef = try await requireYearRef(uid: uid)
         let targetDoc = docRef ?? yearRef.collection("practicalPerformance").document("current")
@@ -9085,6 +10260,13 @@ final class GradesStore: ObservableObject {
         var payload: [String: Any] = [
             "grades": encodedGrades
         ]
+        
+        // Fixed Average
+        if let fixedAvg = fixedAverage {
+            payload["fixedAverage"] = try CryptoService.encryptString(String(fixedAvg), key: key)
+        } else {
+            payload["fixedAverage"] = FieldValue.delete()
+        }
 
         if let first = sorted.first {
             payload["gradeOne"] = try CryptoService.encryptString(String(first.grade), key: key)
@@ -9108,7 +10290,33 @@ final class GradesStore: ObservableObject {
         }
 
         try await targetDoc.setData(payload, merge: true)
-        practicalPerformance = PracticalPerformance(id: "current", grades: sorted)
+        practicalPerformance = PracticalPerformance(id: "current", grades: sorted, fixedAverage: fixedAverage)
+    }
+    
+    // MARK: - Fixed Average/Grade Updates
+    
+    /// Set fixed average for Praktikum (FPA)
+    func setPracticalFixedAverage(_ fixedAverage: Double?, using key: SymmetricKey) async throws {
+        let grades = practicalPerformance?.grades ?? []
+        try await persistPracticalGrades(grades, fixedAverage: fixedAverage, using: key)
+    }
+    
+    /// Set fixed grade for Fachreferat
+    func setFachreferatFixedGrade(_ fixedGrade: Double?, using key: SymmetricKey) async throws {
+        guard let fr = fachreferat else {
+            throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Fachreferat vorhanden"])
+        }
+        try await setFachreferatToFirestore(
+            subjectName: fr.subjectName,
+            grade: fr.grade,
+            date: fr.date,
+            note: fr.note,
+            presentationGrade: fr.presentationGrade,
+            paperGrade: fr.paperGrade,
+            presentationWeight: fr.presentationWeight,
+            fixedGrade: fixedGrade,
+            using: key
+        )
     }
 
     private func sortedPracticalGrades(_ grades: [PracticalGradeEntry]) -> [PracticalGradeEntry] {
@@ -9201,7 +10409,8 @@ final class GradesStore: ObservableObject {
                 )
             }
             if !entries.isEmpty {
-                return PracticalPerformance(id: "current", grades: sortedPracticalGrades(entries))
+                let fixedAvg = (data["fixedAverage"] as? String).flatMap { try? CryptoService.decryptString($0, key: key) }.flatMap { Double($0) }
+                return PracticalPerformance(id: "current", grades: sortedPracticalGrades(entries), fixedAverage: fixedAvg)
             }
         }
 
@@ -9243,7 +10452,8 @@ final class GradesStore: ObservableObject {
             }
 
             if !entries.isEmpty {
-                return PracticalPerformance(id: "current", grades: sortedPracticalGrades(entries))
+                let fixedAvg = (data["fixedAverage"] as? String).flatMap { try? CryptoService.decryptString($0, key: key) }.flatMap { Double($0) }
+                return PracticalPerformance(id: "current", grades: sortedPracticalGrades(entries), fixedAverage: fixedAvg)
             }
         } catch {
             ErrorLoggingService.logErrorIfEnabled(error)
@@ -9267,7 +10477,70 @@ final class GradesStore: ObservableObject {
         assessmentType: AssessmentType?,
         using key: SymmetricKey
     ) async throws {
-        guard let uid = Auth.auth().currentUser?.uid else { throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"]) }
+        let offline = OfflineModeManager.shared.isOfflineModeActive
+        let uid = Auth.auth().currentUser?.uid ?? ""
+        if offline || uid.isEmpty {
+            let previousLinkedExamId = gradesBySubject[subjectId]?.first(where: { $0.id == gradeId })?.linkedExamId
+
+            var list = gradesBySubject[subjectId] ?? []
+            if let idx = list.firstIndex(where: { $0.id == gradeId }) {
+                list[idx] = GradeWithId(
+                    id: gradeId,
+                    grade: grade,
+                    weight: weight,
+                    date: date,
+                    note: note,
+                    halfYear: halfYear,
+                    linkedExamId: linkedExamId,
+                    assessmentType: assessmentType ?? list[idx].assessmentType
+                )
+                gradesBySubject[subjectId] = list
+            }
+
+            if let pendingIdx = offlinePendingGrades.firstIndex(where: { $0.id == gradeId }) {
+                offlinePendingGrades[pendingIdx] = PendingGrade(
+                    id: gradeId,
+                    subjectId: subjectId,
+                    grade: grade,
+                    weight: weight,
+                    date: date,
+                    note: note,
+                    halfYear: halfYear,
+                    linkedExamId: linkedExamId,
+                    createdAt: offlinePendingGrades[pendingIdx].createdAt,
+                    assessmentType: assessmentType
+                )
+            } else {
+                let change = PendingGradeChange(
+                    id: gradeId,
+                    subjectId: subjectId,
+                    action: .update,
+                    grade: grade,
+                    weight: weight,
+                    date: date,
+                    note: note,
+                    halfYear: halfYear,
+                    linkedExamId: linkedExamId,
+                    assessmentType: assessmentType,
+                    updatedAt: Date()
+                )
+                enqueueGradeChange(change)
+            }
+
+            if previousLinkedExamId != linkedExamId, let previousLinkedExamId {
+                await resetExamAfterLinkedGradeDeletion(examId: previousLinkedExamId)
+            }
+            if let linkedExamId {
+                if let sharedExam = sharedExams.first(where: { $0.id == linkedExamId }) {
+                    await setUserCompletedForSharedExam(examId: linkedExamId, completed: true, groupId: sharedExam.groupId)
+                } else {
+                    await setExamCompleted(id: linkedExamId, completed: true)
+                }
+            }
+
+            persistOfflineSnapshotIfPossible()
+            return
+        }
 
         let yearRef = try await requireYearRef(uid: uid)
         let encrypted = try CryptoService.encryptString(String(grade), key: key)
@@ -9321,7 +10594,57 @@ final class GradesStore: ObservableObject {
     }
 
     func updateGradeNoteInFirestore(subjectId: String, gradeId: String, note: String?) async throws {
-        guard let uid = Auth.auth().currentUser?.uid else { throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"]) }
+        let offline = OfflineModeManager.shared.isOfflineModeActive
+        let uid = Auth.auth().currentUser?.uid ?? ""
+        if offline || uid.isEmpty {
+            var list = gradesBySubject[subjectId] ?? []
+            if let idx = list.firstIndex(where: { $0.id == gradeId }) {
+                let g = list[idx]
+                list[idx] = GradeWithId(
+                    id: g.id,
+                    grade: g.grade,
+                    weight: g.weight,
+                    date: g.date,
+                    note: note,
+                    halfYear: g.halfYear,
+                    linkedExamId: g.linkedExamId,
+                    assessmentType: g.assessmentType
+                )
+                gradesBySubject[subjectId] = list
+
+                if let pendingIdx = offlinePendingGrades.firstIndex(where: { $0.id == gradeId }) {
+                    offlinePendingGrades[pendingIdx] = PendingGrade(
+                        id: gradeId,
+                        subjectId: subjectId,
+                        grade: g.grade,
+                        weight: g.weight,
+                        date: g.date,
+                        note: note,
+                        halfYear: g.halfYear,
+                        linkedExamId: g.linkedExamId,
+                        createdAt: offlinePendingGrades[pendingIdx].createdAt,
+                        assessmentType: g.assessmentType
+                    )
+                } else {
+                    let change = PendingGradeChange(
+                        id: gradeId,
+                        subjectId: subjectId,
+                        action: .update,
+                        grade: g.grade,
+                        weight: g.weight,
+                        date: g.date,
+                        note: note,
+                        halfYear: g.halfYear,
+                        linkedExamId: g.linkedExamId,
+                        assessmentType: g.assessmentType,
+                        updatedAt: Date()
+                    )
+                    enqueueGradeChange(change)
+                }
+            }
+            persistOfflineSnapshotIfPossible()
+            return
+        }
 
         let yearRef = try await requireYearRef(uid: uid)
         let gradeDocRef = yearRef.collection("subjects").document(subjectId).collection("grades").document(gradeId)
@@ -9347,11 +10670,44 @@ final class GradesStore: ObservableObject {
     }
 
     func deleteGradeFromFirestore(subjectId: String, gradeId: String) async throws {
-        guard let uid = Auth.auth().currentUser?.uid else { throw NSError(domain: "GradesStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Kein Nutzer"]) }
+        let offline = OfflineModeManager.shared.isOfflineModeActive
+        let uid = Auth.auth().currentUser?.uid ?? ""
+        let linkedExamId = gradesBySubject[subjectId]?.first(where: { $0.id == gradeId })?.linkedExamId
+
+        if offline || uid.isEmpty {
+            if let pendingIdx = offlinePendingGrades.firstIndex(where: { $0.id == gradeId }) {
+                offlinePendingGrades.remove(at: pendingIdx)
+            } else {
+                let change = PendingGradeChange(
+                    id: gradeId,
+                    subjectId: subjectId,
+                    action: .delete,
+                    grade: nil,
+                    weight: nil,
+                    date: nil,
+                    note: nil,
+                    halfYear: nil,
+                    linkedExamId: linkedExamId,
+                    assessmentType: nil,
+                    updatedAt: Date()
+                )
+                enqueueGradeChange(change)
+            }
+            offlinePendingGradeChanges.removeAll { $0.id == gradeId && $0.subjectId == subjectId && $0.action == .update }
+
+            var list = gradesBySubject[subjectId] ?? []
+            list.removeAll { $0.id == gradeId }
+            gradesBySubject[subjectId] = list
+
+            if let linkedExamId {
+                await resetExamAfterLinkedGradeDeletion(examId: linkedExamId)
+            }
+            persistOfflineSnapshotIfPossible()
+            return
+        }
 
         let yearRef = try await requireYearRef(uid: uid)
         let gradeDocRef = yearRef.collection("subjects").document(subjectId).collection("grades").document(gradeId)
-        let linkedExamId = gradesBySubject[subjectId]?.first(where: { $0.id == gradeId })?.linkedExamId
         try await gradeDocRef.delete()
 
         // Optimistisch lokal
@@ -9407,6 +10763,7 @@ final class GradesStore: ObservableObject {
         } catch {
             ErrorLoggingService.logErrorIfEnabled(error)
         }
+        persistOfflineSnapshotIfPossible()
     }
 
     func updateSubjectSortMode(mode: SubjectSortMode) async {
@@ -9420,6 +10777,7 @@ final class GradesStore: ObservableObject {
         } catch {
             ErrorLoggingService.logErrorIfEnabled(error)
         }
+        persistOfflineSnapshotIfPossible()
     }
 
     func updateSubjectCustomOrder(order: [String]) async {
@@ -9438,6 +10796,7 @@ final class GradesStore: ObservableObject {
         } catch {
             ErrorLoggingService.logErrorIfEnabled(error)
         }
+        persistOfflineSnapshotIfPossible()
     }
 
     // Einheitliche Sortierung der Fächer – wird in allen Views genutzt.
@@ -9796,6 +11155,7 @@ final class GradesStore: ObservableObject {
     }
 
     func updateUserDisplayName(name: String) async {
+        if OfflineModeManager.shared.isOfflineModeActive { return }
         guard let uid = Auth.auth().currentUser?.uid else { return }
         do {
             try await db.collection("users").document(uid).updateData([
@@ -9820,6 +11180,8 @@ final class GradesStore: ObservableObject {
                            showSubjectsAsGrid: Bool? = nil,
                            supportNotificationUpdates: Bool? = nil,
                            supportNotificationAccess: Bool? = nil,
+                           customNotificationsEnabled: Bool? = nil,
+                           broadcastNotificationsEnabled: Bool? = nil,
                            homeworkReminderHour: Int? = nil,
                            homeworkReminderMinute: Int? = nil,
                            standardRemindersEnabled: Bool? = nil) async {
@@ -9845,6 +11207,8 @@ final class GradesStore: ObservableObject {
         if let showSubjectsAsGrid { self.showSubjectsAsGrid = showSubjectsAsGrid }
         if let supportNotificationUpdates { self.supportNotificationUpdates = supportNotificationUpdates }
         if let supportNotificationAccess { self.supportNotificationAccess = supportNotificationAccess }
+        if let customNotificationsEnabled { self.customNotificationsEnabled = customNotificationsEnabled }
+        if let broadcastNotificationsEnabled { self.broadcastNotificationsEnabled = broadcastNotificationsEnabled }
         if let homeworkReminderHour { self.homeworkReminderHour = homeworkReminderHour }
         if let homeworkReminderMinute { self.homeworkReminderMinute = homeworkReminderMinute }
         if let standardRemindersEnabled { self.standardRemindersEnabled = standardRemindersEnabled }
@@ -9863,6 +11227,8 @@ final class GradesStore: ObservableObject {
         if let showSubjectsAsGrid { defaults.set(showSubjectsAsGrid, forKey: "grades_showSubjectsAsGrid") }
         if let supportNotificationUpdates { defaults.set(supportNotificationUpdates, forKey: "grades_supportNotificationUpdates") }
         if let supportNotificationAccess { defaults.set(supportNotificationAccess, forKey: "grades_supportNotificationAccess") }
+        if let customNotificationsEnabled { defaults.set(customNotificationsEnabled, forKey: "grades_customNotificationsEnabled") }
+        if let broadcastNotificationsEnabled { defaults.set(broadcastNotificationsEnabled, forKey: "grades_broadcastNotificationsEnabled") }
         if let standardRemindersEnabled { defaults.set(standardRemindersEnabled, forKey: "grades_standardRemindersEnabled") }
         // Note: Hour/Minute usually come from FS, but we can save them if needed. 
         // Current pattern suggests we only strictly sync critical local flags or those with 'grades_' prefix logic.
@@ -9880,9 +11246,13 @@ final class GradesStore: ObservableObject {
         if let showSubjectsAsGrid { payload["showSubjectsAsGrid"] = showSubjectsAsGrid }
         if let supportNotificationUpdates { payload["supportNotificationUpdates"] = supportNotificationUpdates }
         if let supportNotificationAccess { payload["supportNotificationAccess"] = supportNotificationAccess }
+        if let customNotificationsEnabled { payload["customNotificationsEnabled"] = customNotificationsEnabled }
+        if let broadcastNotificationsEnabled { payload["broadcastNotificationsEnabled"] = broadcastNotificationsEnabled }
         if let homeworkReminderHour { payload["homeworkReminderHour"] = homeworkReminderHour }
         if let homeworkReminderMinute { payload["homeworkReminderMinute"] = homeworkReminderMinute }
         if let standardRemindersEnabled { payload["standardRemindersEnabled"] = standardRemindersEnabled }
+        payload["timeZoneOffsetMinutes"] = TimeZone.current.secondsFromGMT() / 60
+        payload["timeZoneId"] = TimeZone.current.identifier
 
         guard !payload.isEmpty else { return }
         do {
@@ -9955,7 +11325,9 @@ final class GradesStore: ObservableObject {
             do {
                 try await db.collection("users").document(uid).setData([
                     "homeworkReminderHour": hr,
-                    "homeworkReminderMinute": mn
+                    "homeworkReminderMinute": mn,
+                    "timeZoneOffsetMinutes": TimeZone.current.secondsFromGMT() / 60,
+                    "timeZoneId": TimeZone.current.identifier
                 ], merge: true)
             } catch {
                 ErrorLoggingService.logErrorIfEnabled(error)
@@ -9976,7 +11348,9 @@ final class GradesStore: ObservableObject {
         if let uid = Auth.auth().currentUser?.uid {
             do {
                 try await db.collection("users").document(uid).setData([
-                    "standardRemindersEnabled": enabled
+                    "standardRemindersEnabled": enabled,
+                    "timeZoneOffsetMinutes": TimeZone.current.secondsFromGMT() / 60,
+                    "timeZoneId": TimeZone.current.identifier
                 ], merge: true)
             } catch {
                 ErrorLoggingService.logErrorIfEnabled(error)
@@ -10006,10 +11380,6 @@ final class GradesStore: ObservableObject {
             minute: homeworkReminderMinute,
             enabled: standardRemindersEnabled
         )
-        BackgroundRefreshManager.schedule(for: allExams)
-        Task {
-            await ExamLiveActivityManager.syncLiveActivities(for: allExams)
-        }
     }
 
     /// Wird aufgerufen, wenn die App im System-Modus läuft und sich das ColorScheme des Geräts ändert.
@@ -10103,6 +11473,7 @@ final class GradesStore: ObservableObject {
     }
 
     func restartOnboarding() async {
+        if OfflineModeManager.shared.isOfflineModeActive { return }
         // Optimization: If already false, we can skip the toggle-reset dance
         // This makes manual restarts instant
         if !onboardingRequired {
@@ -10134,9 +11505,62 @@ final class GradesStore: ObservableObject {
     }
 
     func updateSubjectExamFlags(subjectName: String, examSubject: Bool, examType: ExamType) async {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        let offline = OfflineModeManager.shared.isOfflineModeActive
+        let uid = Auth.auth().currentUser?.uid
+        if offline || uid == nil {
+            subjects = subjects.map { s in
+                if s.name == subjectName {
+                    return Subject(name: s.name,
+                                   type: s.type,
+                                   date: s.date,
+                                   order: s.order,
+                                   teacher: s.teacher,
+                                   room: s.room,
+                                   email: s.email,
+                                   alias: s.alias,
+                                   droppedHalfYear: s.droppedHalfYear,
+                                   examSubject: examSubject,
+                                   examType: examType,
+                                   examPointsEncrypted: s.examPointsEncrypted,
+                                   writtenExamPointsEncrypted: s.writtenExamPointsEncrypted,
+                                   oralExamPointsEncrypted: s.oralExamPointsEncrypted,
+                                   isElective: s.isElective)
+                }
+                return s
+            }
+            let pending = PendingSubjectChange(
+                id: UUID().uuidString,
+                action: .update,
+                subjectName: subjectName,
+                type: nil,
+                date: nil,
+                isElective: nil,
+                gradingModeRaw: nil,
+                expectedSchulaufgabenPerTerm: nil,
+                teacher: nil,
+                room: nil,
+                email: nil,
+                alias: nil,
+                order: nil,
+                examSubject: examSubject,
+                examTypeRaw: examType.rawValue,
+                droppedHalfYear: nil,
+                clearDroppedHalfYear: false,
+                fixedAverageHalfYear1: nil,
+                clearFixedAverageHalfYear1: false,
+                fixedAverageHalfYear2: nil,
+                clearFixedAverageHalfYear2: false,
+                fixedAverageYearly: nil,
+                clearFixedAverageYearly: false,
+                updatedAt: Date()
+            )
+            enqueueSubjectChange(pending)
+            persistOfflineSnapshotIfPossible()
+            return
+        }
+        guard let realUid = uid else { return }
         do {
-            let yearRef = try await requireYearRef(uid: uid)
+            let yearRef = try await requireYearRef(uid: realUid)
             try await yearRef
                 .collection("subjects")
                 .document(subjectName)
@@ -10173,7 +11597,63 @@ final class GradesStore: ObservableObject {
     }
 
     func updateDroppedHalfYear(subjectName: String, value: Int?, inSchoolYear schoolYearId: String? = nil) async {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        let offline = OfflineModeManager.shared.isOfflineModeActive
+        let uid = Auth.auth().currentUser?.uid
+        if offline || uid == nil {
+            if schoolYearId != nil && schoolYearId != activeSchoolYearId {
+                return
+            }
+            subjects = subjects.map { s in
+                if s.name == subjectName {
+                    return Subject(name: s.name,
+                                   type: s.type,
+                                   date: s.date,
+                                   order: s.order,
+                                   teacher: s.teacher,
+                                   room: s.room,
+                                   email: s.email,
+                                   alias: s.alias,
+                                   droppedHalfYear: value,
+                                   examSubject: s.examSubject,
+                                   examType: s.examType,
+                                   examPointsEncrypted: s.examPointsEncrypted,
+                                   writtenExamPointsEncrypted: s.writtenExamPointsEncrypted,
+                                   oralExamPointsEncrypted: s.oralExamPointsEncrypted,
+                                   isElective: s.isElective)
+                }
+                return s
+            }
+            let pending = PendingSubjectChange(
+                id: UUID().uuidString,
+                action: .update,
+                subjectName: subjectName,
+                type: nil,
+                date: nil,
+                isElective: nil,
+                gradingModeRaw: nil,
+                expectedSchulaufgabenPerTerm: nil,
+                teacher: nil,
+                room: nil,
+                email: nil,
+                alias: nil,
+                order: nil,
+                examSubject: nil,
+                examTypeRaw: nil,
+                droppedHalfYear: value,
+                clearDroppedHalfYear: value == nil,
+                fixedAverageHalfYear1: nil,
+                clearFixedAverageHalfYear1: false,
+                fixedAverageHalfYear2: nil,
+                clearFixedAverageHalfYear2: false,
+                fixedAverageYearly: nil,
+                clearFixedAverageYearly: false,
+                updatedAt: Date()
+            )
+            enqueueSubjectChange(pending)
+            persistOfflineSnapshotIfPossible()
+            return
+        }
+        guard let uid = uid else { return }
         do {
             let yearRef: DocumentReference
             if let sid = schoolYearId {
@@ -10229,7 +11709,32 @@ final class GradesStore: ObservableObject {
     }
 
     func deleteHomeworkFromFirestore(id: String) async {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        let offline = OfflineModeManager.shared.isOfflineModeActive
+        let uid = Auth.auth().currentUser?.uid ?? ""
+        if offline || uid.isEmpty {
+            homeworks.removeAll { $0.id == id }
+            offlinePendingHomeworkChanges.removeAll { $0.id == id && $0.action == .update }
+            if offlinePendingHomeworkChanges.contains(where: { $0.id == id && $0.action == .add }) {
+                offlinePendingHomeworkChanges.removeAll { $0.id == id }
+            } else {
+                let pending = PendingHomeworkChange(
+                    id: id,
+                    action: .delete,
+                    subjectName: nil,
+                    subjectKey: nil,
+                    title: nil,
+                    dueDate: nil,
+                    reminderAt: nil,
+                    isCompleted: nil,
+                    createdAt: nil,
+                    updatedAt: Date()
+                )
+                enqueueHomeworkChange(pending)
+            }
+            rescheduleLocalNotifications()
+            persistOfflineSnapshotIfPossible()
+            return
+        }
         guard let yearRef = try? await requireYearRef(uid: uid) else { return }
         let docRef = yearRef
             .collection("homeworks")
@@ -10243,7 +11748,39 @@ final class GradesStore: ObservableObject {
     }
 
     func deleteExamFromFirestore(id: String) async {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        let offline = OfflineModeManager.shared.isOfflineModeActive
+        let uid = Auth.auth().currentUser?.uid ?? ""
+        if offline || uid.isEmpty {
+            exams.removeAll { $0.id == id }
+            examPoints.removeValue(forKey: id)
+            offlinePendingExamChanges.removeAll { $0.id == id && $0.action == .update }
+            if offlinePendingExamChanges.contains(where: { $0.id == id && $0.action == .add }) {
+                offlinePendingExamChanges.removeAll { $0.id == id }
+            } else {
+                let pending = PendingExamChange(
+                    id: id,
+                    action: .delete,
+                    subjectName: nil,
+                    subjectKey: nil,
+                    title: nil,
+                    notes: nil,
+                    date: nil,
+                    hasTime: nil,
+                    weight: nil,
+                    customWeight: nil,
+                    reminderAt: nil,
+                    isCompleted: nil,
+                    createdAt: nil,
+                    requiresGrade: nil,
+                    assessmentType: nil,
+                    updatedAt: Date()
+                )
+                enqueueExamChange(pending)
+            }
+            rescheduleLocalNotifications()
+            persistOfflineSnapshotIfPossible()
+            return
+        }
         guard let yearRef = try? await requireYearRef(uid: uid) else { return }
         let docRef = yearRef
             .collection("exams")
@@ -10425,7 +11962,56 @@ final class GradesStore: ObservableObject {
     }
 
     func deleteSubjectFromFirestore(subjectName: String) async {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        let offline = OfflineModeManager.shared.isOfflineModeActive
+        let uid = Auth.auth().currentUser?.uid
+        if offline || uid == nil {
+            // Remove local state
+            subjects.removeAll { $0.name == subjectName }
+            gradesBySubject.removeValue(forKey: subjectName)
+            gradesListeners[subjectName]?.remove()
+            gradesListeners.removeValue(forKey: subjectName)
+            encryptedGradesCache.removeValue(forKey: subjectName)
+
+            // Clear pending grade operations for this subject
+            offlinePendingGrades.removeAll { $0.subjectId == subjectName }
+            offlinePendingGradeChanges.removeAll { $0.subjectId == subjectName }
+
+            // If subject was created offline, just drop the pending add
+            if offlinePendingSubjectChanges.contains(where: { $0.subjectName == subjectName && $0.action == .add }) {
+                offlinePendingSubjectChanges.removeAll { $0.subjectName == subjectName }
+            } else {
+                let pending = PendingSubjectChange(
+                    id: UUID().uuidString,
+                    action: .delete,
+                    subjectName: subjectName,
+                    type: nil,
+                    date: nil,
+                    isElective: nil,
+                    gradingModeRaw: nil,
+                    expectedSchulaufgabenPerTerm: nil,
+                    teacher: nil,
+                    room: nil,
+                    email: nil,
+                    alias: nil,
+                    order: nil,
+                    examSubject: nil,
+                    examTypeRaw: nil,
+                    droppedHalfYear: nil,
+                    clearDroppedHalfYear: false,
+                    fixedAverageHalfYear1: nil,
+                    clearFixedAverageHalfYear1: false,
+                    fixedAverageHalfYear2: nil,
+                    clearFixedAverageHalfYear2: false,
+                    fixedAverageYearly: nil,
+                    clearFixedAverageYearly: false,
+                    updatedAt: Date()
+                )
+                enqueueSubjectChange(pending)
+            }
+            persistOfflineSnapshotIfPossible()
+            return
+        }
+        guard let uid = uid else { return }
         guard let yearRef = try? await requireYearRef(uid: uid) else { return }
         let subjectRef = yearRef.collection("subjects").document(subjectName)
         do {
@@ -11425,6 +13011,7 @@ final class GradesStore: ObservableObject {
     // MARK: - Web Data Re-import
 
     func fetchWebDataAndDetectConflicts() async {
+        if OfflineModeManager.shared.isOfflineModeActive { return }
         guard let uid = Auth.auth().currentUser?.uid else { return }
         isWebReimportLoading = true
         webConflicts = []
@@ -11569,7 +13156,65 @@ final class GradesStore: ObservableObject {
         isWebReimportLoading = false
     }
     func updateSubjectFixedAverages(subjectName: String, val1: Double?, val2: Double?, valYear: Double?) async {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        let offline = OfflineModeManager.shared.isOfflineModeActive
+        let uid = Auth.auth().currentUser?.uid
+        if offline || uid == nil {
+            subjects = subjects.map { s in
+                if s.name == subjectName {
+                    return Subject(name: s.name,
+                                   type: s.type,
+                                   gradingMode: s.gradingMode,
+                                   expectedSchulaufgabenPerTerm: s.expectedSchulaufgabenPerTerm,
+                                   date: s.date,
+                                   order: s.order,
+                                   teacher: s.teacher,
+                                   room: s.room,
+                                   email: s.email,
+                                   alias: s.alias,
+                                   droppedHalfYear: s.droppedHalfYear,
+                                   examSubject: s.examSubject,
+                                   examType: s.examType,
+                                   examPointsEncrypted: s.examPointsEncrypted,
+                                   writtenExamPointsEncrypted: s.writtenExamPointsEncrypted,
+                                   oralExamPointsEncrypted: s.oralExamPointsEncrypted,
+                                   isElective: s.isElective,
+                                   fixedAverageHalfYear1: val1,
+                                   fixedAverageHalfYear2: val2,
+                                   fixedAverageYearly: valYear)
+                }
+                return s
+            }
+            let pending = PendingSubjectChange(
+                id: UUID().uuidString,
+                action: .update,
+                subjectName: subjectName,
+                type: nil,
+                date: nil,
+                isElective: nil,
+                gradingModeRaw: nil,
+                expectedSchulaufgabenPerTerm: nil,
+                teacher: nil,
+                room: nil,
+                email: nil,
+                alias: nil,
+                order: nil,
+                examSubject: nil,
+                examTypeRaw: nil,
+                droppedHalfYear: nil,
+                clearDroppedHalfYear: false,
+                fixedAverageHalfYear1: val1,
+                clearFixedAverageHalfYear1: val1 == nil,
+                fixedAverageHalfYear2: val2,
+                clearFixedAverageHalfYear2: val2 == nil,
+                fixedAverageYearly: valYear,
+                clearFixedAverageYearly: valYear == nil,
+                updatedAt: Date()
+            )
+            enqueueSubjectChange(pending)
+            persistOfflineSnapshotIfPossible()
+            return
+        }
+        guard let uid = uid else { return }
         do {
             let yearRef = try await requireYearRef(uid: uid)
             var data: [String: Any] = [:]

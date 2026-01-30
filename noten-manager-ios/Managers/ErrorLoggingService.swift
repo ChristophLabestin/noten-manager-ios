@@ -18,8 +18,7 @@ enum ErrorLoggingService {
         // We can still print to console if needed.
         print("DEBUG Error Logging: \(error.localizedDescription) at \(file):\(line)")
         return
-        #endif
-
+        #else
         guard !(error is CancellationError) else { return }
         guard UserDefaults.standard.bool(forKey: preferenceKey) else { return }
 
@@ -47,6 +46,7 @@ enum ErrorLoggingService {
         )
 
         FirestoreService.shared.createAnonymousErrorLog(payload: payload)
+        #endif
     }
 
     static func logErrorIfEnabled(

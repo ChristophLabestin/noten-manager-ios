@@ -11,6 +11,11 @@ struct PraktikumDetailView: View {
     @State private var showDeleteAllAlert: Bool = false
     @State private var isWorking: Bool = false
     @State private var error: String?
+    
+    // Fixed Average State
+    @State private var showFixedAverageSheet: Bool = false
+    @State private var fixedAverageText: String = ""
+    @State private var isSavingFixedAverage: Bool = false
 
     private var sortedPracticalGrades: [PracticalGradeEntry] {
         let entries = store.practicalPerformance?.grades ?? []
@@ -28,6 +33,18 @@ struct PraktikumDetailView: View {
         guard !sortedPracticalGrades.isEmpty else { return nil }
         let total = sortedPracticalGrades.reduce(0.0) { $0 + $1.grade }
         return total / Double(sortedPracticalGrades.count)
+    }
+    
+    private var displayedAverage: Double? {
+        // Fixed average takes priority
+        if let fixed = store.practicalPerformance?.fixedAverage {
+            return fixed
+        }
+        return average
+    }
+    
+    private var hasFixedAverage: Bool {
+        store.practicalPerformance?.fixedAverage != nil
     }
 
     private var canManage: Bool {
@@ -79,10 +96,17 @@ struct PraktikumDetailView: View {
                         Text(statusText)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
-                        if let avg = average {
+                        if let avg = displayedAverage {
                             HStack(spacing: 10) {
-                                Text("Durchschnitt")
-                                    .font(.headline)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Durchschnitt")
+                                        .font(.headline)
+                                    if hasFixedAverage {
+                                        Text("(festgelegt)")
+                                            .font(.caption)
+                                            .foregroundStyle(.orange)
+                                    }
+                                }
                                 Spacer()
                                 Text(String(format: "%.2f", avg))
                                     .font(.system(.title3, design: .rounded).weight(.bold))
@@ -92,6 +116,35 @@ struct PraktikumDetailView: View {
                                     .background(gradeColor(avg).opacity(0.16))
                                     .foregroundStyle(gradeColor(avg))
                                     .clipShape(Capsule())
+                            }
+                        }
+                        
+                        // Fixed Average Section
+                        if canManage {
+                            Divider()
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Festgelegte Endnote")
+                                    .font(.subheadline.weight(.semibold))
+                                Text("Optional: Überschreibt den berechneten Durchschnitt.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Button {
+                                    fixedAverageText = store.practicalPerformance?.fixedAverage.map { String(format: "%.1f", $0) } ?? ""
+                                    showFixedAverageSheet = true
+                                } label: {
+                                    HStack {
+                                        Text(hasFixedAverage ? "Festgelegte Note bearbeiten" : "Festgelegte Note setzen")
+                                        Spacer()
+                                        if let fixed = store.practicalPerformance?.fixedAverage {
+                                            Text(String(format: "%.1f", fixed))
+                                                .foregroundStyle(.orange)
+                                        }
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
                     }
@@ -224,6 +277,9 @@ struct PraktikumDetailView: View {
             Text("Beide gespeicherten Praktikumsnoten werden entfernt.")
         }
         .disabled(isWorking)
+        .sheet(isPresented: $showFixedAverageSheet) {
+            fixedAverageSheet
+        }
     }
 
     @ViewBuilder
@@ -410,5 +466,108 @@ struct PraktikumDetailView: View {
                 .opacity(configuration.isPressed ? 0.9 : 1.0)
                 .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
         }
+    }
+    
+    // MARK: - Fixed Average Sheet
+    
+    @ViewBuilder
+    private var fixedAverageSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 16) {
+                    SettingsCard(
+                        title: "Festgelegte Note",
+                        subtitle: "Überschreibt den berechneten Durchschnitt",
+                        systemImage: "lock.fill",
+                        accent: .orange
+                    ) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Gib die finale Praktikumsnote ein, wie sie auf dem Zeugnis stehen soll. Diese überschreibt den berechneten Durchschnitt.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            
+                            TextField("z. B. 12.0", text: $fixedAverageText)
+                                .keyboardType(.decimalPad)
+                                .padding(12)
+                                .background(Color.formInputBackground)
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            
+                            if hasFixedAverage {
+                                Button(role: .destructive) {
+                                    Task { await clearFixedAverage() }
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "trash")
+                                        Text("Festgelegte Note entfernen")
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(SoftTintButtonStyle(accent: .red))
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+            }
+            .background(ThemedBackground(isDark: store.darkMode, isFeminine: store.theme == "feminine", intensity: store.themeBackgroundIntensity))
+            .sheetNavigationTitle("Festgelegte Note")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button {
+                        showFixedAverageSheet = false
+                    } label: {
+                        ToolbarIcon(symbol: "xmark", showDot: false)
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        Task { await saveFixedAverage() }
+                    } label: {
+                        if isSavingFixedAverage {
+                            ToolbarLoadingIcon()
+                        } else {
+                            ToolbarIcon(symbol: "checkmark", showDot: false)
+                        }
+                    }
+                    .disabled(isSavingFixedAverage)
+                }
+            }
+        }
+    }
+    
+    private func saveFixedAverage() async {
+        guard let key = store.encryptionKey else { return }
+        isSavingFixedAverage = true
+        do {
+            let value = fixedAverageText.isEmpty ? nil : Double(fixedAverageText.replacingOccurrences(of: ",", with: "."))
+            try await store.setPracticalFixedAverage(value, using: key)
+            await MainActor.run {
+                showFixedAverageSheet = false
+            }
+        } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
+            await MainActor.run {
+                self.error = error.localizedDescription
+            }
+        }
+        isSavingFixedAverage = false
+    }
+    
+    private func clearFixedAverage() async {
+        guard let key = store.encryptionKey else { return }
+        isSavingFixedAverage = true
+        do {
+            try await store.setPracticalFixedAverage(nil, using: key)
+            await MainActor.run {
+                showFixedAverageSheet = false
+            }
+        } catch {
+            ErrorLoggingService.logErrorIfEnabled(error)
+            await MainActor.run {
+                self.error = error.localizedDescription
+            }
+        }
+        isSavingFixedAverage = false
     }
 }

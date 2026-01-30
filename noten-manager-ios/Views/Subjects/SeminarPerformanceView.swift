@@ -51,16 +51,18 @@ struct SeminarPerformanceView: View {
         return "Trage alle drei Teilnoten ein, um die Seminarbewertung zu sehen."
     }
 
-    private var submissionYearForSchoolStart: Int {
+    private var submissionYearForJanuaryPreset: Int {
         if let id = store.activeSchoolYearId,
            let startYear = Int(id.prefix(4)) {
-            return gradeYear == 12 ? (startYear + 1) : startYear
+            let januaryYear = startYear + 1
+            return gradeYear == 12 ? (januaryYear + 1) : januaryYear
         }
         let cal = Calendar(identifier: .gregorian)
         let year = cal.component(.year, from: Date())
         let month = cal.component(.month, from: Date())
         let base = month >= 8 ? year : year - 1
-        return gradeYear == 12 ? (base + 1) : base
+        let januaryYear = base + 1
+        return gradeYear == 12 ? (januaryYear + 1) : januaryYear
     }
 
     var body: some View {
@@ -129,7 +131,7 @@ struct SeminarPerformanceView: View {
                                     dateRow(
                                         icon: "calendar",
                                         title: "Abgabe",
-                                        subtitle: "2. Dienstag im Schuljahr",
+                                        subtitle: "2. Unterrichtswoche im Januar",
                                         date: $submissionDate,
                                         onChange: { hasCustomSubmissionDate = true }
                                     )
@@ -236,7 +238,7 @@ struct SeminarPerformanceView: View {
                     presentationDate = sem.presentationDate
                     note = sem.note ?? ""
                     hasCustomSubmissionDate = true
-                    Task { await adjustSubmissionIfBeforeSchoolStart() }
+                    Task { await adjustSubmissionIfBeforeJanuaryStart() }
                 } else if topic.isEmpty {
                     Task { await fillDefaultSubmissionDate() }
                 }
@@ -375,58 +377,83 @@ struct SeminarPerformanceView: View {
 
     private func fillDefaultSubmissionDate() async {
         guard !hasCustomSubmissionDate else { return }
-        let year = submissionYearForSchoolStart
-        if let bySummer = await defaultDateUsingSummerBreak(startYear: year) {
+        let year = submissionYearForJanuaryPreset
+        if let byJanuary = await defaultDateUsingJanuary(startYear: year) {
             await MainActor.run {
-                submissionDate = bySummer
+                submissionDate = byJanuary
                 hasCustomSubmissionDate = true
             }
             return
         }
-        let fallback = defaultDateFallback(startYear: year)
+        let fallback = defaultDateFallbackJanuary(startYear: year)
         await MainActor.run {
             submissionDate = fallback
             hasCustomSubmissionDate = true
         }
     }
 
-    private func defaultDateUsingSummerBreak(startYear: Int) async -> Date? {
+    private func defaultDateUsingJanuary(startYear: Int) async -> Date? {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "Europe/Berlin") ?? .current
-        guard let schoolStart = await HolidaysService.shared.schoolStartDate(forYear: startYear) else {
+
+        guard let jan1 = cal.date(from: DateComponents(year: startYear, month: 1, day: 1)),
+              let jan31 = cal.date(from: DateComponents(year: startYear, month: 1, day: 31)) else {
             return nil
         }
-        return computeSecondTuesday(fromSchoolStart: schoolStart, calendar: cal)
-    }
 
-    private func defaultDateFallback(startYear: Int) -> Date {
-        var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = TimeZone(identifier: "Europe/Berlin") ?? .current
-        let approxStart = cal.date(from: DateComponents(year: startYear, month: 9, day: 10)) ?? Date()
-        return computeSecondTuesday(fromSchoolStart: approxStart, calendar: cal)
-    }
+        let schoolHolidays = await HolidaysService.shared.fetchHolidays(year: startYear)
+            + HolidaysService.shared.fetchHolidays(year: startYear - 1)
+        let publicHolidays = await HolidaysService.shared.fetchPublicHolidays(year: startYear)
+        let allHolidays = schoolHolidays + publicHolidays
 
-    private func nextWeekday(_ weekday: Int, onOrAfter start: Date, using cal: Calendar) -> Date? {
-        var date = cal.startOfDay(for: start)
-        for _ in 0..<60 {
-            if cal.component(.weekday, from: date) == weekday {
-                return date
+        func isHoliday(_ date: Date) -> Bool {
+            let day = cal.startOfDay(for: date)
+            return allHolidays.contains { period in
+                let start = cal.startOfDay(for: period.start)
+                let end = cal.startOfDay(for: period.end)
+                return day >= start && day <= end
+            }
+        }
+
+        var date = cal.startOfDay(for: jan1)
+        var tuesdayCount = 0
+        while date <= jan31 {
+            let weekday = cal.component(.weekday, from: date)
+            let isWeekend = weekday == 1 || weekday == 7
+            if weekday == 3 && !isWeekend && !isHoliday(date) {
+                tuesdayCount += 1
+                if tuesdayCount == 2 {
+                    return date
+                }
             }
             date = cal.date(byAdding: .day, value: 1, to: date) ?? date
         }
         return nil
     }
 
-    private func computeSecondTuesday(fromSchoolStart start: Date, calendar cal: Calendar) -> Date {
-        let firstTuesday = nextWeekday(3, onOrAfter: start, using: cal) ?? start
-        return cal.date(byAdding: .day, value: 7, to: firstTuesday) ?? firstTuesday
+    private func defaultDateFallbackJanuary(startYear: Int) -> Date {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "Europe/Berlin") ?? .current
+        let janStart = cal.date(from: DateComponents(year: startYear, month: 1, day: 1)) ?? Date()
+        var date = cal.startOfDay(for: janStart)
+        var tuesdayCount = 0
+        for _ in 0..<40 {
+            if cal.component(.weekday, from: date) == 3 {
+                tuesdayCount += 1
+                if tuesdayCount == 2 { return date }
+            }
+            date = cal.date(byAdding: .day, value: 1, to: date) ?? date
+        }
+        return janStart
     }
 
-    private func adjustSubmissionIfBeforeSchoolStart() async {
-        let cal = Calendar(identifier: .gregorian)
-        guard let schoolStart = await HolidaysService.shared.schoolStartDate(forYear: submissionYearForSchoolStart) else { return }
-        if submissionDate < schoolStart {
-            let corrected = computeSecondTuesday(fromSchoolStart: schoolStart, calendar: cal)
+    private func adjustSubmissionIfBeforeJanuaryStart() async {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "Europe/Berlin") ?? .current
+        let year = submissionYearForJanuaryPreset
+        guard let janStart = cal.date(from: DateComponents(year: year, month: 1, day: 1)) else { return }
+        if submissionDate < janStart {
+            let corrected = await defaultDateUsingJanuary(startYear: year) ?? defaultDateFallbackJanuary(startYear: year)
             await MainActor.run {
                 submissionDate = corrected
                 hasCustomSubmissionDate = false

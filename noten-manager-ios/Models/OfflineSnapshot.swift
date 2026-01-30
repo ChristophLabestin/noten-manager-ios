@@ -39,9 +39,19 @@ struct OfflineSnapshot: Sendable {
     let homeworkReminderHour: Int
     let homeworkReminderMinute: Int
     let standardRemindersEnabled: Bool?
+    let supportNotificationUpdates: Bool?
+    let supportNotificationAccess: Bool?
+    let customNotificationsEnabled: Bool?
+    let broadcastNotificationsEnabled: Bool?
     let pendingGrades: [PendingGrade]
     let pendingFachreferat: PendingFachreferat?
     let pendingSeminar: PendingSeminarPerformance?
+    let pendingGradeChanges: [PendingGradeChange]
+    let pendingSubjectChanges: [PendingSubjectChange]
+    let pendingExamChanges: [PendingExamChange]
+    let pendingHomeworkChanges: [PendingHomeworkChange]
+    let pendingSharedExamUserChanges: [PendingSharedExamUserChange]
+    let pendingSharedHomeworkUserChanges: [PendingSharedHomeworkUserChange]
     
     private enum CodingKeys: String, CodingKey {
         case userId, capturedAt, activeSchoolYearId, encryptionSalt
@@ -55,7 +65,11 @@ struct OfflineSnapshot: Sendable {
     case theme, themeIntensity, appIcon
         case darkMode, darkModeMode
         case homeworkReminderHour, homeworkReminderMinute, standardRemindersEnabled
+        case supportNotificationUpdates, supportNotificationAccess
+        case customNotificationsEnabled, broadcastNotificationsEnabled
         case pendingGrades, pendingFachreferat, pendingSeminar
+        case pendingGradeChanges, pendingSubjectChanges, pendingExamChanges, pendingHomeworkChanges
+        case pendingSharedExamUserChanges, pendingSharedHomeworkUserChanges
         case subscribedCourseIds, courses, classIds, classNames, classOwners, classDetails
         case migratedGroupIds, activeClassId, courseExamsMap, courseHomeworksMap, courseMappings
         case wahlpflichtfachGroupIds, wahlpflichtfachGroupNames, wahlpflichtfachGroupOwners
@@ -163,9 +177,19 @@ extension OfflineSnapshot: Decodable {
         homeworkReminderHour = try container.decode(Int.self, forKey: .homeworkReminderHour)
         homeworkReminderMinute = try container.decode(Int.self, forKey: .homeworkReminderMinute)
         standardRemindersEnabled = try container.decodeIfPresent(Bool.self, forKey: .standardRemindersEnabled)
+        supportNotificationUpdates = try container.decodeIfPresent(Bool.self, forKey: .supportNotificationUpdates)
+        supportNotificationAccess = try container.decodeIfPresent(Bool.self, forKey: .supportNotificationAccess)
+        customNotificationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .customNotificationsEnabled)
+        broadcastNotificationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .broadcastNotificationsEnabled)
         pendingGrades = try container.decode([PendingGrade].self, forKey: .pendingGrades)
         pendingFachreferat = try container.decodeIfPresent(PendingFachreferat.self, forKey: .pendingFachreferat)
         pendingSeminar = try container.decodeIfPresent(PendingSeminarPerformance.self, forKey: .pendingSeminar)
+        pendingGradeChanges = try container.decodeIfPresent([PendingGradeChange].self, forKey: .pendingGradeChanges) ?? []
+        pendingSubjectChanges = try container.decodeIfPresent([PendingSubjectChange].self, forKey: .pendingSubjectChanges) ?? []
+        pendingExamChanges = try container.decodeIfPresent([PendingExamChange].self, forKey: .pendingExamChanges) ?? []
+        pendingHomeworkChanges = try container.decodeIfPresent([PendingHomeworkChange].self, forKey: .pendingHomeworkChanges) ?? []
+        pendingSharedExamUserChanges = try container.decodeIfPresent([PendingSharedExamUserChange].self, forKey: .pendingSharedExamUserChanges) ?? []
+        pendingSharedHomeworkUserChanges = try container.decodeIfPresent([PendingSharedHomeworkUserChange].self, forKey: .pendingSharedHomeworkUserChanges) ?? []
         
         subscribedCourseIds = try container.decode([String].self, forKey: .subscribedCourseIds)
         courses = try container.decode([Course].self, forKey: .courses)
@@ -261,9 +285,19 @@ extension OfflineSnapshot: Encodable {
         try container.encode(homeworkReminderHour, forKey: .homeworkReminderHour)
         try container.encode(homeworkReminderMinute, forKey: .homeworkReminderMinute)
         try container.encodeIfPresent(standardRemindersEnabled, forKey: .standardRemindersEnabled)
+        try container.encodeIfPresent(supportNotificationUpdates, forKey: .supportNotificationUpdates)
+        try container.encodeIfPresent(supportNotificationAccess, forKey: .supportNotificationAccess)
+        try container.encodeIfPresent(customNotificationsEnabled, forKey: .customNotificationsEnabled)
+        try container.encodeIfPresent(broadcastNotificationsEnabled, forKey: .broadcastNotificationsEnabled)
         try container.encode(pendingGrades, forKey: .pendingGrades)
         try container.encodeIfPresent(pendingFachreferat, forKey: .pendingFachreferat)
         try container.encodeIfPresent(pendingSeminar, forKey: .pendingSeminar)
+        try container.encode(pendingGradeChanges, forKey: .pendingGradeChanges)
+        try container.encode(pendingSubjectChanges, forKey: .pendingSubjectChanges)
+        try container.encode(pendingExamChanges, forKey: .pendingExamChanges)
+        try container.encode(pendingHomeworkChanges, forKey: .pendingHomeworkChanges)
+        try container.encode(pendingSharedExamUserChanges, forKey: .pendingSharedExamUserChanges)
+        try container.encode(pendingSharedHomeworkUserChanges, forKey: .pendingSharedHomeworkUserChanges)
         
         try container.encode(subscribedCourseIds, forKey: .subscribedCourseIds)
         try container.encode(courses, forKey: .courses)

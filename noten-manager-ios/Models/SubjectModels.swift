@@ -203,6 +203,7 @@ struct EncryptedFachreferat: Codable {
     let presentationGrade: String?
     let paperGrade: String?
     let presentationWeight: Double?
+    let fixedGrade: String?  // Override for calculated grade
 }
 
 struct Fachreferat: Codable, Identifiable {
@@ -214,6 +215,7 @@ struct Fachreferat: Codable, Identifiable {
     let presentationGrade: Double?
     let paperGrade: Double?
     let presentationWeight: Double?
+    let fixedGrade: Double?  // Override for calculated grade
 }
 
 struct SeminarPerformance: Codable, Identifiable, Equatable {
@@ -244,6 +246,7 @@ struct PracticalGradeEntry: Codable, Identifiable, Equatable {
 struct PracticalPerformance: Codable, Identifiable, Equatable {
     let id: String
     let grades: [PracticalGradeEntry]
+    let fixedAverage: Double?  // Override for calculated average
 }
 
 enum SubjectSortMode: String, Codable, CaseIterable {

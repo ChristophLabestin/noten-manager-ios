@@ -89,7 +89,20 @@ struct EditExamView: View {
     }
 
     private var subjects: [Subject] {
-        store.sortedSubjectsForDisplay(store.subjects.filter { $0.name != "Fachreferat" })
+        var result = store.sortedSubjectsForDisplay(store.subjects.filter { $0.name != "Fachreferat" })
+        // Ensure the exam's current subject is always in the list for shared exams
+        let examSubjectName = exam.subjectName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !examSubjectName.isEmpty && !result.contains(where: { $0.name == examSubjectName }) {
+            // Create a placeholder subject for the picker
+            let placeholderSubject = Subject(
+                name: examSubjectName,
+                type: 0,
+                gradingMode: .withoutSchulaufgaben,
+                date: Date()
+            )
+            result.insert(placeholderSubject, at: 0)
+        }
+        return result
     }
 
     private var canSave: Bool {
@@ -399,11 +412,6 @@ struct EditExamView: View {
                                                 .foregroundStyle(.secondary)
                                         }
                                     }
-
-                                    if allowWeights && !subjectName.isEmpty {
-                                        Toggle("Note verknüpfen erforderlich", isOn: $requiresGrade)
-                                            .tint(.indigo)
-                                    }
                                 }
                             }
                         }
@@ -501,7 +509,13 @@ struct EditExamView: View {
                                  return Array(Dictionary(grouping: store.courses, by: { $0.id }).values.compactMap(\.first))
                              }
                              let targetIds = Set(store.targetCourseIds(forLocalSubject: subjectName))
-                             let matches = store.courses.filter { targetIds.contains($0.id) }
+                             var matches = store.courses.filter { targetIds.contains($0.id) }
+                             // Always include the current course the exam is shared to
+                             if let cid = exam.courseId, !matches.contains(where: { $0.id == cid }) {
+                                 if let currentCourse = store.courses.first(where: { $0.id == cid }) {
+                                     matches.append(currentCourse)
+                                 }
+                             }
                              return Array(Dictionary(grouping: matches, by: { $0.id }).values.compactMap(\.first))
                          }()
                          
@@ -636,11 +650,16 @@ struct EditExamView: View {
                 }
             }
             .onAppear {
-                updateSelectedGroupsForSubject(subjectName)
-                if exam.groupId != nil {
+                // Only update selections for non-shared exams to avoid overwriting existing sharing targets
+                if !exam.isShared {
+                    updateSelectedGroupsForSubject(subjectName)
+                }
+                // For already shared exams, keep shareWithGroup = true (set in init)
+                // For non-shared exams, only enable sharing toggle if targets are selected
+                if exam.isShared {
                     shareWithGroup = true
                 } else {
-                    shareWithGroup = (!selectedClassIds.isEmpty || !selectedCourseIds.isEmpty) && !exam.isShared
+                    shareWithGroup = !selectedClassIds.isEmpty || !selectedCourseIds.isEmpty || !selectedGroupIds.isEmpty
                 }
             }
             .onChange(of: subjectName) { _, newSubject in

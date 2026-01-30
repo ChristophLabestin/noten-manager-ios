@@ -28,6 +28,7 @@ enum GradeCalculationService {
         let value: Double
         let weight: Double
         let category: String
+        let subjectName: String?
     }
 
     struct SubjectData: Identifiable {
@@ -109,7 +110,8 @@ enum GradeCalculationService {
         var fachreferatPoints = 0.0
         var fachreferatCount = 0
         if includeFachreferat, let fr = fachreferat {
-            fachreferatPoints = fr.grade
+            // Use fixed grade override if available
+            fachreferatPoints = fr.fixedGrade ?? fr.grade
             fachreferatCount = 1
         }
         
@@ -117,10 +119,17 @@ enum GradeCalculationService {
         var practicalPoints = 0.0
         var practicalCount = 0
         if schoolType == .fos && gradeYear <= 12, let practical = practicalPerformance {
-            // Take first two grades (1. and 2. half year equivalent)
-            let limited = practical.grades.sorted(by: { $0.date < $1.date }).prefix(2)
-            practicalPoints = limited.reduce(0.0) { $0 + $1.grade }
-            practicalCount = limited.count
+            // Use fixed average override if available
+            if let fixed = practical.fixedAverage {
+                // Two half-year equivalents
+                practicalPoints = fixed * 2
+                practicalCount = 2
+            } else {
+                // Take first two grades (1. and 2. half year equivalent)
+                let limited = practical.grades.sorted(by: { $0.date < $1.date }).prefix(2)
+                practicalPoints = limited.reduce(0.0) { $0 + $1.grade }
+                practicalCount = limited.count
+            }
         }
         
         // 5. Seminar
@@ -372,17 +381,24 @@ enum GradeCalculationService {
         if halfYearFilter == nil {
             // 1. Fachreferat (Weight: 1 Subject Equivalent)
             if let fr = fachreferat {
-                total += fr.grade
+                // Use fixed grade override if available
+                total += fr.fixedGrade ?? fr.grade
                 count += 1
             }
             
             // 2. fpA (Praktikum) - Only in FOS 11 (Weight: 1 Subject Equivalent)
             if schoolType == .fos && gradeYear == 11, let practical = practical {
-                let limited = practical.grades.sorted(by: { $0.date < $1.date }).prefix(2)
-                if !limited.isEmpty {
-                    let avg = limited.reduce(0.0) { $0 + $1.grade } / Double(limited.count)
-                    total += avg
+                // Use fixed average override if available
+                if let fixed = practical.fixedAverage {
+                    total += fixed
                     count += 1
+                } else {
+                    let limited = practical.grades.sorted(by: { $0.date < $1.date }).prefix(2)
+                    if !limited.isEmpty {
+                        let avg = limited.reduce(0.0) { $0 + $1.grade } / Double(limited.count)
+                        total += avg
+                        count += 1
+                    }
                 }
             }
             
@@ -433,7 +449,7 @@ enum GradeCalculationService {
         for subject in eligibleSubjects {
             if halfYearFilter == nil, let fixedYearly = subject.fixedAverageYearly {
                  // Fixed Yearly Override
-                 items.append(CalculationBreakdownItem(label: "\(subject.name) (Fest)", value: fixedYearly, weight: 2.0, category: "Fächer"))
+                items.append(CalculationBreakdownItem(label: "\(subject.name) (Fest)", value: fixedYearly, weight: 2.0, category: "Fächer", subjectName: subject.name))
                  total += fixedYearly * 2
                  count += 2
                  continue
@@ -444,24 +460,24 @@ enum GradeCalculationService {
             switch halfYearFilter {
             case 1:
                 if droppedHalf != 1, let v = halfYearValueProvider(subject, 1) {
-                    items.append(CalculationBreakdownItem(label: "\(subject.name) (Hj. 1)", value: v, weight: 1.0, category: "Fächer"))
+                    items.append(CalculationBreakdownItem(label: "\(subject.name) (Hj. 1)", value: v, weight: 1.0, category: "Fächer", subjectName: subject.name))
                     total += v
                     count += 1
                 }
             case 2:
                 if droppedHalf != 2, let v = halfYearValueProvider(subject, 2) {
-                    items.append(CalculationBreakdownItem(label: "\(subject.name) (Hj. 2)", value: v, weight: 1.0, category: "Fächer"))
+                    items.append(CalculationBreakdownItem(label: "\(subject.name) (Hj. 2)", value: v, weight: 1.0, category: "Fächer", subjectName: subject.name))
                     total += v
                     count += 1
                 }
             default:
                 if droppedHalf != 1, let v1 = halfYearValueProvider(subject, 1) {
-                    items.append(CalculationBreakdownItem(label: "\(subject.name) (Hj. 1)", value: v1, weight: 1.0, category: "Fächer"))
+                    items.append(CalculationBreakdownItem(label: "\(subject.name) (Hj. 1)", value: v1, weight: 1.0, category: "Fächer", subjectName: subject.name))
                     total += v1
                     count += 1
                 }
                 if droppedHalf != 2, let v2 = halfYearValueProvider(subject, 2) {
-                    items.append(CalculationBreakdownItem(label: "\(subject.name) (Hj. 2)", value: v2, weight: 1.0, category: "Fächer"))
+                    items.append(CalculationBreakdownItem(label: "\(subject.name) (Hj. 2)", value: v2, weight: 1.0, category: "Fächer", subjectName: subject.name))
                     total += v2
                     count += 1
                 }
@@ -470,7 +486,7 @@ enum GradeCalculationService {
         
         if halfYearFilter == nil {
             if let fr = fachreferat {
-                items.append(CalculationBreakdownItem(label: "Fachreferat", value: fr.grade, weight: 1.0, category: "Zusatzleistung"))
+                items.append(CalculationBreakdownItem(label: "Fachreferat", value: fr.grade, weight: 1.0, category: "Zusatzleistung", subjectName: nil))
                 total += fr.grade
                 count += 1
             }
@@ -479,7 +495,7 @@ enum GradeCalculationService {
                 let limited = practical.grades.sorted(by: { $0.date < $1.date }).prefix(2)
                 if !limited.isEmpty {
                     let avg = limited.reduce(0.0) { $0 + $1.grade } / Double(limited.count)
-                    items.append(CalculationBreakdownItem(label: "Praktikum (fpA)", value: avg, weight: 1.0, category: "Zusatzleistung"))
+                    items.append(CalculationBreakdownItem(label: "Praktikum (fpA)", value: avg, weight: 1.0, category: "Zusatzleistung", subjectName: nil))
                     total += avg
                     count += 1
                 }
@@ -488,7 +504,7 @@ enum GradeCalculationService {
             if gradeYear == 13, let sem = seminar {
                 if let finalPoints = calculateSeminarFinalPoints(sem) {
                     let val = finalPoints * 2.0
-                    items.append(CalculationBreakdownItem(label: "Seminar", value: val, weight: 2.0, category: "Zusatzleistung"))
+                    items.append(CalculationBreakdownItem(label: "Seminar", value: val, weight: 2.0, category: "Zusatzleistung", subjectName: nil))
                     total += val
                     count += 2.0
                 }
@@ -497,7 +513,7 @@ enum GradeCalculationService {
             for subject in subjects {
                 if let points = examPoints[subject.name], let p = points {
                     let v = p.rounded(.toNearestOrAwayFromZero)
-                    items.append(CalculationBreakdownItem(label: "Abiprüfung: \(subject.name)", value: v * examWeight, weight: examWeight, category: "Prüfungen"))
+                    items.append(CalculationBreakdownItem(label: "Abiprüfung: \(subject.name)", value: v * examWeight, weight: examWeight, category: "Prüfungen", subjectName: nil))
                     total += v * examWeight
                     count += examWeight
                 }
@@ -548,4 +564,3 @@ enum GradeCalculationService {
         return max(0, totalPotential - required)
     }
 }
-

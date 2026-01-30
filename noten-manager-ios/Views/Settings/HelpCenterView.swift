@@ -525,7 +525,7 @@ struct HelpCenterView: View {
                     )
                     infoRow(
                         title: "Termine & Pflichten",
-                        text: "Abgabe der Seminararbeit am Dienstag der zweiten Unterrichtswoche des Schuljahres; Präsentation mit Diskussion danach. Seminare sind Pflichtveranstaltungen (Unfallversicherung), bei externen Partnern gelten Hausordnung, keine Vergütung und Verschwiegenheit."
+                        text: "Abgabe der Seminararbeit am Dienstag der zweiten Unterrichtswoche im Januar; Präsentation mit Diskussion danach. Seminare sind Pflichtveranstaltungen (Unfallversicherung), bei externen Partnern gelten Hausordnung, keine Vergütung und Verschwiegenheit."
                     )
                     infoRow(
                         title: "In der App",
@@ -1043,7 +1043,7 @@ struct HelpCenterView: View {
     private func scrollToSection(_ section: HelpCenterSection, using proxy: ScrollViewProxy) {
         hideKeyboard()
         withAnimation(.easeInOut(duration: 0.25)) {
-            expandedSections.insert(section)
+            _ = expandedSections.insert(section)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             withAnimation(.easeInOut(duration: 0.25)) {

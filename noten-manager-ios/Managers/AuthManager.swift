@@ -59,6 +59,7 @@ final class AuthManager: ObservableObject {
 
     // Login
     func signIn(email: String, password: String) async -> SignInResult {
+        if OfflineModeManager.shared.isOfflineModeActive { return .failure }
         guard !isLoading else { return .failure }
         await MainActor.run { self.isLoading = true; self.errorMessage = nil }
         do {
@@ -88,6 +89,7 @@ final class AuthManager: ObservableObject {
 
     // Registrierung
     func signUp(name: String, email: String, password: String) async {
+        if OfflineModeManager.shared.isOfflineModeActive { return }
         guard !isLoading else { return }
         await MainActor.run { self.isLoading = true; self.errorMessage = nil }
         do {
@@ -119,6 +121,7 @@ final class AuthManager: ObservableObject {
     }
 
     func sendVerificationEmail() async -> String? {
+        if OfflineModeManager.shared.isOfflineModeActive { return "Offline-Modus aktiv. E-Mail kann nicht gesendet werden." }
         guard let user = Auth.auth().currentUser else { return "Kein angemeldeter Nutzer." }
         do {
             try await user.sendEmailVerification()
@@ -131,6 +134,7 @@ final class AuthManager: ObservableObject {
 
     // Passwort zurücksetzen
     func resetPassword(email: String) async {
+        if OfflineModeManager.shared.isOfflineModeActive { return }
         guard !isLoading else { return }
         await MainActor.run { self.isLoading = true; self.errorMessage = nil }
         do {
@@ -147,6 +151,7 @@ final class AuthManager: ObservableObject {
 
     @MainActor
     func signInWithGoogle(presenting viewController: UIViewController?) async -> SignInResult {
+        if OfflineModeManager.shared.isOfflineModeActive { return .failure }
         guard !isLoading else { return .failure }
         guard let viewController else {
             errorMessage = "Kein aktives Fenster für Google Login gefunden."
@@ -224,6 +229,7 @@ final class AuthManager: ObservableObject {
     // Apple Sign-In
     @MainActor
     func signInWithApple(presentationAnchor: ASPresentationAnchor?) async -> SignInResult {
+        if OfflineModeManager.shared.isOfflineModeActive { return .failure }
         guard !isLoading else { return .failure }
         guard let anchor = presentationAnchor else {
             errorMessage = "Kein Fenster für Apple Login gefunden."

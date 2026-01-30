@@ -14,6 +14,10 @@ struct AppSettingsView: View {
     @EnvironmentObject var storeKit: StoreKitManager
     @AppStorage("launchOfferPurchased") private var launchOfferPurchased = false
     @AppStorage("showSpeedometerOnLaunch") private var showSpeedometerOnLaunch: Bool = false
+    @State private var showAdminDebugSheet: Bool = false
+    private var isAdminUser: Bool {
+        store.isAdmin
+    }
     
     @State private var newName: String = ""
     @State private var isSavingName: Bool = false
@@ -347,6 +351,10 @@ struct AppSettingsView: View {
                         infoCard
                             .softFadeIn(enabled: animationsOn, delay: 0.40, offset: 12)
                         
+                        if isAdminUser {
+                            adminCard
+                                .softFadeIn(enabled: animationsOn, delay: 0.44, offset: 12)
+                        }
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
@@ -568,6 +576,11 @@ struct AppSettingsView: View {
                 case .failure(let error):
                     print("Offer code redemption failed: \(error)")
                 }
+            }
+            .sheet(isPresented: $showAdminDebugSheet) {
+                AdminDebugSheet()
+                    .environmentObject(store)
+                    .environmentObject(storeKit)
             }
         }
     }
@@ -1420,6 +1433,30 @@ struct AppSettingsView: View {
                 private func deactivateOffline() {
                     offlineManager.deactivateOfflineMode()
                     offlineStatusMessage = "Offline-Modus beendet. Live-Synchronisation wird wiederhergestellt."
+                }
+                
+                private var adminCard: some View {
+                    SettingsCard(
+                        title: "Admin Tools",
+                        subtitle: "Debug & Testing",
+                        systemImage: "wrench.and.screwdriver.fill",
+                        accent: .red
+                    ) {
+                        SettingsSectionBox {
+                            Button {
+                                showAdminDebugSheet = true
+                            } label: {
+                                HStack {
+                                    Label("Admin Panel öffnen", systemImage: "terminal.fill")
+                                        .font(.body)
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
                 }
                 
                 private var infoCard: some View {
@@ -3670,3 +3707,206 @@ struct AppSettingsView: View {
                     }
                 }
             }
+
+
+// MARK: - Admin Debug Sheet
+
+struct AdminDebugSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject var store: GradesStore
+    @EnvironmentObject var storeKit: StoreKitManager
+    @State private var showSubscriptionOffer: Bool = false
+    @State private var showWhatsNew: Bool = false
+    @State private var showOnboarding: Bool = false
+    @State private var statusMessage: String? = nil
+    
+    private var isPro: Bool {
+        storeKit.isSubscriptionActive || UserDefaults.standard.bool(forKey: "launchOfferPurchased")
+    }
+    
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 16) {
+                    // Header
+                    VStack(spacing: 4) {
+                        Image(systemName: "wrench.and.screwdriver.fill")
+                            .font(.system(size: 48, weight: .bold))
+                            .foregroundStyle(.red)
+                        Text("Admin Debug Panel")
+                            .font(.title2.weight(.bold))
+                        Text("Nur für Entwickler sichtbar")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 20)
+                    .padding(.bottom, 10)
+                    
+                    // User Info Card
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 8) {
+                            LabeledContent("User ID", value: Auth.auth().currentUser?.uid ?? "Unknown")
+                            LabeledContent("Email", value: Auth.auth().currentUser?.email ?? "Unknown")
+                            LabeledContent("Pro Status", value: isPro ? "Active ✅" : "Inactive")
+                            LabeledContent("Subscription", value: storeKit.isSubscriptionActive ? "Active" : "None")
+                            LabeledContent("Admin Status", value: store.isAdmin ? "TRUE ✅" : "FALSE")
+                            LabeledContent("Last Seen Version", value: store.lastSeenVersion ?? "nil")
+                            LabeledContent("App Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown")
+                        }
+                        .font(.footnote.monospaced())
+                    } label: {
+                        Label("User Info", systemImage: "person.circle.fill")
+                    }
+                    .padding(.horizontal)
+                    
+                    // Sheet Triggers
+                    GroupBox {
+                        VStack(spacing: 12) {
+                            Button {
+                                showWhatsNew = true
+                            } label: {
+                                HStack {
+                                    Label("What's New anzeigen", systemImage: "sparkles")
+                                    Spacer()
+                                    Image(systemName: "arrow.up.right.square")
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            
+                            Button {
+                                showSubscriptionOffer = true
+                            } label: {
+                                HStack {
+                                    Label("Subscription Offer anzeigen", systemImage: "creditcard.fill")
+                                    Spacer()
+                                    Image(systemName: "arrow.up.right.square")
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            
+                            Button {
+                                showOnboarding = true
+                            } label: {
+                                HStack {
+                                    Label("Onboarding anzeigen", systemImage: "figure.wave")
+                                    Spacer()
+                                    Image(systemName: "arrow.up.right.square")
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    } label: {
+                        Label("Sheets anzeigen", systemImage: "rectangle.on.rectangle.angled")
+                    }
+                    .padding(.horizontal)
+                    
+                    // Reset Actions
+                    GroupBox {
+                        VStack(spacing: 12) {
+                            Button {
+                                store.updateLastSeenVersion(to: "0.0.0")
+                                statusMessage = "lastSeenVersion -> 0.0.0 (What's New wird beim nächsten Start angezeigt)"
+                            } label: {
+                                HStack {
+                                    Label("What's New zurücksetzen", systemImage: "arrow.counterclockwise")
+                                    Spacer()
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.orange)
+                            
+                            Button {
+                                UserDefaults.standard.set(false, forKey: "launchOfferPurchased")
+                                statusMessage = "launchOfferPurchased -> false"
+                            } label: {
+                                HStack {
+                                    Label("Launch Offer Reset", systemImage: "gift.fill")
+                                    Spacer()
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.orange)
+                            
+                            Button {
+                                Task {
+                                    guard let uid = Auth.auth().currentUser?.uid else { return }
+                                    try? await FirebaseFirestore.Firestore.firestore().collection("users").document(uid).updateData(["onboardingRequired": true])
+                                    store.onboardingRequired = true
+                                    statusMessage = "onboardingRequired -> true"
+                                }
+                            } label: {
+                                HStack {
+                                    Label("Onboarding zurücksetzen", systemImage: "arrow.triangle.turn.up.right.circle.fill")
+                                    Spacer()
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.orange)
+                        }
+                    } label: {
+                        Label("Zurücksetzen", systemImage: "arrow.counterclockwise.circle")
+                    }
+                    .padding(.horizontal)
+                    
+                    // Status Message
+                    if let statusMessage {
+                        Text(statusMessage)
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                            .padding(.horizontal)
+                            .padding(.vertical, 8)
+                            .background(Color.green.opacity(0.15))
+                            .cornerRadius(8)
+                            .padding(.horizontal)
+                    }
+                    
+                    Spacer(minLength: 40)
+                }
+            }
+            .background(
+                ThemedBackground(
+                    isDark: colorScheme == .dark,
+                    isFeminine: store.theme == "feminine",
+                    intensity: store.themeBackgroundIntensity
+                )
+            )
+            .navigationTitle("Admin Panel")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Fertig") {
+                        dismiss()
+                    }
+                }
+            }
+            .sheet(isPresented: $showWhatsNew) {
+                WhatsNewSheet()
+                    .environmentObject(store)
+            }
+            .sheet(isPresented: $showSubscriptionOffer) {
+                SubscriptionOfferSheetView(
+                    onLater: {},
+                    onPurchaseSuccess: {
+                        Task {
+                            await storeKit.refreshSubscriptionStatus()
+                            await MainActor.run {
+                                showSubscriptionOffer = false
+                            }
+                        }
+                    }
+                )
+                .environmentObject(storeKit)
+                .environmentObject(store)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.hidden)
+            }
+            .sheet(isPresented: $showOnboarding) {
+                OnboardingFunnelView(isSchoolYearChange: false) {
+                    showOnboarding = false
+                }
+                .environmentObject(store)
+            }
+        }
+    }
+}

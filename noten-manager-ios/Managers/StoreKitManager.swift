@@ -254,6 +254,13 @@ final class StoreKitManager: ObservableObject {
         return false
     }
 
+    @discardableResult
+    func refreshAllStatus() async -> Bool {
+        let lifetime = await refreshPurchasedStatus()
+        let subscription = await refreshSubscriptionStatus()
+        return lifetime || subscription
+    }
+
     private func listenForTransactions() async {
         for await result in Transaction.updates {
             guard let transaction = try? checkVerified(result) else { continue }

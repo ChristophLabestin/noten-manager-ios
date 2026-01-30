@@ -9,20 +9,31 @@ final class FirestoreService {
     private let db = Firestore.firestore()
 
     func setUserProfile(profile: UserProfile, onboardingCompleted: Bool = true) async throws {
-        try await db.collection("users").document(profile.id).setData([
+        if OfflineModeManager.shared.isOfflineModeActive { return }
+        var data: [String: Any] = [
             "id": profile.id,
             "name": profile.name,
             "email": profile.email,
             "encryptionSalt": profile.encryptionSalt,
-            "onboardingCompleted": onboardingCompleted,
-            "registeredInVersion": profile.registeredInVersion,
-            "registrationPlatform": profile.registrationPlatform,
-            "purchaseType": profile.purchaseType,
-            "subscriptionTier": profile.subscriptionTier
-        ], merge: true)
+            "onboardingCompleted": onboardingCompleted
+        ]
+        if let registeredInVersion = profile.registeredInVersion {
+            data["registeredInVersion"] = registeredInVersion
+        }
+        if let registrationPlatform = profile.registrationPlatform {
+            data["registrationPlatform"] = registrationPlatform
+        }
+        if let purchaseType = profile.purchaseType {
+            data["purchaseType"] = purchaseType
+        }
+        if let subscriptionTier = profile.subscriptionTier {
+            data["subscriptionTier"] = subscriptionTier
+        }
+        try await db.collection("users").document(profile.id).setData(data, merge: true)
     }
     
     func updateUserProfileField(userId: String, field: String, value: Any) async throws {
+        if OfflineModeManager.shared.isOfflineModeActive { return }
         try await db.collection("users").document(userId).updateData([
             field: value
         ])
@@ -54,6 +65,7 @@ final class FirestoreService {
     }
 
     func createSupportTicket(userId: String, email: String?, subject: String, message: String) async throws {
+        if OfflineModeManager.shared.isOfflineModeActive { return }
         var data: [String: Any] = [
             "userId": userId,
             "subject": subject,
@@ -68,12 +80,41 @@ final class FirestoreService {
     }
 
     func getUserSupportTickets(userId: String) async throws -> [SupportTicket] {
-        let snap = try await db.collection("supportTickets")
-            .whereField("userId", isEqualTo: userId)
-            .order(by: "createdAt", descending: true)
-            .getDocuments()
-        
-        return snap.documents.compactMap { parseSupportTicket(from: $0) }
+        let baseQuery = db.collection("supportTickets").whereField("userId", isEqualTo: userId)
+        do {
+            let snap = try await baseQuery
+                .order(by: "createdAt", descending: true)
+                .getDocuments()
+            var tickets = snap.documents.compactMap { parseSupportTicket(from: $0) }
+            if tickets.isEmpty {
+                let legacySnap = try await db.collection("users").document(userId)
+                    .collection("supportTickets")
+                    .order(by: "createdAt", descending: true)
+                    .getDocuments()
+                let legacy = legacySnap.documents.compactMap { parseSupportTicket(from: $0) }
+                if !legacy.isEmpty {
+                    tickets = legacy
+                }
+            }
+            return tickets
+        } catch {
+            let nsError = error as NSError
+            if nsError.domain == FirestoreErrorDomain, nsError.code == FirestoreErrorCode.failedPrecondition.rawValue {
+                let snap = try await baseQuery.getDocuments()
+                var tickets = snap.documents.compactMap { parseSupportTicket(from: $0) }
+                if tickets.isEmpty {
+                    let legacySnap = try await db.collection("users").document(userId)
+                        .collection("supportTickets")
+                        .getDocuments()
+                    let legacy = legacySnap.documents.compactMap { parseSupportTicket(from: $0) }
+                    if !legacy.isEmpty {
+                        tickets = legacy
+                    }
+                }
+                return tickets.sorted { $0.createdAt > $1.createdAt }
+            }
+            throw error
+        }
     }
 
     func getSupportTicket(ticketId: String, userId: String? = nil) async throws -> SupportTicket? {
@@ -84,6 +125,7 @@ final class FirestoreService {
     }
 
     func addSupportTicketUpdate(ticketId: String, userId: String, message: String) async throws {
+        if OfflineModeManager.shared.isOfflineModeActive { return }
         let now = Timestamp(date: Date())
         let update: [String: Any] = [
             "message": message,
@@ -151,6 +193,7 @@ final class FirestoreService {
 
     /// Grants admin access for 24 hours and creates a support access request
     func grantAdminAccess(userId: String, message: String, notifyByPush: Bool, notifyByEmail: Bool, email: String?, allowGradeDecryption: Bool) async throws -> String {
+        if OfflineModeManager.shared.isOfflineModeActive { return "" }
         let expiresAt = Date().addingTimeInterval(24 * 60 * 60) // 24 hours
         let requestId = UUID().uuidString
         
@@ -181,6 +224,7 @@ final class FirestoreService {
 
     /// Revokes admin access immediately
     func revokeAdminAccess(userId: String) async throws {
+        if OfflineModeManager.shared.isOfflineModeActive { return }
         try await db.collection("users").document(userId).setData([
             "adminAccessGranted": false,
             "adminAccessExpiresAt": FieldValue.delete()
@@ -223,18 +267,35 @@ final class FirestoreService {
 
     // MARK: - Notification Tokens
 
-    func updateFcmToken(userId: String, token: String) async {
+    func updateFcmToken(userId: String, deviceId: String, token: String) async {
+        if OfflineModeManager.shared.isOfflineModeActive { return }
         do {
-            try await db.collection("users").document(userId).updateData([
-                "fcmTokens": FieldValue.arrayUnion([token]),
+            let userRef = db.collection("users").document(userId)
+            let tokenRef = userRef.collection("fcmTokens").document(deviceId)
+
+            try await tokenRef.setData([
+                "token": token,
+                "deviceId": deviceId,
+                "platform": "ios",
+                "updatedAt": FieldValue.serverTimestamp()
+            ], merge: true)
+
+            try await userRef.updateData([
                 "lastTokenUpdate": Timestamp(date: Date()),
                 "lastPlatform": "ios"
             ])
         } catch {
             print("Error updating FCM token: \(error)")
             // If document doesn't exist, create it (partially)
-            try? await db.collection("users").document(userId).setData([
-                "fcmTokens": [token],
+            let userRef = db.collection("users").document(userId)
+            let tokenRef = userRef.collection("fcmTokens").document(deviceId)
+            try? await tokenRef.setData([
+                "token": token,
+                "deviceId": deviceId,
+                "platform": "ios",
+                "updatedAt": FieldValue.serverTimestamp()
+            ], merge: true)
+            try? await userRef.setData([
                 "lastTokenUpdate": Timestamp(date: Date()),
                 "lastPlatform": "ios"
             ], merge: true)
@@ -279,6 +340,7 @@ final class FirestoreService {
     
     /// Logs that a user has seen a specific feature onboarding/info sheet
     func logFeatureOnboardingSeen(featureId: String) async {
+        if OfflineModeManager.shared.isOfflineModeActive { return }
         guard let uid = Auth.auth().currentUser?.uid else { return }
         let logData: [String: Any] = [
             "userId": uid,
@@ -295,6 +357,7 @@ final class FirestoreService {
     // MARK: - Purchase Tracking
     
     func updateUserPurchaseMetadata(uid: String, type: String, tier: String?) async {
+        if OfflineModeManager.shared.isOfflineModeActive { return }
         var data: [String: Any] = ["purchaseType": type]
         if let tier {
             data["subscriptionTier"] = tier

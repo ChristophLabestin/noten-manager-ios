@@ -46,6 +46,10 @@ struct MSSDetailedCalculationView: View {
             ScrollView {
                 VStack(spacing: 20) {
                     summaryCard
+                    Text("Tippe auf ein Fach für Details.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                     
                     let categories = Array(Set(breakdown.items.map { $0.category })).sorted()
                     ForEach(categories, id: \.self) { category in
@@ -188,7 +192,9 @@ struct MSSDetailedCalculationView: View {
             VStack(spacing: 0) {
                 ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                     Button {
-                        if category == "Fächer", let subject = store.subjects.first(where: { $0.name == item.label }) {
+                        if category == "Fächer",
+                           let subjectName = item.subjectName,
+                           let subject = store.subjects.first(where: { $0.name == subjectName }) {
                             self.selectedSubject = subject
                         }
                     } label: {

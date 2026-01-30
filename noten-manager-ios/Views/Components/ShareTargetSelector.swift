@@ -51,47 +51,21 @@ struct ShareTargetSelector: View {
                                 .padding(.vertical, 8)
                             } else {
                                 // Summary Info
-                                if !selectedCourseIds.isEmpty || !selectedClassIds.isEmpty {
+                                if !selectedCourseIds.isEmpty {
                                     HStack(spacing: 6) {
                                         Image(systemName: "info.circle.fill")
                                             .font(.caption)
                                             .foregroundStyle(.indigo)
-                                        let classCount = selectedClassIds.count
                                         let courseCount = selectedCourseIds.count
-                                        let text = [
-                                            classCount > 0 ? "\(classCount) \(classCount == 1 ? "Klasse" : "Klassen")" : nil,
-                                            courseCount > 0 ? "\(courseCount) \(courseCount == 1 ? "Kurs" : "Kurse")" : nil
-                                        ].compactMap { $0 }.joined(separator: " & ")
                                         
-                                        Text("Geteilt mit \(text)")
+                                        Text("Geteilt mit \(courseCount) \(courseCount == 1 ? "Kurs" : "Kurse")")
                                             .font(.caption.weight(.medium))
                                             .foregroundStyle(.secondary)
                                     }
                                     .padding(.horizontal, 4)
                                 }
 
-                                // 2. Classes Section (Primary Classes)
-                                if !store.classIds.isEmpty {
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        Text("Meine Klassen")
-                                            .font(.caption.weight(.bold))
-                                            .foregroundStyle(.secondary)
-                                            .textCase(.uppercase)
-                                        
-                                        let uniqueClassIds = Array(Set(store.classIds)).sorted()
-                                        FlowLayout(spacing: 8) {
-                                            ForEach(uniqueClassIds, id: \.self) { cid in
-                                                ClassSelectionChip(
-                                                    classId: cid,
-                                                    isSelected: selectedClassIds.contains(cid)
-                                                ) {
-                                                    toggleClass(cid)
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                
+
                                 // 3. Courses Section (Specific Subjects/Branches)
                                 if !availableCourses.isEmpty {
                                     VStack(alignment: .leading, spacing: 8) {
@@ -170,13 +144,6 @@ struct ShareTargetSelector: View {
         }
     }
     
-    private func toggleClass(_ cid: String) {
-        if selectedClassIds.contains(cid) {
-            selectedClassIds.remove(cid)
-        } else {
-            selectedClassIds.insert(cid)
-        }
-    }
 
     private func toggleGroup(_ gid: String) {
         if selectedGroupIds.contains(gid) {
@@ -259,53 +226,6 @@ struct CourseSelectionChip: View {
     }
 }
 
-// MARK: - Subviews
-
-struct ClassSelectionChip: View {
-    @EnvironmentObject var store: GradesStore
-    @Environment(\.colorScheme) private var colorScheme
-    let classId: String
-    let isSelected: Bool
-    let action: () -> Void
-    
-    private var backgroundColor: Color {
-        if isSelected {
-            return .indigo
-        }
-        if colorScheme == .dark {
-            return Color(red: 0.16, green: 0.16, blue: 0.18)
-        } else {
-            return Color(uiColor: .systemGray6)
-        }
-    }
-    
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Text(store.classNames[classId] ?? "Klasse")
-                    .lineLimit(1)
-                
-                if isSelected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.caption)
-                }
-            }
-            .font(.subheadline.weight(.medium))
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(backgroundColor)
-            )
-            .foregroundStyle(isSelected ? .white : .primary)
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(isSelected ? Color.clear : Color.primary.opacity(0.1), lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-}
 
 struct GroupSelectionChip: View {
     @EnvironmentObject var store: GradesStore
