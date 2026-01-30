@@ -1,0 +1,420 @@
+import Foundation
+import Combine
+@preconcurrency import UserNotifications
+
+struct NotificationInboxItem: Identifiable, Codable, Hashable, Sendable {
+    enum Kind: String, Codable {
+        case exam
+        case homework
+        case daily
+        case support
+        case unknown
+    }
+
+    let id: String
+    let title: String
+    let body: String
+    let date: Date
+    let kind: Kind
+    let examId: String?
+    let examIds: [String]?
+    let homeworkId: String?
+    let homeworkIds: [String]?
+    let ticketId: String?
+    let groupId: String?
+    let isRead: Bool
+
+    init(
+        id: String,
+        title: String,
+        body: String,
+        date: Date,
+        kind: Kind,
+        examId: String?,
+        examIds: [String]? = nil,
+        homeworkId: String?,
+        homeworkIds: [String]? = nil,
+        ticketId: String? = nil,
+        groupId: String?,
+        isRead: Bool = false
+    ) {
+        self.id = id
+        self.title = title
+        self.body = body
+        self.date = date
+        self.kind = kind
+        self.examId = examId
+        self.examIds = examIds
+        self.homeworkId = homeworkId
+        self.homeworkIds = homeworkIds
+        self.ticketId = ticketId
+        self.groupId = groupId
+        self.isRead = isRead
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case body
+        case date
+        case kind
+        case examId
+        case examIds
+        case homeworkId
+        case homeworkIds
+        case ticketId
+        case groupId
+        case isRead
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        body = try container.decode(String.self, forKey: .body)
+        date = try container.decode(Date.self, forKey: .date)
+        kind = try container.decode(Kind.self, forKey: .kind)
+        examId = try container.decodeIfPresent(String.self, forKey: .examId)
+        examIds = try container.decodeIfPresent([String].self, forKey: .examIds)
+        homeworkId = try container.decodeIfPresent(String.self, forKey: .homeworkId)
+        homeworkIds = try container.decodeIfPresent([String].self, forKey: .homeworkIds)
+        ticketId = try container.decodeIfPresent(String.self, forKey: .ticketId)
+        groupId = try container.decodeIfPresent(String.self, forKey: .groupId)
+        isRead = try container.decodeIfPresent(Bool.self, forKey: .isRead) ?? false
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(body, forKey: .body)
+        try container.encode(date, forKey: .date)
+        try container.encode(kind, forKey: .kind)
+        try container.encodeIfPresent(examId, forKey: .examId)
+        try container.encodeIfPresent(examIds, forKey: .examIds)
+        try container.encodeIfPresent(homeworkId, forKey: .homeworkId)
+        try container.encodeIfPresent(homeworkIds, forKey: .homeworkIds)
+        try container.encodeIfPresent(ticketId, forKey: .ticketId)
+        try container.encodeIfPresent(groupId, forKey: .groupId)
+        try container.encode(isRead, forKey: .isRead)
+    }
+}
+
+@MainActor
+final class NotificationInboxStore: ObservableObject {
+    static let shared = NotificationInboxStore()
+
+    @Published private(set) var items: [NotificationInboxItem] = []
+    @Published private(set) var broadcasts: [BroadcastNotification] = []
+    @Published private(set) var pendingOpenItem: NotificationInboxItem? = nil
+
+    private let storageKey = "notification_inbox_items_v1"
+
+    var hasItems: Bool { !items.isEmpty }
+    var hasUnread: Bool { items.contains { !$0.isRead } }
+
+    private init() {
+        load()
+    }
+
+    func refreshFromDelivered() {
+        Task { @MainActor in
+            let notifications = await UNUserNotificationCenter.current().deliveredNotifications()
+            let items = notifications.compactMap { NotificationInboxItem.from($0) }
+            mergeDelivered(items)
+            await fetchBroadcasts()
+        }
+    }
+
+    func fetchBroadcasts() async {
+        do {
+            let fetched = try await FirestoreService.shared.getActiveBroadcastNotifications()
+            broadcasts = fetched
+            removeBroadcastDuplicates(using: fetched)
+        } catch {
+            print("Error fetching broadcasts: \(error)")
+        }
+    }
+
+    func record(item: NotificationInboxItem) {
+        if merge(item: item) {
+            sortAndPersist()
+        }
+    }
+
+    func queueOpen(_ item: NotificationInboxItem) {
+        pendingOpenItem = item
+    }
+
+    func clearPendingOpen() {
+        pendingOpenItem = nil
+    }
+
+    func clearAll() {
+        items.removeAll()
+        persist()
+        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+    }
+
+    func remove(_ item: NotificationInboxItem) {
+        items.removeAll { $0.id == item.id }
+        persist()
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [item.id])
+    }
+
+    private func removeBroadcastDuplicates(using broadcasts: [BroadcastNotification]) {
+        guard !broadcasts.isEmpty else { return }
+        let keys = Set(broadcasts.map { normalizeKey(title: $0.title, body: $0.body) })
+        let originalCount = items.count
+        items.removeAll { item in
+            item.kind == .unknown && keys.contains(normalizeKey(title: item.title, body: item.body))
+        }
+        if items.count != originalCount {
+            persist()
+        }
+    }
+
+    private func normalizeKey(title: String, body: String) -> String {
+        "\(normalizeText(title))|\(normalizeText(body))"
+    }
+
+    private func normalizeText(_ text: String) -> String {
+        text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+    }
+
+    private func mergeDelivered(_ delivered: [NotificationInboxItem]) {
+        var changed = false
+        for item in delivered {
+            changed = merge(item: item) || changed
+        }
+        if changed {
+            sortAndPersist()
+        } else {
+            items.sort { $0.date > $1.date }
+        }
+    }
+
+    @discardableResult
+    private func merge(item: NotificationInboxItem) -> Bool {
+        if let index = items.firstIndex(where: { $0.id == item.id }) {
+            let existing = items[index]
+            let resolvedRead = existing.isRead || item.isRead
+            let merged = item.isRead == resolvedRead ? item : item.withRead(resolvedRead)
+            if existing != merged {
+                items[index] = merged
+                return true
+            }
+            return false
+        }
+        items.append(item)
+        return true
+    }
+
+    private func sortAndPersist() {
+        items.sort { $0.date > $1.date }
+        persist()
+    }
+
+    private func persist() {
+        let encoder = JSONEncoder()
+        if let data = try? encoder.encode(items) {
+            UserDefaults.standard.set(data, forKey: storageKey)
+        }
+    }
+
+    private func load() {
+        guard let data = UserDefaults.standard.data(forKey: storageKey) else { return }
+        let decoder = JSONDecoder()
+        if let decoded = try? decoder.decode([NotificationInboxItem].self, from: data) {
+            items = decoded.sorted(by: { $0.date > $1.date })
+        }
+    }
+
+    func markRead(_ id: String) {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        guard !items[index].isRead else { return }
+        items[index] = items[index].withRead(true)
+        persist()
+    }
+}
+
+extension NotificationInboxItem {
+    static func from(_ notification: UNNotification, markRead: Bool = false) -> NotificationInboxItem? {
+        let request = notification.request
+        let content = request.content
+        let identifier = request.identifier
+        let userInfo = content.userInfo
+
+        let kind = Kind.from(identifier: identifier, userInfo: userInfo)
+        let explicitExamId = stringValue(from: userInfo, keys: ["examId", "gcm.notification.examId"]) ?? extractExamId(from: identifier)
+        let examIds = extractExamIds(from: userInfo, fallback: explicitExamId)
+        let examId = explicitExamId ?? (examIds.count == 1 ? examIds.first : nil)
+        let explicitHomeworkId = stringValue(from: userInfo, keys: ["homeworkId", "gcm.notification.homeworkId"]) ?? extractHomeworkId(from: identifier)
+        let homeworkIds = extractHomeworkIds(from: userInfo, fallback: explicitHomeworkId)
+        let homeworkId = explicitHomeworkId ?? (homeworkIds.count == 1 ? homeworkIds.first : nil)
+        let ticketId = stringValue(from: userInfo, keys: ["ticketId", "gcm.notification.ticketId"])
+        let groupId = stringValue(from: userInfo, keys: ["groupId", "gcm.notification.groupId"])
+
+        let title = content.title.isEmpty ? "Benachrichtigung" : content.title
+        let body = content.body
+
+        return NotificationInboxItem(
+            id: identifier,
+            title: title,
+            body: body,
+            date: notification.date,
+            kind: kind,
+            examId: examId,
+            examIds: examIds.isEmpty ? nil : examIds,
+            homeworkId: homeworkId,
+            homeworkIds: homeworkIds.isEmpty ? nil : homeworkIds,
+            ticketId: ticketId,
+            groupId: groupId,
+            isRead: markRead
+        )
+    }
+
+    func withRead(_ isRead: Bool) -> NotificationInboxItem {
+        NotificationInboxItem(
+            id: id,
+            title: title,
+            body: body,
+            date: date,
+            kind: kind,
+            examId: examId,
+            examIds: examIds,
+            homeworkId: homeworkId,
+            homeworkIds: homeworkIds,
+            ticketId: ticketId,
+            groupId: groupId,
+            isRead: isRead
+        )
+    }
+
+    private static func extractExamIds(from userInfo: [AnyHashable: Any], fallback: String?) -> [String] {
+        if let ids = userInfo["examIds"] as? [String] {
+            return ids
+        }
+        if let ids = userInfo["examIds"] as? [Any] {
+            let strings = ids.compactMap { $0 as? String }
+            if !strings.isEmpty {
+                return strings
+            }
+        }
+        if let ids = userInfo["gcm.notification.examIds"] as? [String] {
+            return ids
+        }
+        if let ids = userInfo["gcm.notification.examIds"] as? [Any] {
+            let strings = ids.compactMap { $0 as? String }
+            if !strings.isEmpty {
+                return strings
+            }
+        }
+        if let encoded = stringValue(from: userInfo, keys: ["examIds", "gcm.notification.examIds"]) {
+            let parsed = parseIdList(encoded)
+            if !parsed.isEmpty { return parsed }
+        }
+        if let fallback, !fallback.isEmpty {
+            return [fallback]
+        }
+        return []
+    }
+
+    private static func extractHomeworkIds(from userInfo: [AnyHashable: Any], fallback: String?) -> [String] {
+        if let ids = userInfo["homeworkIds"] as? [String] {
+            return ids
+        }
+        if let ids = userInfo["homeworkIds"] as? [Any] {
+            let strings = ids.compactMap { $0 as? String }
+            if !strings.isEmpty {
+                return strings
+            }
+        }
+        if let ids = userInfo["gcm.notification.homeworkIds"] as? [String] {
+            return ids
+        }
+        if let ids = userInfo["gcm.notification.homeworkIds"] as? [Any] {
+            let strings = ids.compactMap { $0 as? String }
+            if !strings.isEmpty {
+                return strings
+            }
+        }
+        if let encoded = stringValue(from: userInfo, keys: ["homeworkIds", "gcm.notification.homeworkIds"]) {
+            let parsed = parseIdList(encoded)
+            if !parsed.isEmpty { return parsed }
+        }
+        if let fallback, !fallback.isEmpty {
+            return [fallback]
+        }
+        return []
+    }
+
+    private static func extractExamId(from identifier: String) -> String? {
+        guard identifier.hasPrefix("exam_") else { return nil }
+        let components = identifier.split(separator: "_", maxSplits: 2, omittingEmptySubsequences: true)
+        guard components.count >= 3 else { return nil }
+        return String(components[2])
+    }
+
+    private static func extractHomeworkId(from identifier: String) -> String? {
+        guard identifier.hasPrefix("homework_") else { return nil }
+        let components = identifier.split(separator: "_", maxSplits: 2, omittingEmptySubsequences: true)
+        guard components.count >= 3 else { return nil }
+        return String(components[2])
+    }
+
+    private static func stringValue(from userInfo: [AnyHashable: Any], keys: [String]) -> String? {
+        for key in keys {
+            if let value = userInfo[key] as? String, !value.isEmpty {
+                return value
+            }
+            if let value = userInfo[key] {
+                let stringified = String(describing: value)
+                if !stringified.isEmpty, stringified != "null", stringified != "nil" {
+                    return stringified
+                }
+            }
+        }
+        return nil
+    }
+
+    private static func parseIdList(_ raw: String) -> [String] {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("[") {
+            if let data = trimmed.data(using: .utf8),
+               let decoded = try? JSONSerialization.jsonObject(with: data) as? [Any] {
+                let strings = decoded.compactMap { $0 as? String }
+                if !strings.isEmpty { return strings }
+            }
+        }
+        if trimmed.contains(",") {
+            let parts = trimmed.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            return parts.filter { !$0.isEmpty }
+        }
+        return trimmed.isEmpty ? [] : [trimmed]
+    }
+}
+
+extension NotificationInboxItem.Kind {
+    static func from(identifier: String, userInfo: [AnyHashable: Any]) -> NotificationInboxItem.Kind {
+        if identifier.hasPrefix("exam_") { return .exam }
+        if identifier.hasPrefix("homework_") { return .homework }
+        if identifier.hasPrefix("daily_reminder_") { return .daily }
+        let action = NotificationInboxItem.stringValue(from: userInfo, keys: ["action", "gcm.notification.action"])?.uppercased()
+        let sheetType = NotificationInboxItem.stringValue(
+            from: userInfo,
+            keys: ["sheetType", "sheet_type", "gcm.notification.sheetType", "gcm.notification.sheet_type"]
+        )
+        if (action == "OPEN_SHEET" || action == nil),
+           sheetType == "daily_summary" {
+            return .daily
+        }
+        if NotificationInboxItem.stringValue(from: userInfo, keys: ["examId", "gcm.notification.examId"]) != nil { return .exam }
+        if NotificationInboxItem.stringValue(from: userInfo, keys: ["homeworkId", "gcm.notification.homeworkId"]) != nil { return .homework }
+        if NotificationInboxItem.stringValue(from: userInfo, keys: ["ticketId", "gcm.notification.ticketId"]) != nil { return .support }
+        return .unknown
+    }
+}

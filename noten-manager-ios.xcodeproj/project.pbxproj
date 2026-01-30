@@ -9,9 +9,11 @@
 /* Begin PBXBuildFile section */
 		55050D342ED6292C0082A2EE /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 55050D332ED6292C0082A2EE /* GoogleSignIn */; };
 		55050D362ED6292C0082A2EE /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 55050D352ED6292C0082A2EE /* GoogleSignInSwift */; };
+		5515A4462F0F9E6C00A83829 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 5515A4452F0F9E6C00A83829 /* FirebaseMessaging */; };
 		5535B85D2ECC2C7A00B778F4 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 5535B85C2ECC2C7A00B778F4 /* FirebaseAuth */; };
 		5535B85F2ECC2C7F00B778F4 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5535B85E2ECC2C7F00B778F4 /* FirebaseCore */; };
 		5535B8612ECC2C8500B778F4 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 5535B8602ECC2C8500B778F4 /* FirebaseFirestore */; };
+		5535B9002ECC2C7A00B778F4 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 5535B9012ECC2C7A00B778F4 /* FirebaseMessaging */; };
 		553A0CE92EDA312F00D93B93 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 553A0CE82EDA312F00D93B93 /* WidgetKit.framework */; };
 		553A0CEB2EDA312F00D93B93 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 553A0CEA2EDA312F00D93B93 /* SwiftUI.framework */; };
 		553A0CFC2EDA313200D93B93 /* ExamCountdownWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 553A0CE72EDA312F00D93B93 /* ExamCountdownWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -42,10 +44,13 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		0B81CAE7A7258A7CBD8BC078 /* noten-manager-iosTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "noten-manager-iosTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		25FA1AE72DAEDFF3F2E009B3 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		5535B84A2ECC21F600B778F4 /* noten-manager-ios.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "noten-manager-ios.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		553A0CE72EDA312F00D93B93 /* ExamCountdownWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ExamCountdownWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		553A0CE82EDA312F00D93B93 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		553A0CEA2EDA312F00D93B93 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		BBDDD1F6B0079669C75F2061 /* GradeEngineTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GradeEngineTests.swift; path = Tests/GradeEngineTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -97,11 +102,13 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5515A4462F0F9E6C00A83829 /* FirebaseMessaging in Frameworks */,
 				55050D362ED6292C0082A2EE /* GoogleSignInSwift in Frameworks */,
 				5535B85F2ECC2C7F00B778F4 /* FirebaseCore in Frameworks */,
 				55050D342ED6292C0082A2EE /* GoogleSignIn in Frameworks */,
 				5535B85D2ECC2C7A00B778F4 /* FirebaseAuth in Frameworks */,
 				5535B8612ECC2C8500B778F4 /* FirebaseFirestore in Frameworks */,
+				5535B9002ECC2C7A00B778F4 /* FirebaseMessaging in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -117,6 +124,14 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		30C144142C5C8CA666544C2A /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				25FA1AE72DAEDFF3F2E009B3 /* Foundation.framework */,
+			);
+			name = iOS;
+			sourceTree = "<group>";
+		};
 		5535B8412ECC21F600B778F4 = {
 			isa = PBXGroup;
 			children = (
@@ -124,6 +139,7 @@
 				553A0CEC2EDA312F00D93B93 /* ExamCountdownWidget */,
 				5535B85B2ECC2C7A00B778F4 /* Frameworks */,
 				5535B84B2ECC21F600B778F4 /* Products */,
+				BBDDD1F6B0079669C75F2061 /* GradeEngineTests.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -132,6 +148,7 @@
 			children = (
 				5535B84A2ECC21F600B778F4 /* noten-manager-ios.app */,
 				553A0CE72EDA312F00D93B93 /* ExamCountdownWidgetExtension.appex */,
+				0B81CAE7A7258A7CBD8BC078 /* noten-manager-iosTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -141,6 +158,7 @@
 			children = (
 				553A0CE82EDA312F00D93B93 /* WidgetKit.framework */,
 				553A0CEA2EDA312F00D93B93 /* SwiftUI.framework */,
+				30C144142C5C8CA666544C2A /* iOS */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -170,8 +188,10 @@
 				5535B85C2ECC2C7A00B778F4 /* FirebaseAuth */,
 				5535B85E2ECC2C7F00B778F4 /* FirebaseCore */,
 				5535B8602ECC2C8500B778F4 /* FirebaseFirestore */,
+				5535B9012ECC2C7A00B778F4 /* FirebaseMessaging */,
 				55050D332ED6292C0082A2EE /* GoogleSignIn */,
 				55050D352ED6292C0082A2EE /* GoogleSignInSwift */,
+				5515A4452F0F9E6C00A83829 /* FirebaseMessaging */,
 			);
 			productName = "noten-manager-ios";
 			productReference = 5535B84A2ECC21F600B778F4 /* noten-manager-ios.app */;
@@ -193,8 +213,6 @@
 				553A0CEC2EDA312F00D93B93 /* ExamCountdownWidget */,
 			);
 			name = ExamCountdownWidgetExtension;
-			packageProductDependencies = (
-			);
 			productName = ExamCountdownWidgetExtension;
 			productReference = 553A0CE72EDA312F00D93B93 /* ExamCountdownWidgetExtension.appex */;
 			productType = "com.apple.product-type.app-extension";
@@ -414,7 +432,7 @@
 				CODE_SIGN_ENTITLEMENTS = "noten-manager-ios/noten-manager-ios.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 1.3;
 				DEVELOPMENT_TEAM = 48BM67TY9G;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -432,17 +450,21 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2.1;
+				MARKETING_VERSION = 1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = "de.christophlabestin.noten-manager-ios";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 6.0;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
@@ -456,7 +478,7 @@
 				CODE_SIGN_ENTITLEMENTS = "noten-manager-ios/noten-manager-ios.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 1.3;
 				DEVELOPMENT_TEAM = 48BM67TY9G;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -474,17 +496,21 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2.1;
+				MARKETING_VERSION = 1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = "de.christophlabestin.noten-manager-ios";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 6.0;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
@@ -496,7 +522,7 @@
 				CODE_SIGN_ENTITLEMENTS = ExamCountdownWidget/ExamCountdownWidget.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 1.3;
 				DEVELOPMENT_TEAM = 48BM67TY9G;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ExamCountdownWidget/Info.plist;
@@ -508,7 +534,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.2.1;
+				MARKETING_VERSION = 1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = "de.christophlabestin.noten-manager-ios.ExamCountdownWidget";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -529,7 +555,7 @@
 				CODE_SIGN_ENTITLEMENTS = ExamCountdownWidget/ExamCountdownWidget.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 1.3;
 				DEVELOPMENT_TEAM = 48BM67TY9G;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ExamCountdownWidget/Info.plist;
@@ -541,7 +567,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.2.1;
+				MARKETING_VERSION = 1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = "de.christophlabestin.noten-manager-ios.ExamCountdownWidget";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -616,6 +642,11 @@
 			package = 55050D322ED6292C0082A2EE /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
 			productName = GoogleSignInSwift;
 		};
+		5515A4452F0F9E6C00A83829 /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5535B85A2ECC29C800B778F4 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
+		};
 		5535B85C2ECC2C7A00B778F4 /* FirebaseAuth */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 5535B85A2ECC29C800B778F4 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
@@ -630,6 +661,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 5535B85A2ECC29C800B778F4 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseFirestore;
+		};
+		5535B9012ECC2C7A00B778F4 /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5535B85A2ECC29C800B778F4 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

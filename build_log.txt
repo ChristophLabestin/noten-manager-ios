@@ -1,0 +1,72 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -scheme noten-manager-ios -destination "platform=iOS Simulator,name=iPhone 16" build
+
+Resolve Package Graph
+
+
+Resolved source packages:
+  GoogleAppMeasurement: https://github.com/google/GoogleAppMeasurement.git @ 12.5.0
+  SwiftProtobuf: https://github.com/apple/swift-protobuf.git @ 1.33.3
+  gRPC: https://github.com/google/grpc-binary.git @ 1.69.1
+  Firebase: https://github.com/firebase/firebase-ios-sdk @ 12.6.0
+  GoogleDataTransport: https://github.com/google/GoogleDataTransport.git @ 10.1.0
+  GTMSessionFetcher: https://github.com/google/gtm-session-fetcher.git @ 3.5.0
+  GoogleSignIn: https://github.com/google/GoogleSignIn-iOS @ 9.0.0
+  GoogleAdsOnDeviceConversion: https://github.com/googleads/google-ads-on-device-conversion-ios-sdk @ 3.2.0
+  leveldb: https://github.com/firebase/leveldb.git @ 1.22.5
+  GoogleUtilities: https://github.com/google/GoogleUtilities.git @ 8.1.0
+  AppAuth: https://github.com/openid/AppAuth-iOS.git @ 2.0.0
+  InteropForGoogle: https://github.com/google/interop-ios-for-google-sdks.git @ 101.0.0
+  GTMAppAuth: https://github.com/google/GTMAppAuth.git @ 5.0.0
+  nanopb: https://github.com/firebase/nanopb.git @ 2.30910.0
+  AppCheck: https://github.com/google/app-check.git @ 11.2.0
+  Promises: https://github.com/google/promises.git @ 2.4.0
+  abseil: https://github.com/google/abseil-cpp-binary.git @ 1.2024072200.0
+
+2026-01-22 21:05:11.806 xcodebuild[33413:5353299] Writing error result bundle to /var/folders/kr/p2ccznmn3glbgzstwv9g7b0c0000gn/T/ResultBundle_2026-22-01_21-05-0011.xcresult
+xcodebuild: error: Unable to find a device matching the provided destination specifier:
+		{ platform:iOS Simulator, OS:latest, name:iPhone 16 }
+
+	The requested device could not be found because no available devices matched the request.
+
+	Available destinations for the "noten-manager-ios" scheme:
+		{ platform:macOS, arch:arm64, variant:Designed for [iPad,iPhone], id:00008132-000868C102D0401C, name:My Mac }
+		{ platform:iOS, arch:arm64, id:00008140-000274EE0413C01C, name:iPhone 16 Pro von Christoph }
+		{ platform:iOS, id:dvtdevice-DVTiPhonePlaceholder-iphoneos:placeholder, name:Any iOS Device }
+		{ platform:iOS Simulator, id:dvtdevice-DVTiOSDeviceSimulatorPlaceholder-iphonesimulator:placeholder, name:Any iOS Simulator Device }
+		{ platform:iOS Simulator, arch:arm64, id:CB60EA10-3B59-42E5-A066-A43A1C71CF43, OS:17.0, name:iPad (10th generation) }
+		{ platform:iOS Simulator, arch:x86_64, id:CB60EA10-3B59-42E5-A066-A43A1C71CF43, OS:17.0, name:iPad (10th generation) }
+		{ platform:iOS Simulator, arch:arm64, id:C7623F8D-1656-44F7-8E60-D9E8573EB42E, OS:26.1, name:iPad (A16) }
+		{ platform:iOS Simulator, arch:arm64, id:214C4E66-51ED-4868-86A2-2766749E796B, OS:17.0, name:iPad Air (5th generation) }
+		{ platform:iOS Simulator, arch:x86_64, id:214C4E66-51ED-4868-86A2-2766749E796B, OS:17.0, name:iPad Air (5th generation) }
+		{ platform:iOS Simulator, arch:arm64, id:D6E29630-9DA3-4FB4-BA0C-EA18EF06834B, OS:26.1, name:iPad Air 11-inch (M3) }
+		{ platform:iOS Simulator, arch:arm64, id:11E42589-8174-4BAD-A72E-04FFA590714F, OS:26.1, name:iPad Air 13-inch (M3) }
+		{ platform:iOS Simulator, arch:arm64, id:A1C24071-0C11-4F29-BE64-C7D5CF776FA2, OS:17.0, name:iPad Pro (11-inch) (4th generation) }
+		{ platform:iOS Simulator, arch:x86_64, id:A1C24071-0C11-4F29-BE64-C7D5CF776FA2, OS:17.0, name:iPad Pro (11-inch) (4th generation) }
+		{ platform:iOS Simulator, arch:arm64, id:9939229F-2FBA-4DF6-9CA2-B3C19C40932F, OS:17.0, name:iPad Pro (12.9-inch) (6th generation) }
+		{ platform:iOS Simulator, arch:x86_64, id:9939229F-2FBA-4DF6-9CA2-B3C19C40932F, OS:17.0, name:iPad Pro (12.9-inch) (6th generation) }
+		{ platform:iOS Simulator, arch:arm64, id:D4ED4AB2-B6E1-4241-9F35-75D42CB78EEC, OS:26.1, name:iPad Pro 11-inch (M5) }
+		{ platform:iOS Simulator, arch:arm64, id:5004EA2F-4B97-4879-BE5E-23199D0131FB, OS:26.1, name:iPad Pro 13-inch (M5) }
+		{ platform:iOS Simulator, arch:arm64, id:B7411340-48B4-4CA6-8D88-C757B6549FC1, OS:17.0, name:iPad mini (6th generation) }
+		{ platform:iOS Simulator, arch:x86_64, id:B7411340-48B4-4CA6-8D88-C757B6549FC1, OS:17.0, name:iPad mini (6th generation) }
+		{ platform:iOS Simulator, arch:arm64, id:EB61DD41-9621-4AAC-A7E0-F1FA624F27C5, OS:26.1, name:iPad mini (A17 Pro) }
+		{ platform:iOS Simulator, arch:arm64, id:A630E8E4-F9F9-4240-8FD6-B7989573E708, OS:17.0, name:iPhone 12 }
+		{ platform:iOS Simulator, arch:x86_64, id:A630E8E4-F9F9-4240-8FD6-B7989573E708, OS:17.0, name:iPhone 12 }
+		{ platform:iOS Simulator, arch:arm64, id:7D89E363-95B2-465E-926D-A891E68A9A92, OS:26.1, name:iPhone 12 mini }
+		{ platform:iOS Simulator, arch:arm64, id:9075C143-A06A-4284-B74D-5D98F9888A2E, OS:17.0, name:iPhone 13 Pro }
+		{ platform:iOS Simulator, arch:x86_64, id:9075C143-A06A-4284-B74D-5D98F9888A2E, OS:17.0, name:iPhone 13 Pro }
+		{ platform:iOS Simulator, arch:arm64, id:C5578384-6834-4F21-8150-A68A3FEF7AF3, OS:17.0, name:iPhone 15 }
+		{ platform:iOS Simulator, arch:x86_64, id:C5578384-6834-4F21-8150-A68A3FEF7AF3, OS:17.0, name:iPhone 15 }
+		{ platform:iOS Simulator, arch:arm64, id:5125BDC3-16AB-454E-BD4F-85147133DEEE, OS:17.0, name:iPhone 15 Plus }
+		{ platform:iOS Simulator, arch:x86_64, id:5125BDC3-16AB-454E-BD4F-85147133DEEE, OS:17.0, name:iPhone 15 Plus }
+		{ platform:iOS Simulator, arch:arm64, id:1E8A4ADF-B568-4662-B139-96031D4C1B08, OS:17.0, name:iPhone 15 Pro }
+		{ platform:iOS Simulator, arch:x86_64, id:1E8A4ADF-B568-4662-B139-96031D4C1B08, OS:17.0, name:iPhone 15 Pro }
+		{ platform:iOS Simulator, arch:arm64, id:688BBBA2-684E-497F-AB69-D26CAC9A115F, OS:17.0, name:iPhone 15 Pro Max }
+		{ platform:iOS Simulator, arch:x86_64, id:688BBBA2-684E-497F-AB69-D26CAC9A115F, OS:17.0, name:iPhone 15 Pro Max }
+		{ platform:iOS Simulator, arch:arm64, id:335A7FF1-441D-4D77-A7BA-B06A9EDE5A4B, OS:26.1, name:iPhone 16e }
+		{ platform:iOS Simulator, arch:arm64, id:39966D10-7F54-4D5E-A615-EF2C73E0205D, OS:26.1, name:iPhone 17 }
+		{ platform:iOS Simulator, arch:arm64, id:33283466-F777-4109-9800-41A47C8BAE32, OS:26.1, name:iPhone 17 Pro }
+		{ platform:iOS Simulator, arch:arm64, id:C964D893-E584-4651-B787-9C040E9D8A88, OS:26.1, name:iPhone 17 Pro Max }
+		{ platform:iOS Simulator, arch:arm64, id:009CD4BD-0692-45A2-97B9-CD9612A055FE, OS:26.1, name:iPhone Air }
+		{ platform:iOS Simulator, arch:arm64, id:94B53ADB-BC05-4A13-A1B3-02E184BBE35C, OS:17.0, name:iPhone SE (3rd generation) }
+		{ platform:iOS Simulator, arch:x86_64, id:94B53ADB-BC05-4A13-A1B3-02E184BBE35C, OS:17.0, name:iPhone SE (3rd generation) }
