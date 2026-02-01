@@ -1243,7 +1243,7 @@ struct AppSettingsView: View {
                         statusAccent = isSubscribed ? .green : .secondary
                         statusDetail = isSubscribed
                         ? "Abo ist mit deiner Apple ID verknüpft und kann jederzeit wiederhergestellt werden."
-                        : "Early-Bird ist beendet. Pro gibt es jetzt im Abo."
+                        : "Kein aktives Abo gefunden. Pro ist im Abo verfügbar."
                         headline = "Noten Manager Pro Abo"
                         subline = isSubscribed ? "Danke für dein Abo." : "Jetzt im Abo verfügbar."
                         headerIcon = isSubscribed ? "checkmark.seal.fill" : "creditcard.fill"
@@ -3760,6 +3760,31 @@ struct AdminDebugSheet: View {
                     }
                     .padding(.horizontal)
                     
+#if DEBUG
+                    // Debug Subscription Override
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Toggle(isOn: Binding(
+                                get: { storeKit.debugSubscriptionOverride },
+                                set: { enabled in
+                                    storeKit.setDebugSubscriptionOverride(enabled)
+                                    statusMessage = enabled ? "Debug: Abo freigeschaltet." : "Debug: Abo deaktiviert."
+                                }
+                            )) {
+                                Text("Debug: Pro freischalten")
+                            }
+                            .tint(.green)
+                            
+                            Text("Simuliert ein aktives Abo und hebt die Sperre für Abitur & Insights auf.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } label: {
+                        Label("Subscription", systemImage: "checkmark.seal.fill")
+                    }
+                    .padding(.horizontal)
+#endif
+
                     // Sheet Triggers
                     GroupBox {
                         VStack(spacing: 12) {

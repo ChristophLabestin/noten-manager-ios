@@ -9,6 +9,7 @@ struct AddGradeView: View {
     let preselectedSubjectName: String?
     let preselectedWeight: Int?
     let preselectedCustomWeight: Double?
+    let preselectedAssessmentType: AssessmentType?
     let prefilledNote: String?
 
     let linkedExamId: String?
@@ -58,10 +59,11 @@ struct AddGradeView: View {
             .sorted { $0.date > $1.date }
     }
 
-    init(preselectedSubjectName: String? = nil, preselectedWeight: Int? = nil, preselectedCustomWeight: Double? = nil, prefilledNote: String? = nil, linkedExamId: String? = nil, markLinkedExamCompletedByDefault: Bool = false) {
+    init(preselectedSubjectName: String? = nil, preselectedWeight: Int? = nil, preselectedCustomWeight: Double? = nil, preselectedAssessmentType: AssessmentType? = nil, prefilledNote: String? = nil, linkedExamId: String? = nil, markLinkedExamCompletedByDefault: Bool = false) {
         self.preselectedSubjectName = preselectedSubjectName
         self.preselectedWeight = preselectedWeight
         self.preselectedCustomWeight = preselectedCustomWeight
+        self.preselectedAssessmentType = preselectedAssessmentType
         self.prefilledNote = prefilledNote
         self.linkedExamId = linkedExamId
         self.markLinkedExamCompletedByDefault = markLinkedExamCompletedByDefault
@@ -96,7 +98,11 @@ struct AddGradeView: View {
         switch weightChoice {
         case .preset(let value):
             let options = weightOptions(for: gradingMode)
-            if let match = options.first(where: { $0.value == value }) {
+            if let match = options.first(where: { $0.value == value && $0.type == assessmentType }) {
+                return match.title
+            }
+            let matches = options.filter { $0.value == value }
+            if matches.count == 1, let match = matches.first {
                 return match.title
             }
             return "Art auswählen"
@@ -126,6 +132,15 @@ struct AddGradeView: View {
             return String(Int(value))
         }
         return String(format: "%.2f", value)
+    }
+
+    private func syncAssessmentTypeForCurrentWeight(gradingMode: GradingMode) {
+        guard case .preset(let value) = weightChoice else { return }
+        let options = weightOptions(for: gradingMode)
+        if options.contains(where: { $0.value == value && $0.type == assessmentType }) { return }
+        if let match = options.first(where: { $0.value == value }) {
+            assessmentType = match.type
+        }
     }
 
     var body: some View {
@@ -187,7 +202,7 @@ struct AddGradeView: View {
                                             ForEach(weightOptions(for: gradingMode), id: \.type) { option in
                                                 let isSelected: Bool = {
                                                     if case .preset(let value) = weightChoice {
-                                                        return value == option.value
+                                                        return value == option.value && assessmentType == option.type
                                                     }
                                                     return false
                                                 }()
@@ -432,6 +447,10 @@ struct AddGradeView: View {
                     weightChoice = .preset(0)
                 }
 
+                if let preType = preselectedAssessmentType {
+                    assessmentType = preType
+                }
+
                 if let noteText = prefilledNote, note.isEmpty {
                     note = noteText
                 }
@@ -455,17 +474,20 @@ struct AddGradeView: View {
                 }
                 ensureLinkedExamSelection()
                 applyExamWeightIfAvailable(examId: selectedLinkedExamId)
+                syncAssessmentTypeForCurrentWeight(gradingMode: gradingMode(for: subjectName))
             }
             .onChange(of: subjectName) { _, _ in
                 if linkToExam {
                     ensureLinkedExamSelection()
                 }
+                syncAssessmentTypeForCurrentWeight(gradingMode: gradingMode(for: subjectName))
             }
             .onChange(of: selectedLinkedExamId) { _, newValue in
                 if let date = examDate(for: newValue) {
                     halfYearSelection = AddGradeView.defaultHalfYear(referenceDate: date)
                 }
                 applyExamWeightIfAvailable(examId: newValue)
+                syncAssessmentTypeForCurrentWeight(gradingMode: gradingMode(for: subjectName))
             }
         }
         .keyboardNavigationToolbar(focus: $focusedField, fields: [.grade, .note])

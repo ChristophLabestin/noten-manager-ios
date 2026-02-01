@@ -11,3 +11,4 @@
     - [ ] Sheet to select the subjects custom order
     - [ ] Sheet to select the cards on homeview order and on/off
 - [ ] Review requesting sheet
+- [ ] In-App-Browser View for legal pages

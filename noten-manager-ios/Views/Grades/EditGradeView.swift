@@ -75,10 +75,11 @@ struct EditGradeView: View {
             if let match = weightOptions().first(where: { $0.value == value && $0.type == assessmentType }) {
                 return match.title
             }
-            if let match = weightOptions().first(where: { $0.value == value }) {
+            let matches = weightOptions().filter { $0.value == value }
+            if matches.count == 1, let match = matches.first {
                 return match.title
             }
-            return "Sonstige Leistung"
+            return "Art auswählen"
         case .custom:
             if let weight = parsedCustomWeight() {
                 return "Sonstige Leistung (\(EditGradeView.formatWeight(weight))x)"
@@ -161,10 +162,10 @@ struct EditGradeView: View {
                                         Text("Art")
                                             .font(.headline)
                                         Menu {
-                                            ForEach(weightOptions(), id: \.value) { option in
+                                            ForEach(weightOptions(), id: \.type) { option in
                                                 let isSelected: Bool = {
                                                     if case .preset(let value) = weightChoice {
-                                                        return value == option.value
+                                                        return value == option.value && assessmentType == option.type
                                                     }
                                                     return false
                                                 }()

@@ -1059,15 +1059,17 @@ struct MainView: View {
                 }
                 .tag(BottomNavView.Tab.home)
 
-                NavigationStack {
-                    GroupsListView(onOpenCreationMenu: { activeSheet = .creationMenu })
-                        .environmentObject(gradesStore)
+                if !isSubscriptionGateActive {
+                    NavigationStack {
+                        GroupsListView(onOpenCreationMenu: { activeSheet = .creationMenu })
+                            .environmentObject(gradesStore)
 
+                    }
+                    .tabItem {
+                        Label("Gruppen", systemImage: "person.3.fill")
+                    }
+                    .tag(BottomNavView.Tab.groups)
                 }
-                .tabItem {
-                    Label("Gruppen", systemImage: "person.3.fill")
-                }
-                .tag(BottomNavView.Tab.groups)
 
                 if !isSubscriptionGateActive {
                     NavigationStack {
@@ -1253,7 +1255,7 @@ struct MainView: View {
         if !isSubscriptionGateActive {
             return true
         }
-        return tab == .home || tab == .settings || tab == .groups
+        return tab == .home || tab == .settings
     }
 
     @MainActor

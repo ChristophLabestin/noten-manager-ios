@@ -156,7 +156,11 @@ struct EditExamView: View {
             return "Sonstige Leistung"
         }
         let options = weightOptions(for: gradingMode)
-        if let match = options.first(where: { $0.type == examAssessmentType }) {
+        if let match = options.first(where: { $0.value == examWeight && $0.type == examAssessmentType }) {
+            return match.title
+        }
+        let matches = options.filter { $0.value == examWeight }
+        if matches.count == 1, let match = matches.first {
             return match.title
         }
         return "Art auswählen"
@@ -175,6 +179,16 @@ struct EditExamView: View {
             return String(Int(value))
         }
         return String(format: "%.2f", value)
+    }
+
+    private func syncAssessmentTypeForCurrentWeight(gradingMode: GradingMode) {
+        guard allowWeights, !useCustomWeight else { return }
+        let options = weightOptions(for: gradingMode)
+        if options.contains(where: { $0.value == examWeight && $0.type == examAssessmentType }) { return }
+        let matches = options.filter { $0.value == examWeight }
+        if let match = matches.first {
+            examAssessmentType = match.type
+        }
     }
 
     private func combinedExamDate() -> Date {
@@ -313,7 +327,7 @@ struct EditExamView: View {
                                             Text("Art")
                                                 .font(.headline)
                                             Menu {
-                                                ForEach(weightOptions(for: gm), id: \.title) { option in
+                                                ForEach(weightOptions(for: gm), id: \.type) { option in
                                                     let isSelected = !useCustomWeight && examWeight == option.value && examAssessmentType == option.type
                                                     Button {
                                                         useCustomWeight = false
@@ -661,9 +675,11 @@ struct EditExamView: View {
                 } else {
                     shareWithGroup = !selectedClassIds.isEmpty || !selectedCourseIds.isEmpty || !selectedGroupIds.isEmpty
                 }
+                syncAssessmentTypeForCurrentWeight(gradingMode: gradingMode(for: subjectName))
             }
             .onChange(of: subjectName) { _, newSubject in
                 updateSelectedGroupsForSubject(newSubject)
+                syncAssessmentTypeForCurrentWeight(gradingMode: gradingMode(for: newSubject))
             }
             .alert(
                 "Klausur löschen?",

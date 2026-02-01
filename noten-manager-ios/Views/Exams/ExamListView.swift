@@ -368,6 +368,7 @@ struct ExamListView: View {
                     preselectedSubjectName: exam.subjectName,
                     preselectedWeight: exam.weight,
                     preselectedCustomWeight: exam.customWeight,
+                    preselectedAssessmentType: exam.assessmentType,
                     prefilledNote: note,
                     linkedExamId: exam.id,
                     markLinkedExamCompletedByDefault: true
@@ -980,6 +981,7 @@ struct ExamDetailSheet: View {
                     preselectedSubjectName: exam.subjectName,
                     preselectedWeight: exam.weight,
                     preselectedCustomWeight: exam.customWeight,
+                    preselectedAssessmentType: exam.assessmentType,
                     prefilledNote: note,
                     linkedExamId: exam.id,
                     markLinkedExamCompletedByDefault: true

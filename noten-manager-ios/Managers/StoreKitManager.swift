@@ -38,6 +38,9 @@ final class StoreKitManager: ObservableObject {
     private let subscriptionGroupId = "21865065"
     private let purchaseDefaultsKey = "launchOfferPurchased"
     private let subscriptionDefaultsKey = "proSubscriptionActive"
+#if DEBUG
+    private static let debugSubscriptionOverrideKey = "debugSubscriptionOverride"
+#endif
 
     @Published private(set) var product: Product?
     @Published private(set) var subscriptionProduct: Product?
@@ -47,6 +50,9 @@ final class StoreKitManager: ObservableObject {
     @Published private(set) var isProcessingSubscriptionPurchase = false
     @Published private(set) var isRestoring = false
     @Published private(set) var isSubscriptionActive = false
+#if DEBUG
+    private(set) var debugSubscriptionOverride: Bool = false
+#endif
 
     private var updatesTask: Task<Void, Never>?
 
@@ -55,6 +61,12 @@ final class StoreKitManager: ObservableObject {
             await self?.listenForTransactions()
         }
         isSubscriptionActive = UserDefaults.standard.bool(forKey: subscriptionDefaultsKey)
+#if DEBUG
+        debugSubscriptionOverride = UserDefaults.standard.bool(forKey: Self.debugSubscriptionOverrideKey)
+        if debugSubscriptionOverride {
+            isSubscriptionActive = true
+        }
+#endif
         Task { [weak self] in
             await self?.loadProduct()
         }
@@ -315,9 +327,29 @@ final class StoreKitManager: ObservableObject {
     }
 
     private func setSubscriptionActive(_ active: Bool) {
+#if DEBUG
+        isSubscriptionActive = debugSubscriptionOverride ? true : active
+#else
         isSubscriptionActive = active
+#endif
         UserDefaults.standard.set(active, forKey: subscriptionDefaultsKey)
     }
+
+#if DEBUG
+    func setDebugSubscriptionOverride(_ enabled: Bool) {
+        debugSubscriptionOverride = enabled
+        UserDefaults.standard.set(enabled, forKey: Self.debugSubscriptionOverrideKey)
+        objectWillChange.send()
+        if enabled {
+            isSubscriptionActive = true
+        } else {
+            isSubscriptionActive = UserDefaults.standard.bool(forKey: subscriptionDefaultsKey)
+            Task { [weak self] in
+                await self?.refreshSubscriptionStatus()
+            }
+        }
+    }
+#endif
 
     private func isActiveSubscriptionTransaction(_ transaction: Transaction) -> Bool {
         if transaction.revocationDate != nil {
