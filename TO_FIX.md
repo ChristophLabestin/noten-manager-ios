@@ -1,7 +1,7 @@
 #A document that lists bugs and other stuff that still needs to be fixed or adapted.
 
-##Current Version in development is Version 1.3
-###--> Version 1.3 is feature complete. any feature ideas listed are tentative for Version 1.4 and can be ignored for now
+##Current Version in development is Version 1.3.1
+###--> Version 1.3.1 is feature complete. any feature ideas listed are tentative for Version 1.4 and can be ignored for now
 
 ##AI Instructions
 --> after completing a task always mark it as closed in this file. Refer to the following legend

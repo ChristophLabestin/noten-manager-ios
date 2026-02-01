@@ -797,7 +797,7 @@ struct MainView: View {
         // Version-based guard: only show if user registered on an older version
         if let regVersion = gradesStore.registeredInVersion {
             // Very simple comparison for now (legacy or older strings)
-            guard regVersion != "1.3" else { return }
+            guard regVersion != "1.3.1" else { return }
         }
         
         guard !launchOfferPurchased else { return }
